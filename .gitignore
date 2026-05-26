@@ -1,0 +1,14 @@
+__pycache__/
+.vscode/
+.cursor/
+.claude/
+logs/
+data/
+plans/
+pos_copy.py
+debug_hopper_weight.py
+fix_syntax.py
+gloabal_v4.py
+test_diagnosis_engine.py
+*.pyc
+*.pyo
