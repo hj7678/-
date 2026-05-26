@@ -59,6 +59,9 @@ class ControlPanel(QWidget):
     cart_sensor_changed = pyqtSignal(str, dict)  # 小车传感器改变信号 (cart_id, {sensor_type: value})
     bin_levels_uniform_requested = pyqtSignal(float)  # 统一料位百分比 0-100
     bin_levels_random_requested = pyqtSignal()  # 随机初始化料位
+    consumption_random_requested = pyqtSignal()
+    consumption_uniform_requested = pyqtSignal(float)
+    consumption_toggled = pyqtSignal(bool)
     tcp_communication_toggled = pyqtSignal(bool)  # 下位机通信开关
     udp_sender_toggled = pyqtSignal(bool)  # UDP 二进制发送开关
     diagnosis_mode_changed = pyqtSignal(str)   # 诊断模式切换 "local" / "tcp"
@@ -119,6 +122,9 @@ class ControlPanel(QWidget):
 
         bin_level_group = self._create_bin_level_init_group()
         main_layout.addWidget(bin_level_group)
+
+        consumption_group = self._create_consumption_rate_group()
+        main_layout.addWidget(consumption_group)
 
         # 速度控制组
         speed_group = self._create_speed_control_group()
@@ -247,6 +253,74 @@ class ControlPanel(QWidget):
             QMessageBox.warning(self, "料位初始化", "料位百分比应在 0–100 之间。")
             return
         self.bin_levels_uniform_requested.emit(v)
+
+    def _create_consumption_rate_group(self) -> QGroupBox:
+        """消耗速度设置（各配料站料仓）"""
+        group = QGroupBox("消耗速度设置")
+        group.setStyleSheet(styles.get_group_box_style())
+        layout = QVBoxLayout()
+        layout.setSpacing(6)
+
+        info = QLabel("统一设置全部料仓消耗速度(t/s)，或随机 0.05–0.1。")
+        info.setStyleSheet("color: #8B949E; font-size: 10px;")
+        layout.addWidget(info)
+
+        row = QHBoxLayout()
+        rate_label = QLabel("速度:")
+        rate_label.setStyleSheet("color: #ECF0F1;")
+        row.addWidget(rate_label)
+        self._consumption_rate_edit = QLineEdit()
+        self._consumption_rate_edit.setPlaceholderText("0.05–0.2 t/s")
+        self._consumption_rate_edit.setStyleSheet("color: #ECF0F1; background-color: #21262d;")
+        self._consumption_rate_edit.setFixedWidth(72)
+        val = QDoubleValidator(0.01, 1.0, 3, self)
+        val.setNotation(QDoubleValidator.StandardNotation)
+        self._consumption_rate_edit.setValidator(val)
+        row.addWidget(self._consumption_rate_edit)
+
+        apply_btn = QPushButton("应用")
+        apply_btn.setStyleSheet(styles.get_small_button_style('#27AE60'))
+        apply_btn.clicked.connect(self._on_consumption_rate_uniform_apply)
+        row.addWidget(apply_btn)
+        layout.addLayout(row)
+
+        rand_btn = QPushButton("随机初始化 (0.05–0.1 t/s)")
+        rand_btn.setStyleSheet(styles.get_small_button_style('#8E44AD'))
+        rand_btn.clicked.connect(lambda: self.consumption_random_requested.emit())
+        layout.addWidget(rand_btn)
+
+        self._consumption_toggle_btn = QPushButton("启动消耗")
+        self._consumption_toggle_btn.setCheckable(True)
+        self._consumption_toggle_btn.setStyleSheet(styles.get_small_button_style('#E67E22'))
+        self._consumption_toggle_btn.clicked.connect(self._on_consumption_toggle)
+        layout.addWidget(self._consumption_toggle_btn)
+
+        group.setLayout(layout)
+        return group
+
+    def _on_consumption_toggle(self, checked: bool):
+        if checked:
+            self._consumption_toggle_btn.setText("停止消耗")
+            self._consumption_toggle_btn.setStyleSheet(styles.get_small_button_style('#E74C3C'))
+        else:
+            self._consumption_toggle_btn.setText("启动消耗")
+            self._consumption_toggle_btn.setStyleSheet(styles.get_small_button_style('#E67E22'))
+        self.consumption_toggled.emit(checked)
+
+    def _on_consumption_rate_uniform_apply(self):
+        text = self._consumption_rate_edit.text().strip().replace(',', '.')
+        if not text:
+            QMessageBox.warning(self, "消耗速度设置", "请输入消耗速度。")
+            return
+        try:
+            v = round(float(text), 3)
+        except ValueError:
+            QMessageBox.warning(self, "消耗速度设置", "请输入有效数字。")
+            return
+        if v < 0.01 or v > 1.0:
+            QMessageBox.warning(self, "消耗速度设置", "消耗速度应在 0.01–1.0 t/s 之间。")
+            return
+        self.consumption_uniform_requested.emit(v)
 
     def _create_laser_sensor_group(self) -> QGroupBox:
         """创建激光测距仪传感器设置组"""
@@ -553,7 +627,7 @@ class ControlPanel(QWidget):
         self.cart_sensor_changed.emit(cart_id, {sensor_type: value})
 
     def _write_cart_init_data(self, cart_id: str):
-        """将单个小车的初始化数据写入generate_data.json"""
+        """将单个小车的初始化数据写入generate_data.json，并同步到控制器"""
         controls = self.cart_sensor_controls[cart_id]
         position = controls['position_combo'].currentIndex() + 1
         left_limit = controls['llimit_btn'].isChecked()
@@ -563,6 +637,12 @@ class ControlPanel(QWidget):
         self._sensor_data_manager.write_all_cart_sensors(
             cart_id, position, left_limit, right_limit, left_divert, right_divert
         )
+        # 同步到控制器内存（Cart1/2/3），Cart4 在 _on_cart_position_changed 中已处理
+        if hasattr(self, '_controller') and self._controller and cart_id != 'Cart4':
+            self._controller.cart_positions[cart_id] = position
+            self._controller.cart_target_positions[cart_id] = position
+            self._controller.cart_sensor_positions[cart_id] = position
+            self._controller.cart_divert[cart_id] = (left_divert, right_divert)
         controls['apply_btn'].setText("已应用")
         controls['apply_btn'].setEnabled(False)
         self._cart_init_written.add(cart_id)

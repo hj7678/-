@@ -248,6 +248,9 @@ class MainWindow(QMainWindow):
         self.control_panel.laser_sensor_changed.connect(self._on_laser_sensor_changed)
         self.control_panel.bin_levels_uniform_requested.connect(self._on_bin_levels_uniform)
         self.control_panel.bin_levels_random_requested.connect(self._on_bin_levels_random)
+        self.control_panel.consumption_uniform_requested.connect(self._on_consumption_uniform)
+        self.control_panel.consumption_random_requested.connect(self._on_consumption_random)
+        self.control_panel.consumption_toggled.connect(self._on_consumption_toggled)
         self.control_panel.tcp_communication_toggled.connect(self._on_tcp_communication_toggled)
         self.control_panel.udp_sender_toggled.connect(self._on_udp_sender_toggled)
         self.control_panel.diagnosis_mode_changed.connect(self._on_diagnosis_mode_changed)
@@ -653,6 +656,22 @@ class MainWindow(QMainWindow):
         self.simulation_view.mark_needs_repaint()
         self.status_panel.update_all_status(collect_status_data(self.controller))
         self._update_status_bar("各料仓料位已在 5%–95% 范围内随机初始化")
+
+    def _on_consumption_uniform(self, rate: float):
+        """统一设置全部料仓消耗速度"""
+        self.controller.apply_consumption_rate_uniform(rate)
+        self._update_status_bar(f"全部料仓消耗速度已设为 {rate:.3f} t/s")
+
+    def _on_consumption_random(self):
+        """随机初始化各料仓消耗速度 (0.05-0.1)"""
+        self.controller.randomize_consumption_rates(0.05, 0.1)
+        self._update_status_bar("各料仓消耗速度已在 0.05–0.1 t/s 范围内随机初始化")
+
+    def _on_consumption_toggled(self, active: bool):
+        """启动/停止料仓消耗"""
+        self.controller.toggle_consumption(active)
+        state = "启动" if active else "停止"
+        self._update_status_bar(f"料仓消耗已{state}")
 
     def _on_tcp_communication_toggled(self, enabled: bool):
         """下位机通信开关"""

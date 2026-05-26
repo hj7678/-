@@ -222,26 +222,21 @@ class SimulationView(QWidget):
     def _init_all_carts(self):
         """仿真启动时初始化所有分料小车在各自皮带的默认位置
 
-        D7皮带上：服务于路线①②③，默认停在第1行小仓 P1-1（行1）
-        D8皮带上：服务于路线⑦⑨，默认停在第1行小仓 P2-1（行1）
-        D9皮带上：服务于路线④⑥⑧，默认停在第1行小仓 P4-1（行1）
-
-        这些小车在仿真启动时就在画布上显示，不依赖路线是否激活。
+        优先从 controller.cart_positions 读取持久化的小车位置，
+        若无持久化数据则默认停在第1行。
         标记 _persistent=True，防止被 _update_cart_positions 的清理逻辑误删。
         """
-        conveyor_bins = {
-            'D7': 'P1-1',  # 路线①②③
-            'D8': 'P2-1',  # 路线⑦⑨
-            'D9': 'P4-1',  # 路线④⑥⑧
-        }
-        conveyor_routes = {
-            'D7': 'route1',
-            'D8': 'route7',
-            'D9': 'route4',
+        conveyor_config = {
+            'D7': ('route1', 'P1', 'Cart1'),
+            'D8': ('route7', 'P2', 'Cart2'),
+            'D9': ('route4', 'P4', 'Cart3'),
         }
 
-        for conveyor_id, default_bin in conveyor_bins.items():
-            route_id = conveyor_routes[conveyor_id]
+        for conveyor_id, (route_id, col_prefix, cart_id) in conveyor_config.items():
+            row = 1
+            if hasattr(self, 'controller') and self.controller:
+                row = int(self.controller.cart_positions.get(cart_id, 1))
+            default_bin = f"{col_prefix}-{row}"
             pos = self._get_cart_target_on_conveyor(conveyor_id, default_bin)
             self.cart_positions[route_id] = {
                 'target_bin': default_bin,
@@ -326,10 +321,6 @@ class SimulationView(QWidget):
                 )
                 if use_snap and hasattr(self, 'controller') and self.controller:
                     fx, fy = float(snap['current_x']), float(snap['current_y'])
-                    cpos = int(snap.get('controller_pos', 1))
-                    self.controller.cart_positions[assigned_cart] = cpos
-                    self.controller.cart_target_positions[assigned_cart] = target_grid
-                    self.controller.cart_sensor_positions[assigned_cart] = cpos
                     self.cart_positions[route_id] = {
                         'target_bin': target_bin,
                         'conveyor_id': conveyor_id,
@@ -347,8 +338,11 @@ class SimulationView(QWidget):
                         'to_y': target_pos[1],
                     }
                 else:
-                    # 新路线：从格子1位置出现
-                    initial_bin = self._row_to_cart_pixel(conveyor_id, 1)
+                    # 新路线：从控制器记录的当前位置出现
+                    initial_row = 1
+                    if hasattr(self, 'controller') and self.controller and assigned_cart in ('Cart1', 'Cart2', 'Cart3'):
+                        initial_row = int(self.controller.cart_positions.get(assigned_cart, 1))
+                    initial_bin = self._row_to_cart_pixel(conveyor_id, initial_row)
                     self.cart_positions[route_id] = {
                         'target_bin': target_bin,
                         'conveyor_id': conveyor_id,

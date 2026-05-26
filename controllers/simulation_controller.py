@@ -414,6 +414,7 @@ class SmallBin:
         self.target_conveyor = bin_config['target_conveyor']  # D7/D8/D9
         self.capacity = bin_config.get('capacity', config.BATCHING_BIN_CAPACITY)  # 容量（吨）
         self.current_level = 0.0  # 当前料位（吨）
+        self.consumption_rate = 0.01  # 消耗速度 (t/s)
 
     @property
     def level_percent(self) -> float:
@@ -448,6 +449,7 @@ class SmallBin:
     def reset(self):
         """重置小仓"""
         self.current_level = 0.0
+        self.consumption_rate = 0.01
 
 
 class SimulationController(QObject):
@@ -595,6 +597,9 @@ class SimulationController(QObject):
             'Cart3': (False, True),
         }
 
+        self._consumption_rates: Dict[str, float] = {}  # bin_id -> rate (t/s)
+        self._consumption_active = False  # 消耗开关
+
         # 料位阈值（从config读取或使用默认值）
         self.level_threshold_with_hopper = config.ALARM_THRESHOLDS.get('batching_full', 95)  # 有中转斗：95%
         self.level_threshold_without_hopper = config.ALARM_THRESHOLDS.get('silo_full', 90)  # 无中转斗：90%
@@ -646,6 +651,10 @@ class SimulationController(QObject):
 
         # 初始化小仓料位（从sensor_data_manager读取）
         self._load_initial_levels()
+        # 初始化小车位置与分料状态
+        self._load_initial_cart_positions()
+        # 初始化消耗速度
+        self._load_initial_consumption_rates()
 
         self.feed_points = config.FEED_POINTS.copy()
 
@@ -668,7 +677,40 @@ class SimulationController(QObject):
                     # 更新到控制策略生成器
                     self.control_strategy_generator.set_level_sensor(bin_id, level_percent)
         except Exception as e:
-            pass
+            print(f"[初始化] 加载料位失败: {e}", flush=True)
+
+    def _load_initial_cart_positions(self):
+        """从sensor_data_manager加载小车位置与分料状态"""
+        try:
+            cart_sensors = self.sensor_data_manager.read_cart_sensors()
+            for cart_id in ('Cart1', 'Cart2', 'Cart3', 'Cart4'):
+                if cart_id in cart_sensors:
+                    data = cart_sensors[cart_id]
+                    pos = data.get('position', 1)
+                    left_div = data.get('left_divert', False)
+                    right_div = data.get('right_divert', False)
+                    if cart_id == 'Cart4':
+                        self.cart4_position = pos
+                        self.cart4_target_position = pos
+                        self.cart4_sensor_position = pos
+                    else:
+                        self.cart_positions[cart_id] = pos
+                        self.cart_target_positions[cart_id] = pos
+                        self.cart_sensor_positions[cart_id] = pos
+                        self.cart_divert[cart_id] = (left_div, right_div)
+        except Exception as e:
+            print(f"[初始化] 加载小车位置失败: {e}", flush=True)
+
+    def _load_initial_consumption_rates(self):
+        """从sensor_data_manager加载消耗速度"""
+        try:
+            rates = self.sensor_data_manager.read_consumption_rates()
+            self._consumption_rates.update(rates)
+            for bin_id, rate in rates.items():
+                if bin_id in self.small_bins:
+                    self.small_bins[bin_id].consumption_rate = rate
+        except Exception as e:
+            print(f"[初始化] 加载消耗速度失败: {e}", flush=True)
 
     def _on_route_state_change(self, route_id: str, old_state, new_state):
         """路线状态变更回调"""
@@ -1158,6 +1200,11 @@ class SimulationController(QObject):
         self.diagnosis_result.clear()
         self._accumulated_diagnosis.clear()
         self.diagnosis_engine.clear_history()
+        # 持久化状态（reset_all_data会清空JSON，需提前保存）
+        _saved_cart_positions = dict(self.cart_positions)
+        _saved_cart_divert = dict(self.cart_divert)
+        _saved_consumption_rates = dict(self._consumption_rates)
+
         # 清除数据管理器中的故障 + 重置传感器数据到初始状态
         self.sensor_data_manager.reset_all_data()
         self.control_strategy_generator.clear_all_fault_overrides()
@@ -1172,14 +1219,28 @@ class SimulationController(QObject):
         self._pending_stop_routes.clear()
         self._pending_stop_after_cart_arrival.clear()
 
-        # 重置小车位置
+        # 重置小车位置（从持久化数据恢复）
         self.cart4_position = 1
         self.cart4_target_position = 1
         self.cart4_is_moving = False
         self.cart4_sensor_position = 1
-        self.cart_positions = {'Cart1': 1, 'Cart2': 1, 'Cart3': 1}
-        self.cart_target_positions = {'Cart1': 1, 'Cart2': 1, 'Cart3': 1}
-        self.cart_sensor_positions = {'Cart1': 1, 'Cart2': 1, 'Cart3': 1}  # 传感器位置也重置
+        self.cart_positions = _saved_cart_positions
+        self.cart_target_positions = dict(_saved_cart_positions)
+        self.cart_sensor_positions = dict(_saved_cart_positions)
+        self.cart_divert = _saved_cart_divert
+        # 重写到JSON
+        for cart_id in ('Cart1', 'Cart2', 'Cart3'):
+            pos = _saved_cart_positions.get(cart_id, 1)
+            ld, rd = _saved_cart_divert.get(cart_id, (False, False))
+            self.sensor_data_manager.write_cart_position(cart_id, pos)
+            self.sensor_data_manager.write_cart_left_divert(cart_id, ld)
+            self.sensor_data_manager.write_cart_right_divert(cart_id, rd)
+        # 恢复消耗速度
+        self._consumption_rates = _saved_consumption_rates
+        for bin_id, rate in _saved_consumption_rates.items():
+            if bin_id in self.small_bins:
+                self.small_bins[bin_id].consumption_rate = rate
+        self.sensor_data_manager.write_consumption_rates(_saved_consumption_rates)
         if hasattr(self, '_cart_move_timers'):
             self._cart_move_timers.clear()
 
@@ -1338,6 +1399,9 @@ class SimulationController(QObject):
         self._run_fault_diagnosis()
         self._check_alarms()
 
+        # 料仓消耗（模拟搅拌站生产消耗）
+        self._update_bin_consumption(delta_seconds)
+
         # 检查料位是否达到阈值，触发清空状态
         self._check_level_thresholds()
 
@@ -1494,6 +1558,7 @@ class SimulationController(QObject):
         bins = []
         for bin_id in bin_ids:
             maintenance = bin_id in self._maintenance_bins
+            rate = self._consumption_rates.get(bin_id, 0.01)
             if belt_id == 'D6':
                 if hasattr(self, 'view') and self.view:
                     comp = self.view.silo_compartments.get(bin_id)
@@ -1501,7 +1566,7 @@ class SimulationController(QObject):
                         bins.append({
                             "bin_id": bin_id,
                             "stock": round(comp.get('current_level', 0), 2),
-                            "consumption_rate": 0.01,
+                            "consumption_rate": rate,
                             "maintenance": maintenance,
                             "has_future_order": False,
                         })
@@ -1511,7 +1576,7 @@ class SimulationController(QObject):
                     bins.append({
                         "bin_id": bin_id,
                         "stock": round(sb.current_level, 2),
-                        "consumption_rate": 0.01,
+                        "consumption_rate": rate,
                         "maintenance": maintenance,
                         "has_future_order": False,
                     })
@@ -3367,6 +3432,68 @@ class SimulationController(QObject):
             p = round(random.uniform(lo, hi), 1)
             self._apply_level_percent_to_bin(bin_id, p)
         self.mark_dirty()
+
+    def _iter_all_bin_ids_for_consumption(self) -> List[str]:
+        """返回所有需要消耗速度的料仓ID（P1-1~P4-7 + S1~S12）"""
+        ids = list(self.small_bins.keys())
+        if hasattr(self, 'view') and self.view and hasattr(self.view, 'silo_compartments'):
+            for bid in self.view.silo_compartments.keys():
+                if bid not in ids:
+                    ids.append(bid)
+        return ids
+
+    def _apply_consumption_rate_to_bin(self, bin_id: str, rate: float):
+        """将消耗速度写入模型与传感器数据"""
+        r = round(max(0.0, float(rate)), 6)
+        self._consumption_rates[bin_id] = r
+        if bin_id in self.small_bins:
+            self.small_bins[bin_id].consumption_rate = r
+        self.sensor_data_manager.write_consumption_rates(self._consumption_rates)
+
+    def apply_consumption_rate_uniform(self, rate: float):
+        """所有料仓统一消耗速度 (t/s)"""
+        r = round(max(0.0, float(rate)), 6)
+        for bin_id in self._iter_all_bin_ids_for_consumption():
+            self._apply_consumption_rate_to_bin(bin_id, r)
+
+    def randomize_consumption_rates(self, low: float = 0.05, high: float = 0.1):
+        """各料仓随机消耗速度，默认范围 0.05-0.1 t/s"""
+        lo, hi = float(low), float(high)
+        if lo > hi:
+            lo, hi = hi, lo
+        for bin_id in self._iter_all_bin_ids_for_consumption():
+            r = round(random.uniform(lo, hi), 6)
+            self._apply_consumption_rate_to_bin(bin_id, r)
+
+    def toggle_consumption(self, active: bool):
+        """启动/停止料仓消耗"""
+        self._consumption_active = active
+        state = "启动" if active else "停止"
+        print(f"[消耗] 料仓消耗已{state}", flush=True)
+
+    def is_consumption_active(self) -> bool:
+        return self._consumption_active
+
+    def _update_bin_consumption(self, delta_seconds: float):
+        """实时消耗配料站料仓物料（仅P1-P4，高位储料仓不参与消耗）"""
+        if not self._consumption_active:
+            return
+
+        # 收集正在上料的目标料仓（FEEDING状态）
+        feeding_bins = set()
+        for route_id in self.active_routes:
+            ctx = self.route_state_manager.get_route_context(route_id)
+            if ctx and ctx.state == RouteState.FEEDING and ctx.target_bin:
+                feeding_bins.add(ctx.target_bin)
+
+        for bin_id, sb in self.small_bins.items():
+            if bin_id in feeding_bins:
+                continue
+            rate = self._consumption_rates.get(bin_id, 0.01)
+            if rate <= 0:
+                continue
+            sb.current_level = max(0.0, sb.current_level - rate * delta_seconds)
+            self.set_level_sensor(bin_id, sb.level_percent)
 
     # ============ 上料控制信号接口 ============
 

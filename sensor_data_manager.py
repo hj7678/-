@@ -136,8 +136,9 @@ class SensorDataManager:
             "cart_sensors": {},
             "level_sensors": {},
             "feed_signals": {},
+            "consumption_rates": {},
         }
-        
+
         # 初始化接近开关（所有为false）
         for sensor_id in config.SENSORS.keys():
             self._current_data['sensors'][sensor_id] = {
@@ -423,6 +424,7 @@ class SensorDataManager:
             "cart_sensors": {},
             "level_sensors": {},
             "feed_signals": {},
+            "consumption_rates": {},
         }
         self._save_to_file()
     
@@ -1108,6 +1110,34 @@ class SensorDataManager:
         """批量写入料位传感器数据"""
         for bin_id, value in level_data.items():
             self.write_level_sensor(bin_id, value)
+
+    def write_consumption_rates(self, rates: Dict[str, float]):
+        """批量写入料仓消耗速度
+
+        Args:
+            rates: {bin_id: consumption_rate_t_per_s, ...}
+        """
+        self._load_from_file()
+        if 'consumption_rates' not in self._current_data:
+            self._current_data['consumption_rates'] = {}
+        for bin_id, rate in rates.items():
+            self._current_data['consumption_rates'][bin_id] = {
+                'type': 'consumption_rate',
+                'unit': 't/s',
+                'value': round(float(rate), 6)
+            }
+        self._current_data['timestamp'] = get_beijing_time_str()
+        self._save_to_file()
+
+    def read_consumption_rates(self) -> Dict[str, float]:
+        """读取所有料仓消耗速度
+
+        Returns:
+            {bin_id: rate_t_per_s, ...}  未配置的返回空dict
+        """
+        self._load_from_file()
+        rates = self._current_data.get('consumption_rates', {})
+        return {bin_id: data.get('value', 0.01) for bin_id, data in rates.items()}
 
     # ============ 上料控制信号接口 ============
 
