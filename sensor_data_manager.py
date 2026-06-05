@@ -109,8 +109,7 @@ class SensorDataManager:
         
         # 故障配置
         self._sensor_faults: Dict[str, SensorFaultConfig] = {}
-        self._hopper_switch_faults: Dict[str, SensorFaultConfig] = {}
-        self._hopper_weight_faults: Dict[str, SensorFaultConfig] = {}
+        self._hopper_faults: Dict[str, SensorFaultConfig] = {}
         self._cart_faults: Dict[str, SensorFaultConfig] = {}  # 小车传感器故障 (key: "Cart1_position", "Cart1_left_limit"等)
         
         # 故障计时器
@@ -136,9 +135,8 @@ class SensorDataManager:
             "cart_sensors": {},
             "level_sensors": {},
             "feed_signals": {},
-            "consumption_rates": {},
         }
-
+        
         # 初始化接近开关（所有为false）
         for sensor_id in config.SENSORS.keys():
             self._current_data['sensors'][sensor_id] = {
@@ -424,7 +422,6 @@ class SensorDataManager:
             "cart_sensors": {},
             "level_sensors": {},
             "feed_signals": {},
-            "consumption_rates": {},
         }
         self._save_to_file()
     
@@ -732,16 +729,12 @@ class SensorDataManager:
             return normal_speed
 
         if fault_type == 'stopped':
+            # 关闭状态：转速为0
             return 0
         elif fault_type == 'speed_abnormal':
+            # 转速异常：返回低于阈值的转速值（低于450视为异常）
+            # 异常转速范围：350-440
             return random.randint(350, 440)
-        elif fault_type == 'force_zero':
-            return 0
-        elif fault_type == 'force_nonzero':
-            return random.randint(350, 500)
-        elif fault_type == 'volatile':
-            fluctuation = random.uniform(-0.4, 0.4)
-            return max(0, int(normal_speed * (1.0 + fluctuation)))
 
         return normal_speed
 
@@ -793,7 +786,7 @@ class SensorDataManager:
                                    duration: float = -1.0):
         """
         注入中转斗开关故障
-
+        
         Args:
             hopper_id: 中转斗ID
             fault_mode: 故障模式（STUCK_CLOSED表示卡关，STUCK_OPEN表示卡开）
@@ -806,7 +799,7 @@ class SensorDataManager:
             fault_duration=duration,
             probability=1.0
         )
-        self._hopper_switch_faults[hopper_id] = config
+        self._hopper_faults[hopper_id] = config
     
     def inject_hopper_weight_fault(self, hopper_id: str, fault_mode: FaultMode,
                                    offset: float = 0.0, duration: float = -1.0):
@@ -827,41 +820,26 @@ class SensorDataManager:
             probability=1.0
         )
         config.weight_offset = offset
-        self._hopper_weight_faults[hopper_id] = config
+        self._hopper_faults[hopper_id] = config
     
     def clear_fault(self, sensor_id: str = None, hopper_id: str = None):
         """清除故障"""
         if sensor_id:
             self._sensor_faults.pop(sensor_id, None)
         if hopper_id:
-            self._hopper_switch_faults.pop(hopper_id, None)
-            self._hopper_weight_faults.pop(hopper_id, None)
-
-    def reset_all_data(self):
-        """重置所有传感器数据到初始状态"""
-        self._force_initialize_data()
-        self._sensor_faults.clear()
-        self._hopper_switch_faults.clear()
-        self._hopper_weight_faults.clear()
-        self._cart_faults.clear()
-        self._conveyor_speed_faults.clear()
-        self._save_to_file()
-
+            self._hopper_faults.pop(hopper_id, None)
+    
     def clear_all_faults(self):
         """清除所有故障"""
         self._sensor_faults.clear()
-        self._hopper_switch_faults.clear()
-        self._hopper_weight_faults.clear()
+        self._hopper_faults.clear()
         self._cart_faults.clear()
-        self._conveyor_speed_faults.clear()
     
     def get_fault_status(self) -> Dict[str, Any]:
         """获取故障状态"""
-        switch_faults = {k: v.fault_mode.value for k, v in self._hopper_switch_faults.items()}
-        weight_faults = {k: v.fault_mode.value for k, v in self._hopper_weight_faults.items()}
         return {
             'sensor_faults': {k: v.fault_mode.value for k, v in self._sensor_faults.items()},
-            'hopper_faults': {**switch_faults, **weight_faults},
+            'hopper_faults': {k: v.fault_mode.value for k, v in self._hopper_faults.items()},
             'cart_faults': {k: v.fault_mode.value for k, v in self._cart_faults.items()}
         }
     
@@ -965,24 +943,24 @@ class SensorDataManager:
     
     def _apply_hopper_switch_fault(self, hopper_id: str, original_value: bool) -> bool:
         """应用中转斗开关故障"""
-        if hopper_id not in self._hopper_switch_faults:
+        if hopper_id not in self._hopper_faults:
             return original_value
-
-        fault = self._hopper_switch_faults[hopper_id]
-
+        
+        fault = self._hopper_faults[hopper_id]
+        
         # 检查故障是否过期
         if fault.fault_duration > 0:
             elapsed = time.time() - fault.fault_start_time
             if elapsed > fault.fault_duration:
-                self._hopper_switch_faults.pop(hopper_id, None)
+                self._hopper_faults.pop(hopper_id, None)
                 return original_value
-
+        
         # STUCK_LOW = 卡关, STUCK_HIGH = 卡开
         if fault.fault_mode == FaultMode.STUCK_LOW:
             return False  # 卡在关
         elif fault.fault_mode == FaultMode.STUCK_HIGH:
             return True   # 卡在开
-
+        
         return original_value
     
     def _apply_cart_sensor_fault(self, fault_key: str, cart_id: str, sensor_type: str, original_value: Any) -> Any:
@@ -1048,24 +1026,24 @@ class SensorDataManager:
     
     def _apply_hopper_weight_fault(self, hopper_id: str, original_value: float) -> float:
         """应用中转斗称重故障"""
-        if hopper_id not in self._hopper_weight_faults:
+        if hopper_id not in self._hopper_faults:
             return original_value
-
-        fault = self._hopper_weight_faults[hopper_id]
-
+        
+        fault = self._hopper_faults[hopper_id]
+        
         # 检查故障是否过期
         if fault.fault_duration > 0:
             elapsed = time.time() - fault.fault_start_time
             if elapsed > fault.fault_duration:
-                self._hopper_weight_faults.pop(hopper_id, None)
+                self._hopper_faults.pop(hopper_id, None)
                 return original_value
-
+        
         if fault.fault_mode == FaultMode.STUCK_LOW:
             return 0.0  # 恒为0
         elif fault.fault_mode == FaultMode.SENSITIVITY_LOSS:
             # 偏移±20%
             return original_value * random.uniform(0.8, 1.2)
-
+        
         return original_value
     
     # ============ 料位传感器接口 ============
@@ -1111,34 +1089,6 @@ class SensorDataManager:
         for bin_id, value in level_data.items():
             self.write_level_sensor(bin_id, value)
 
-    def write_consumption_rates(self, rates: Dict[str, float]):
-        """批量写入料仓消耗速度
-
-        Args:
-            rates: {bin_id: consumption_rate_t_per_s, ...}
-        """
-        self._load_from_file()
-        if 'consumption_rates' not in self._current_data:
-            self._current_data['consumption_rates'] = {}
-        for bin_id, rate in rates.items():
-            self._current_data['consumption_rates'][bin_id] = {
-                'type': 'consumption_rate',
-                'unit': 't/s',
-                'value': round(float(rate), 6)
-            }
-        self._current_data['timestamp'] = get_beijing_time_str()
-        self._save_to_file()
-
-    def read_consumption_rates(self) -> Dict[str, float]:
-        """读取所有料仓消耗速度
-
-        Returns:
-            {bin_id: rate_t_per_s, ...}  未配置的返回空dict
-        """
-        self._load_from_file()
-        rates = self._current_data.get('consumption_rates', {})
-        return {bin_id: data.get('value', 0.01) for bin_id, data in rates.items()}
-
     # ============ 上料控制信号接口 ============
 
     def write_feed_signal(self, feed_id: str, value: bool):
@@ -1182,6 +1132,17 @@ class SensorDataManager:
         for feed_id, value in feed_data.items():
             self.write_feed_signal(feed_id, value)
 
+    def read_consumption_rates(self) -> Dict[str, float]:
+        """读取料仓消耗速度"""
+        self._load_from_file()
+        return self._current_data.get('consumption_rates', {})
+
+    def write_consumption_rates(self, rates: Dict[str, float]):
+        """写入料仓消耗速度"""
+        self._load_from_file()
+        self._current_data['consumption_rates'] = dict(rates)
+        self._save_to_file()
+
     # ============ 辅助方法 ============
 
     def get_generate_data_file_path(self) -> str:
@@ -1195,6 +1156,11 @@ class SensorDataManager:
     def reset_data(self):
         """重置数据为默认值"""
         self._create_default_data()
+
+    def reset_all_data(self):
+        """重置全部数据（reset_data 的别名，兼容新接口）"""
+        self.reset_data()
+        self.clear_all_faults() if hasattr(self, 'clear_all_faults') else None
 
     def export_data(self) -> str:
         """导出当前数据为JSON字符串"""

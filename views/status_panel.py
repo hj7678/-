@@ -7,12 +7,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QGroupBox, QLabel, QProgressBar, QScrollArea, QPushButton)
 from PyQt5.QtCore import Qt, pyqtSignal
 from typing import Dict
+import config
 import styles
-from views.status_data import (
-    StatusData, CONVEYOR_IDS, SENSOR_IDS, HOPPER_IDS,
-    LASER_SENSOR_IDS, LASER_SENSORS_CONFIG, CART_IDS, CART_SENSORS_CONFIG,
-    TRANSFER_HOPPERS_CONFIG, FEED_POINT_DISPLAY_NAMES, CATEGORY_CN,
-)
+from sensor_data_manager import get_data_manager
 
 
 class StatusPanel(QWidget):
@@ -20,7 +17,6 @@ class StatusPanel(QWidget):
 
     # 中转斗开关切换信号
     hopper_switch_toggled = pyqtSignal(str, bool)  # hopper_id, new_state
-    data_reset_requested = pyqtSignal()  # 传感器数据初始化请求
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,7 +27,6 @@ class StatusPanel(QWidget):
         self.laser_sensor_labels = {}  # 激光传感器显示标签
         self.cart_sensor_labels = {}   # 运料小车传感器显示标签
         self.level_sensor_labels = {}  # 料位传感器显示标签
-        self.schedule_labels = {}     # 调度结果显示标签 D7/D8/D9
 
         # 状态缓存，用于优化更新
         self._conveyor_cache = {}
@@ -87,13 +82,13 @@ class StatusPanel(QWidget):
         fault_diagnosis_group = self._create_fault_diagnosis_result_group()
         scroll_layout.addWidget(fault_diagnosis_group)
 
-        # 调度结果（D7/D8/D9 上料顺序）
-        schedule_group = self._create_schedule_display_group()
-        scroll_layout.addWidget(schedule_group)
-
         # 统计信息
         stats_group = self._create_stats_group()
         scroll_layout.addWidget(stats_group)
+
+        # 调度序列显示
+        schedule_group = self._create_schedule_group()
+        scroll_layout.addWidget(schedule_group)
 
         scroll_layout.addStretch()
 
@@ -109,7 +104,7 @@ class StatusPanel(QWidget):
         layout.setSpacing(4)
 
         # 创建小车传感器的显示单元格，4个小车分两行显示（每行2个）
-        cart_ids = list(CART_IDS)
+        cart_ids = list(config.CART_SENSORS.keys())
 
         # 第一行：Cart1, Cart2
         row1_layout = QHBoxLayout()
@@ -135,7 +130,7 @@ class StatusPanel(QWidget):
 
     def _create_cart_sensor_cell(self, cart_id: str) -> QWidget:
         """创建小车传感器状态单元格"""
-        cart_config = CART_SENSORS_CONFIG[cart_id]
+        cart_config = config.CART_SENSORS[cart_id]
 
         cell = QWidget()
         cell.setFixedWidth(160)  # 固定宽度，确保一致
@@ -300,18 +295,27 @@ class StatusPanel(QWidget):
         layout = QGridLayout()
         layout.setSpacing(8)
 
+        # 上料点名称映射
+        feed_point_names = {
+            'feed1_1': '上料点1-1',
+            'feed1_2': '上料点1-2',
+            'feed2_1': '上料点2-1',
+            'feed2_2': '上料点2-2',
+            'feed3': '上料点3',
+        }
+
         # 创建每个激光传感器的显示单元格
-        laser_ids = list(LASER_SENSOR_IDS)
+        laser_ids = list(config.LASER_SENSORS.keys())
         for idx, laser_id in enumerate(laser_ids):
             row = idx // 2
             col = idx % 2
 
             # 从传感器配置获取上料点信息
-            sensor_config = LASER_SENSORS_CONFIG.get(laser_id, {})
+            sensor_config = config.LASER_SENSORS.get(laser_id, {})
             feed_point = sensor_config.get('feed_point', '')
 
             # 获取上料点中文名称
-            feed_point_name = FEED_POINT_DISPLAY_NAMES.get(feed_point, feed_point)
+            feed_point_name = feed_point_names.get(feed_point, feed_point)
 
             cell = self._create_laser_sensor_cell(laser_id, feed_point_name)
             self.laser_sensor_labels[laser_id] = cell
@@ -385,7 +389,8 @@ class StatusPanel(QWidget):
         group.setStyleSheet(styles.get_group_box_style())
 
         # 所有皮带列表
-        conv_ids = list(CONVEYOR_IDS)
+        conv_ids = ['E1', 'E2', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9', 'E10',
+                    'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D13']
 
         layout = QGridLayout()
         layout.setSpacing(4)
@@ -445,7 +450,7 @@ class StatusPanel(QWidget):
         layout.setSpacing(3)
 
         # 所有传感器 - 使用新的传感器ID格式
-        sensor_ids = list(SENSOR_IDS)
+        sensor_ids = list(config.SENSORS.keys())
 
         for idx, sensor_id in enumerate(sensor_ids):
             row = idx // 5
@@ -521,7 +526,7 @@ class StatusPanel(QWidget):
         layout = QGridLayout()
         layout.setSpacing(4)
 
-        hopper_ids = list(HOPPER_IDS)
+        hopper_ids = list(config.TRANSFER_HOPPERS.keys())
 
         for idx, hopper_id in enumerate(hopper_ids):
             row = idx // 4
@@ -536,7 +541,7 @@ class StatusPanel(QWidget):
 
     def _create_hopper_cell(self, hopper_id: str) -> QWidget:
         """创建中转斗状态单元格"""
-        hopper_config = TRANSFER_HOPPERS_CONFIG[hopper_id]
+        hopper_config = config.TRANSFER_HOPPERS[hopper_id]
 
         cell = QWidget()
         cell.setFixedWidth(75)
@@ -684,50 +689,53 @@ class StatusPanel(QWidget):
         self.route_counter.setStyleSheet("font-weight: bold; color: #4A90D9; font-size: 14px;")
         layout.addWidget(self.route_counter, 2, 1)
 
-        # 报警次数（暂时隐藏）
-        alarm_label = QLabel("报警次数:")
-        alarm_label.setStyleSheet("color: #8B949E; font-size: 13px;")
-        alarm_label.hide()
-        layout.addWidget(alarm_label, 3, 0)
-
-        self.alarm_counter = QLabel("0")
-        self.alarm_counter.setStyleSheet("font-weight: bold; color: #E74C3C; font-size: 14px;")
-        self.alarm_counter.hide()
-        layout.addWidget(self.alarm_counter, 3, 1)
-
         # 故障传感器数
         fault_label = QLabel("故障传感器:")
         fault_label.setStyleSheet("color: #8B949E; font-size: 13px;")
-        layout.addWidget(fault_label, 4, 0)
+        layout.addWidget(fault_label, 3, 0)
 
         self.fault_sensor_counter = QLabel("0")
         self.fault_sensor_counter.setStyleSheet("font-weight: bold; color: #E74C3C; font-size: 14px;")
-        layout.addWidget(self.fault_sensor_counter, 4, 1)
-
-        # 数据初始化按钮
-        reset_btn = QPushButton("传感器数据初始化")
-        reset_btn.setMinimumHeight(28)
-        reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #8E44AD;
-                color: #ECF0F1;
-                border: none;
-                border-radius: 4px;
-                font-size: 11px;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                background-color: #9B59B6;
-            }
-            QPushButton:pressed {
-                background-color: #7D3C98;
-            }
-        """)
-        reset_btn.clicked.connect(self.data_reset_requested.emit)
-        layout.addWidget(reset_btn, 5, 0, 1, 2)
+        layout.addWidget(self.fault_sensor_counter, 3, 1)
 
         group.setLayout(layout)
         return group
+
+    def _create_schedule_group(self) -> QGroupBox:
+        """创建调度序列显示组"""
+        group = QGroupBox("调度序列")
+        group.setStyleSheet(styles.get_group_box_style())
+        layout = QVBoxLayout()
+        layout.setSpacing(4)
+
+        self.schedule_labels = {}
+        for belt_id, label_text in [('D6', 'D6 高位仓'), ('D7', 'D7 P1配料站'),
+                                     ('D8', 'D8 P2/P3配料站'), ('D9', 'D9 P4配料站')]:
+            lbl = QLabel(f"{label_text}: --")
+            lbl.setStyleSheet("color: #8B949E; font-size: 12px; padding: 2px 4px;")
+            lbl.setWordWrap(True)
+            self.schedule_labels[belt_id] = lbl
+            layout.addWidget(lbl)
+
+        group.setLayout(layout)
+        return group
+
+    def update_schedule_display(self, executing_bin: dict, scheduled_sequence: dict):
+        """更新调度序列显示"""
+        for belt_id, lbl in self.schedule_labels.items():
+            exec_bin = executing_bin.get(belt_id, '')
+            seq = scheduled_sequence.get(belt_id, [])
+            parts = []
+            if exec_bin:
+                parts.append(f"执行: {exec_bin}")
+            if seq:
+                parts.append(f"队列: {','.join(seq)}")
+            if parts:
+                lbl.setText(f"{belt_id}: {' | '.join(parts)}")
+                lbl.setStyleSheet("color: #2ECC71; font-size: 12px; padding: 2px 4px;")
+            else:
+                lbl.setText(f"{belt_id}: --")
+                lbl.setStyleSheet("color: #8B949E; font-size: 12px; padding: 2px 4px;")
 
     def _create_fault_diagnosis_result_group(self) -> QGroupBox:
         """创建故障诊断结果组"""
@@ -765,87 +773,6 @@ class StatusPanel(QWidget):
 
         group.setLayout(layout)
         return group
-
-    def _create_schedule_display_group(self) -> QGroupBox:
-        """创建调度结果显示组"""
-        group = QGroupBox("调度上料顺序")
-        group.setStyleSheet(styles.get_group_box_style())
-        layout = QVBoxLayout()
-        layout.setSpacing(4)
-
-        for belt_id in ['D7', 'D8', 'D9']:
-            label = QLabel(f"{belt_id}：等待调度结果...")
-            label.setStyleSheet("""
-                QLabel {
-                    color: #6E7681;
-                    font-size: 12px;
-                    padding: 4px;
-                }
-            """)
-            label.setWordWrap(True)
-            label.setMinimumHeight(20)
-            self.schedule_labels[belt_id] = label
-            layout.addWidget(label)
-
-        group.setLayout(layout)
-        return group
-
-    def update_schedule_display(self, schedules: dict, executing_bins: dict = None):
-        executing_bins = executing_bins or {}
-        for belt_id in ['D7', 'D8', 'D9']:
-            label = self.schedule_labels.get(belt_id)
-            if label is None:
-                continue
-            result = schedules.get(belt_id)
-            executing_bin = executing_bins.get(belt_id)
-            if result:
-                seq = result.get("sequence", [])
-                if seq:
-                    parts = []
-                    for i, s in enumerate(seq[:7]):
-                        if s == executing_bin:
-                            parts.append(f"▶{s}")
-                        else:
-                            parts.append(str(s))
-                    seq_str = " → ".join(parts)
-                    move_time = result.get("summary", {}).get("total_move", 0)
-                    text = f"{belt_id}：{seq_str}  |  移动耗时 {move_time:.1f}s"
-                    if executing_bin:
-                        label.setStyleSheet("""
-                            QLabel {
-                                color: #2ECC71;
-                                font-size: 12px;
-                                padding: 4px;
-                                font-weight: bold;
-                            }
-                        """)
-                    else:
-                        label.setStyleSheet("""
-                            QLabel {
-                                color: #4A90D9;
-                                font-size: 12px;
-                                padding: 4px;
-                            }
-                        """)
-                    label.setText(text)
-                else:
-                    label.setText(f"{belt_id}：无可行的上料顺序")
-                    label.setStyleSheet("""
-                        QLABEL {
-                            color: #F39C12;
-                            font-size: 12px;
-                            padding: 4px;
-                        }
-                    """)
-            else:
-                label.setText(f"{belt_id}：等待调度结果...")
-                label.setStyleSheet("""
-                    QLabel {
-                        color: #6E7681;
-                        font-size: 12px;
-                        padding: 4px;
-                    }
-                """)
 
     def _create_level_sensors_display_group(self) -> QGroupBox:
         """创建料位传感器显示组（只显示高位储料仓）"""
@@ -1144,11 +1071,10 @@ class StatusPanel(QWidget):
         else:
             self.fault_sensor_counter.setStyleSheet("font-weight: bold; color: #2ECC71; font-size: 14px;")
 
-    def update_diagnosis_result(self, faults: list, full_results: list = None):
+    def update_diagnosis_result(self, faults: list):
         """
         更新故障诊断结果
-        faults: [(sensor_id, reason), ...]  兼容旧格式
-        full_results: [DiagnosisResult, ...]  完整结果（含置信度、类别）
+        faults: [(sensor_id, reason), ...]
         """
         if faults:
             self.diagnosis_status_label.setText(f"检测到 {len(faults)} 个故障")
@@ -1163,22 +1089,8 @@ class StatusPanel(QWidget):
                     border-radius: 4px;
                 }
             """)
-            # 构建带置信度和类别的故障文本
-            lines = []
-            if full_results:
-                for r in full_results:
-                    if r.confidence >= 0.7:
-                        conf_pct = int(r.confidence * 100)
-                        cat_cn = CATEGORY_CN.get(r.category, r.category)
-                        lines.append(f"[{cat_cn}] {r.sensor_id}: {r.description} (置信度{conf_pct}%)")
-                    elif r.confidence >= 0.5:
-                        conf_pct = int(r.confidence * 100)
-                        cat_cn = CATEGORY_CN.get(r.category, r.category)
-                        lines.append(f"[{cat_cn}·低] {r.sensor_id}: {r.description} (置信度{conf_pct}%)")
-            else:
-                lines = [f"{sid}: {reason}" for sid, reason in faults]
-
-            fault_text = "\n".join(lines)
+            # 显示故障列表
+            fault_text = "\n".join([f"{sid}: {reason}" for sid, reason in faults])
             self.fault_list_label.setText(fault_text)
             self.fault_list_label.setStyleSheet("""
                 QLabel {
@@ -1210,12 +1122,19 @@ class StatusPanel(QWidget):
                 }
             """)
 
-    def update_all_status(self, data: StatusData):
-        """从 StatusData 更新所有状态"""
+    def update_all_status(self, simulator):
+        """从仿真器更新所有状态"""
+        # 获取故障传感器列表
+        faulty_sensors = simulator.get_faulty_sensors() if hasattr(simulator, 'get_faulty_sensors') else set()
 
-        # 更新运料小车传感器状态
+        # 从 generate_data.json 实时读取小车和中转斗数据
+        data_manager = get_data_manager()
+        cart_data = data_manager.read_cart_sensors()
+        hopper_data = data_manager.read_all_hopper_data()
+
+        # 更新运料小车传感器状态（从 generate_data.json 实时读取）
         for cart_id in self.cart_sensor_labels.keys():
-            cart_info = data.cart_sensors.get(cart_id, {})
+            cart_info = cart_data.get(cart_id, {})
             if cart_info:
                 self.update_cart_sensor_display(
                     cart_id,
@@ -1228,47 +1147,49 @@ class StatusPanel(QWidget):
 
         # 更新皮带状态
         for conv_id in list(self.conveyor_labels.keys()):
-            state = data.conveyors.get(conv_id, {})
+            state = simulator.get_conveyor_state(conv_id)
             self.update_conveyor_status(
-                conv_id, state.get('is_running', False), state.get('on_route', False),
+                conv_id, state['is_running'], state['on_route'],
                 state.get('fault_type'), state.get('raw_speed', 0)
             )
 
         # 更新传感器状态
         for sensor_id in self.sensor_labels.keys():
-            is_active = data.sensors.get(sensor_id, False)
-            is_faulty = sensor_id in data.faulty_sensors
+            is_active = simulator.get_sensor_state(sensor_id)
+            is_faulty = sensor_id in faulty_sensors
             self.update_sensor_status(sensor_id, is_active, is_faulty)
 
-        # 更新中转斗
+        # 更新中转斗（开关状态和称重数据从 generate_data.json 同步）
         for hopper_id in self.hopper_labels.keys():
-            h = data.hoppers.get(hopper_id, {})
-            self.update_hopper_level(hopper_id, h.get('level_percent', 0),
-                                     switch_open=h.get('switch_open', True),
-                                     weight=h.get('weight', 0.0))
+            level = simulator.get_hopper_level(hopper_id)
+            switch_data = hopper_data.get(hopper_id, {})
+            switch_open = switch_data.get('switch', True)
+            weight_kg = switch_data.get('weight', 0)
+            # 转换为吨用于计算料位百分比
+            weight_tons = weight_kg / 1000.0
+            self.update_hopper_level(hopper_id, level, switch_open=switch_open, weight=weight_tons)
 
         # 更新故障传感器计数
-        self.update_fault_count(len(data.faulty_sensors))
+        self.update_fault_count(len(faulty_sensors))
 
         # 更新故障诊断结果
-        if data.diagnosis_faults:
-            self.update_diagnosis_result(data.diagnosis_faults, data.full_diagnosis_results)
+        if hasattr(simulator, 'get_diagnosis_result'):
+            faults = simulator.get_diagnosis_result()
+            self.update_diagnosis_result(faults)
 
         # 更新激光传感器状态
-        for laser_id in self.laser_sensor_labels.keys():
-            has_material = data.laser_sensors.get(laser_id, False)
-            self.update_laser_sensor_display(laser_id, has_material)
+        if hasattr(simulator, 'laser_sensor_states'):
+            for laser_id in self.laser_sensor_labels.keys():
+                has_material = simulator.get_laser_sensor_state(laser_id)
+                self.update_laser_sensor_display(laser_id, has_material)
 
-        # 更新料位传感器状态
-        if data.level_sensors:
-            self.update_level_sensors_display(data.level_sensors)
-
-        # 更新调度结果显示
-        if data.schedules:
-            self.update_schedule_display(data.schedules, data.executing_bins)
+        # 更新料位传感器状态（只更新S1-S12）
+        if hasattr(simulator, 'get_all_level_sensors'):
+            level_sensors = simulator.get_all_level_sensors()
+            self.update_level_sensors_display(level_sensors)
 
         # 更新统计
-        self.update_runtime(data.total_runtime)
-        self.update_material_count(data.total_feed_weight)
-        self.update_alarm_count(data.alarm_count)
-        self.update_active_routes(data.active_routes)
+        status = simulator.get_status()
+        self.update_runtime(status['total_runtime'])
+        self.update_material_count(status.get('total_feed_weight', 0.0))
+        self.update_active_routes(status.get('active_routes', []))

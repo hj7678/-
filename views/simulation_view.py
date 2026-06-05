@@ -17,7 +17,6 @@ from PyQt5.QtWidgets import QWidget, QSizePolicy, QMessageBox
 from PyQt5.QtCore import Qt, QTimer, QPointF, QPoint, QRectF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath, QPolygon, QRadialGradient, QLinearGradient
 import config
-from controllers.route_state_manager import RouteStateManager
 
 
 class SimulationView(QWidget):
@@ -43,19 +42,15 @@ class SimulationView(QWidget):
 
         # 分料小车状态
         self.cart_positions: Dict[str, dict] = {}  # route_id -> {target_bin, current_x, target_x, moving}
-        # 同 Cart 路线切换时继承画布/控制器车位（Cart1–3）
-        self._last_shared_cart_visual: Dict[str, dict] = {}
 
         # 高位储料仓小仓状态（S1-S12）
         self.silo_compartments: Dict = {}
         for i in range(1, 13):
             bin_id = f'S{i}'
-            capacity = config.HIGH_SILO_BIN_CAPACITY
-            material_type = config.SILO_BIN_MATERIALS.get(bin_id, 'stone_powder')
+            capacity = config.HIGH_SILO_BIN_CAPACITY  # 110吨
             self.silo_compartments[bin_id] = {
                 'capacity': capacity,
-                'current_level': capacity * 0.85,
-                'material_type': material_type,
+                'current_level': capacity * 0.85,  # 初始85%（93.5吨）
                 'is_target': False
             }
 
@@ -63,7 +58,7 @@ class SimulationView(QWidget):
         self.animation_time = 0
         self.animation_timer = QTimer()
         self.animation_timer.timeout.connect(self._advance_animation)
-        self.animation_timer.start(1000)  # 每秒更新一次小车位置
+        self.animation_timer.start(500)  # 每500ms更新（支持闪烁动画）
 
         # 颜色
         self.bg_color = QColor(config.COLORS['background'])
@@ -88,14 +83,14 @@ class SimulationView(QWidget):
         self._init_all_carts()
 
     def _advance_animation(self):
-        """推进动画 - 每秒移动1.333像素"""
-        self.animation_time += 1000
-        delta_time = 1.0  # 每秒移动一次
+        """推进动画"""
+        self.animation_time += 500
+        delta_time = 0.5
         self._update_cart_positions(delta_time)
         self._update_cart4_position()
         if self._needs_repaint:
             self._needs_repaint = False
-        self.update()
+            self.update()
 
     def mark_needs_repaint(self):
         """标记需要重绘"""
@@ -222,21 +217,26 @@ class SimulationView(QWidget):
     def _init_all_carts(self):
         """仿真启动时初始化所有分料小车在各自皮带的默认位置
 
-        优先从 controller.cart_positions 读取持久化的小车位置，
-        若无持久化数据则默认停在第1行。
+        D7皮带上：服务于路线①②③，默认停在第1行小仓 P1-1（行1）
+        D8皮带上：服务于路线⑦⑨，默认停在第1行小仓 P2-1（行1）
+        D9皮带上：服务于路线④⑥⑧，默认停在第1行小仓 P4-1（行1）
+
+        这些小车在仿真启动时就在画布上显示，不依赖路线是否激活。
         标记 _persistent=True，防止被 _update_cart_positions 的清理逻辑误删。
         """
-        conveyor_config = {
-            'D7': ('route1', 'P1', 'Cart1'),
-            'D8': ('route7', 'P2', 'Cart2'),
-            'D9': ('route4', 'P4', 'Cart3'),
+        conveyor_bins = {
+            'D7': 'P1-1',  # 路线①②③
+            'D8': 'P2-1',  # 路线⑥⑧
+            'D9': 'P4-1',  # 路线④⑦
+        }
+        conveyor_routes = {
+            'D7': '_persistent_D7',
+            'D8': '_persistent_D8',
+            'D9': '_persistent_D9',
         }
 
-        for conveyor_id, (route_id, col_prefix, cart_id) in conveyor_config.items():
-            row = 1
-            if hasattr(self, 'controller') and self.controller:
-                row = int(self.controller.cart_positions.get(cart_id, 1))
-            default_bin = f"{col_prefix}-{row}"
+        for conveyor_id, default_bin in conveyor_bins.items():
+            route_id = conveyor_routes[conveyor_id]
             pos = self._get_cart_target_on_conveyor(conveyor_id, default_bin)
             self.cart_positions[route_id] = {
                 'target_bin': default_bin,
@@ -265,26 +265,12 @@ class SimulationView(QWidget):
         # 获取当前目标小仓
         new_targets = set(self.route_to_bin.items())
 
-        # 停止不存在的路线的小车（保留常驻小车 route8/route9 + Cart4占用route5）
+        # 停止不存在的路线的小车（保留常驻小车 route7/route8）
         for route_id in list(getattr(self, 'cart_positions', {}).keys()):
             if route_id not in self.route_to_bin:
                 cart = self.cart_positions.get(route_id, {})
-                if cart.get('_persistent') or route_id == 'route5':
+                if cart.get('_persistent'):
                     continue
-                # 保存共用小车末态，供同 Cart 的下一条路线继承
-                if hasattr(self, 'controller') and self.controller:
-                    cart_id = RouteStateManager.ROUTE_CARTS.get(route_id)
-                    if cart_id in ('Cart1', 'Cart2', 'Cart3'):
-                        anim_copy = None
-                        if hasattr(self, '_cart_anim_state') and route_id in self._cart_anim_state:
-                            anim_copy = dict(self._cart_anim_state[route_id])
-                        self._last_shared_cart_visual[cart_id] = {
-                            'current_x': cart['current_x'],
-                            'current_y': cart['current_y'],
-                            'conveyor_id': cart.get('conveyor_id'),
-                            'controller_pos': int(self.controller.cart_positions.get(cart_id, 1)),
-                            'anim': anim_copy,
-                        }
                 del self.cart_positions[route_id]
                 if hasattr(self, '_cart_anim_state') and route_id in self._cart_anim_state:
                     del self._cart_anim_state[route_id]
@@ -294,71 +280,37 @@ class SimulationView(QWidget):
             self._cart_anim_state = {}
 
         # 为新路线初始化小车 / 更新已有路线
+        # 注意：route5使用Cart4（水平移动在D6皮带上），由_draw_cart4单独处理
         for route_id, target_bin in new_targets:
             if route_id == 'route5':
-                continue  # Cart4由_update_cart4_position管理动画
+                continue
             conveyor_id = self._get_conveyor_for_route(route_id)
             target_pos = self._get_cart_target_on_conveyor(conveyor_id, target_bin)
             target_grid = self._get_bin_row(target_bin)
 
-            # 常驻占位（route1/route4/route7）与真实上料路线共用同一物理小车：
-            # 一旦该路线进入 new_targets，应删除占位并走下方「新建」逻辑，才能继承 _last_shared_cart_visual
-            existing = self.cart_positions.get(route_id)
-            if existing and existing.get('_persistent'):
-                if hasattr(self, '_cart_anim_state') and route_id in self._cart_anim_state:
-                    del self._cart_anim_state[route_id]
-                del self.cart_positions[route_id]
-
             if route_id not in self.cart_positions:
-                assigned_cart = RouteStateManager.ROUTE_CARTS.get(route_id)
-                snap = None
-                if assigned_cart in ('Cart1', 'Cart2', 'Cart3'):
-                    snap = self._last_shared_cart_visual.pop(assigned_cart, None)
-                use_snap = (
-                    snap is not None
-                    and snap.get('conveyor_id') == conveyor_id
-                    and assigned_cart in ('Cart1', 'Cart2', 'Cart3')
-                )
-                if use_snap and hasattr(self, 'controller') and self.controller:
-                    fx, fy = float(snap['current_x']), float(snap['current_y'])
-                    self.cart_positions[route_id] = {
-                        'target_bin': target_bin,
-                        'conveyor_id': conveyor_id,
-                        'current_x': fx,
-                        'current_y': fy,
-                        'target_x': target_pos[0],
-                        'target_y': target_pos[1],
-                        'moving': True,
-                    }
-                    self._cart_anim_state[route_id] = {
-                        'elapsed': 0.0,
-                        'from_x': fx,
-                        'from_y': fy,
-                        'to_x': target_pos[0],
-                        'to_y': target_pos[1],
-                    }
-                else:
-                    # 新路线：从控制器记录的当前位置出现
-                    initial_row = 1
-                    if hasattr(self, 'controller') and self.controller and assigned_cart in ('Cart1', 'Cart2', 'Cart3'):
-                        initial_row = int(self.controller.cart_positions.get(assigned_cart, 1))
-                    initial_bin = self._row_to_cart_pixel(conveyor_id, initial_row)
-                    self.cart_positions[route_id] = {
-                        'target_bin': target_bin,
-                        'conveyor_id': conveyor_id,
-                        'current_x': initial_bin[0],
-                        'current_y': initial_bin[1],
-                        'target_x': target_pos[0],
-                        'target_y': target_pos[1],
-                        'moving': True
-                    }
-                    self._cart_anim_state[route_id] = {
-                        'elapsed': 0.0,
-                        'from_x': initial_bin[0],
-                        'from_y': initial_bin[1],
-                        'to_x': target_pos[0],
-                        'to_y': target_pos[1],
-                    }
+                # 新路线：从控制器中读取小车当前实际位置（而非硬编码位置1）
+                cart_id = self._get_cart_for_route(route_id)
+                current_row = 1
+                if hasattr(self, 'controller') and self.controller and cart_id:
+                    current_row = self.controller.cart_positions.get(cart_id, 1)
+                initial_bin = self._row_to_cart_pixel(conveyor_id, current_row)
+                self.cart_positions[route_id] = {
+                    'target_bin': target_bin,
+                    'conveyor_id': conveyor_id,
+                    'current_x': initial_bin[0],
+                    'current_y': initial_bin[1],
+                    'target_x': target_pos[0],
+                    'target_y': target_pos[1],
+                    'moving': True
+                }
+                self._cart_anim_state[route_id] = {
+                    'elapsed': 0.0,
+                    'from_x': initial_bin[0],
+                    'from_y': initial_bin[1],
+                    'to_x': target_pos[0],
+                    'to_y': target_pos[1],
+                }
             else:
                 cart = self.cart_positions[route_id]
                 # 路线激活时移除 _persistent 标记，使小车在 _draw_distribution_carts 中被绘制
@@ -411,38 +363,29 @@ class SimulationView(QWidget):
                             cart['current_x'] += dx * ratio
                             cart['current_y'] += dy * ratio
 
-        # Cart4 平滑动画（route5，在D6皮带上水平移动）
-        route5_id = 'route5'
-        if route5_id in self.cart_positions and route5_id in getattr(self, '_cart_anim_state', {}):
-            cart = self.cart_positions[route5_id]
-            anim = self._cart_anim_state[route5_id]
-            from_x, from_y = anim['from_x'], anim['from_y']
-            to_x, to_y = anim['to_x'], anim['to_y']
-            dx = to_x - from_x
-            dy = to_y - from_y
-            total_dist = math.sqrt(dx * dx + dy * dy)
-            if total_dist > 0:
-                move_pixels = PIXELS_PER_SECOND * delta_seconds
-                elapsed_dist = math.sqrt((cart['current_x'] - from_x) ** 2 + (cart['current_y'] - from_y) ** 2)
-                remaining_dist = total_dist - elapsed_dist
-                if remaining_dist > 0:
-                    step = min(move_pixels, remaining_dist)
-                    ratio = step / total_dist
-                    cart['current_x'] += dx * ratio
-                    cart['current_y'] += dy * ratio
-                    self._needs_repaint = True
-
     def _get_conveyor_for_route(self, route_id: str) -> str:
-        """获取路线对应的皮带ID"""
+        """获取路线对应的皮带ID（8路线系统）"""
         if route_id in ('route1', 'route2', 'route3'):
-            return 'D7'
-        elif route_id in ('route4', 'route6', 'route8'):
-            return 'D9'
-        elif route_id in ('route7', 'route9'):
-            return 'D8'
+            return 'D7'    # Cart1 → P1
+        elif route_id in ('route4', 'route7'):
+            return 'D9'    # Cart3 → P4
+        elif route_id in ('route6', 'route8'):
+            return 'D8'    # Cart2 → P2/P3
         elif route_id == 'route5':
-            return 'D6'
+            return 'D6'    # Cart4 → silo
         return 'D7'
+
+    def _get_cart_for_route(self, route_id: str) -> str:
+        """获取路线对应的小车ID"""
+        if route_id in ('route1', 'route2', 'route3'):
+            return 'Cart1'
+        elif route_id in ('route4', 'route7'):
+            return 'Cart3'
+        elif route_id in ('route6', 'route8'):
+            return 'Cart2'
+        elif route_id == 'route5':
+            return 'Cart4'
+        return 'Cart1'
 
     def _get_bin_row(self, bin_id: str) -> int:
         """从 bin_id 提取行号（P1-3 -> 3）"""
@@ -479,69 +422,57 @@ class SimulationView(QWidget):
         return column_mapping.get(conveyor_id, 'P1')
 
     def _update_cart4_position(self):
-        """更新小车4在D6皮带上的平滑像素位置（与Cart1-3移动模式相同）"""
+        """从小车4控制器获取位置，平滑插值动画"""
         if not hasattr(self, 'controller') or not self.controller:
             return
+        # 获取目标位置（控制器中的离散整数位置）
+        target_pos = int(getattr(self.controller, 'cart4_position', 1))
+        target_target = int(getattr(self.controller, 'cart4_target_position', 1))
+        is_moving = getattr(self.controller, 'cart4_is_moving', False)
+
+        # 计算D6皮带上的像素范围
         if 'D6' not in self.conveyors:
             return
+        conv = self.conveyors['D6']
+        x1, y1 = conv.start_pos
+        x2, y2 = conv.end_pos
+        belt_len = abs(x2 - x1)
 
-        cart4_target = self.controller.cart4_target_position
-        cart4_current = self.controller.cart4_position
-
-        # 计算各位置的像素坐标
-        target_pixel = self._get_cart4_pixel_for_position(cart4_target)
-        current_pixel = self._get_cart4_pixel_for_position(cart4_current)
-
-        route_id = 'route5'
-        if route_id not in self.cart_positions:
-            pos_pixel = self._get_cart4_pixel_for_position(cart4_current)
-            self.cart_positions[route_id] = {
-                'target_bin': f'S{cart4_target}',
-                'conveyor_id': 'D6',
-                'current_x': pos_pixel[0],
-                'current_y': pos_pixel[1],
-                'target_x': target_pixel[0],
-                'target_y': target_pixel[1],
-                'moving': self.controller.cart4_is_moving,
-            }
-            if not hasattr(self, '_cart_anim_state'):
-                self._cart_anim_state = {}
-            self._cart_anim_state[route_id] = {
+        # 初始化动画状态
+        if not hasattr(self, '_cart4_anim'):
+            self._cart4_anim = {
+                'display_pos': float(target_pos),
+                'from_grid': target_pos,
+                'to_grid': target_pos,
                 'elapsed': 0.0,
-                'from_x': pos_pixel[0],
-                'from_y': pos_pixel[1],
-                'to_x': target_pixel[0],
-                'to_y': target_pixel[1],
+                'total_time': 18.0,
             }
-        else:
-            cart = self.cart_positions[route_id]
-            cart['target_bin'] = f'S{cart4_target}'
-            cart['moving'] = self.controller.cart4_is_moving
-            # 目标变化时更新动画
-            new_target = self._get_cart4_pixel_for_position(cart4_target)
-            if abs(new_target[0] - cart.get('target_x', 0)) > 1:
-                cart['target_x'] = new_target[0]
-                cart['target_y'] = new_target[1]
-                if route_id in self._cart_anim_state:
-                    self._cart_anim_state[route_id] = {
-                        'elapsed': 0.0,
-                        'from_x': cart['current_x'],
-                        'from_y': cart['current_y'],
-                        'to_x': new_target[0],
-                        'to_y': new_target[1],
-                    }
+        anim = self._cart4_anim
 
-    def _get_cart4_pixel_for_position(self, grid_pos: int) -> tuple:
-        """计算小车4在D6皮带上第grid_pos格(1-6)的像素坐标"""
-        if 'D6' not in self.conveyors:
-            return (0, 0)
-        d6 = self.conveyors['D6']
-        belt_y = float(d6.start_pos[1])
-        x_start = float(d6.start_pos[0])
-        x_end = float(d6.end_pos[0])
-        belt_length = x_end - x_start
-        x = x_start + belt_length * (grid_pos / 6.0)
-        return (x, belt_y)
+        # 检测目标变化：控制器目标变了，启动新动画
+        if is_moving and target_target != anim['to_grid']:
+            anim['from_grid'] = anim['display_pos']
+            anim['to_grid'] = float(target_target)
+            anim['elapsed'] = 0.0
+            anim['total_time'] = 18.0 * abs(anim['to_grid'] - anim['from_grid'])
+
+        # 推进动画：线性插值
+        if is_moving and abs(anim['display_pos'] - anim['to_grid']) > 0.01:
+            anim['elapsed'] += 0.5  # 500ms步进
+            if anim['elapsed'] >= anim['total_time']:
+                anim['display_pos'] = anim['to_grid']
+            else:
+                t = anim['elapsed'] / anim['total_time']
+                anim['display_pos'] = anim['from_grid'] + (anim['to_grid'] - anim['from_grid']) * t
+        elif not is_moving:
+            # 小车已到达，使用控制器精确位置
+            anim['display_pos'] = float(target_pos)
+            anim['from_grid'] = float(target_pos)
+            anim['to_grid'] = float(target_pos)
+            anim['elapsed'] = 0.0
+
+        # 更新视图位置为平滑后的像素值
+        self.cart4_position = anim['display_pos']
 
     def _get_cart_target_on_conveyor(self, conveyor_id: str, bin_id: str) -> tuple:
         """根据目标小仓计算小车在皮带上的目标位置"""
@@ -593,7 +524,7 @@ class SimulationView(QWidget):
         # 高位储料仓下半部分（第2行小仓和边框）
         self._draw_high_silo_bottom(painter)
 
-        # D6 皮带（在储料仓之上，层级更高）
+        # D6 皮带（在储料仓上方）
         if 'D6' in self.conveyors:
             self._draw_single_conveyor(painter, self.conveyors['D6'])
 
@@ -748,9 +679,9 @@ class SimulationView(QWidget):
         font.setBold(True)
         painter.setFont(font)
 
-        # 简化名称显示
-        short_name = name.replace('上料点', '点')
-        painter.drawText(int(x - 20), int(y - h/2 - 5), short_name)
+        # 简化名称贴紧组件右侧
+        short_name = name.replace('上料点', '点').replace('中转斗', '斗')
+        painter.drawText(int(x + w + 2), int(y + 4), short_name)
 
     def _draw_laser_sensors(self, painter: QPainter):
         """绘制所有激光测距仪传感器"""
@@ -801,7 +732,7 @@ class SimulationView(QWidget):
         font.setPointSize(7)
         painter.setFont(font)
         name = laser_config.get('name', laser_id)
-        painter.drawText(int(x - 15), int(y + 22), name)
+        painter.drawText(int(x + 4), int(y - 6), name)
 
     def _is_feed_point_active(self, feed_point: dict) -> bool:
         """检查上料点是否活跃"""
@@ -1038,7 +969,7 @@ class SimulationView(QWidget):
             painter.setBrush(QBrush(material_gradient))
 
             # 计算物料区域
-            material_h = h * min(fill_level / 100, 0.88)
+            material_h = h * min(fill_level / 100, 1.0)
             material_top = y + h - material_h
 
             # 梯形物料
@@ -1646,9 +1577,14 @@ class SimulationView(QWidget):
             #                    int(cart_x - cart_width/2 - motor_width + 2), int(cart_y))
 
             # =============================================
-            # 10. 绘制分料箭头
+            # 10. 绘制分料箭头（仅FEEDING时紫黄闪烁）
             # =============================================
-            arrow_color = QColor('#6B2D8B')  # 深紫色
+            is_feeding = False
+            ctx = self.controller.route_state_manager.get_route_context(route_id) if hasattr(self, 'controller') and self.controller else None
+            if ctx and ctx.state.value == 'feeding':
+                is_feeding = True
+            flash = (self.animation_time % 1000) < 500
+            arrow_color = QColor('#F1C40F') if (flash and is_feeding) else QColor('#9B59B6')
             painter.setBrush(QBrush(arrow_color))
             painter.setPen(QPen(arrow_color, 2))
 
@@ -1706,40 +1642,52 @@ class SimulationView(QWidget):
 
     def _draw_cart4(self, painter: QPainter):
         """绘制小车4 - 高位储料仓补料小车（水平移动在D6皮带上）
+        
+        小车4在D6皮带上水平移动：
+        - 左分料：为S1-S6补料
+        - 右分料：为S7-S12补料
+        - 位置传感器：1-6表示位于6个列的中间位置
+        - 左极限：皮带最左侧
+        - 右极限：皮带最右侧
 
-        与其他小车(Cart1-3)移动模式相同：等距缓慢移动至目标位置。
-        仅在路线⑤激活时显示，尺寸缩小。
+        绘制风格与其他小车(Cart1-3)一致，朝向上方放料。
         """
-        # 仅在路线⑤激活时显示
-        route5_active = 'route5' in self.active_routes
-        if not route5_active:
-            return
-
+        # 获取D6皮带信息
         if 'D6' not in self.conveyors:
             return
 
-        # 使用cart_positions中的平滑像素位置（与Cart1-3相同动画系统）
-        if 'route5' in self.cart_positions:
-            cart_data = self.cart_positions['route5']
-            cart_x = float(cart_data['current_x'])
-            cart_y = float(cart_data['current_y'])
-        else:
-            return  # 还未初始化，不显示
+        conv = self.conveyors['D6']
+        x1, y1 = conv.start_pos
+        x2, y2 = conv.end_pos
 
-        # 缩小后的小车尺寸
-        cart_width = 26
-        cart_height = 18
+        # D6是水平皮带
+        belt_length = abs(x2 - x1)
 
-        # 获取状态
+        # 从控制器读取Cart4实际位置（非视图本地副本）
+        cart4_pos = getattr(self, 'cart4_position', 1)
+        position_ratio = cart4_pos / 6.0
+        cart_x = int(x1 + belt_length * position_ratio)
+        cart_y = int(y1)
+
+        # 小车尺寸（D6小车缩小）
+        cart_width = 28
+        cart_height = 20
+
+        # 获取小车是否在移动
         cart_moving = False
+        route5_active = False
         has_material_on_belt = False
-        cart_stopped_at_target = False
         if hasattr(self, 'controller') and self.controller:
             cart_moving = self.controller.cart4_is_moving
             cart4_target = self.controller.cart4_target_position
             cart4_current = self.controller.cart4_position
+            # 判断是否停止在目标位置（显示补料箭头的前提条件）
             cart_stopped_at_target = (not cart_moving and cart4_current == cart4_target)
+            # 检查路线⑤是否激活
+            route5_active = 'route5' in self.active_routes
+            # 检查D6皮带上是否有物料
             if 'D6' in self.controller.conveyors:
+                d6_conv = self.controller.conveyors['D6']
                 has_material_on_belt = any(
                     m.current_conveyor == 'D6' and m.is_active and m.route_id == 'route5'
                     for m in self.controller.materials
@@ -1749,42 +1697,43 @@ class SimulationView(QWidget):
         painter.save()
 
         # 1. 绘制阴影
-        shadow_offset = 3
+        shadow_offset = 4
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(QColor(0, 0, 0, 60)))
         shadow_path = QPainterPath()
         shadow_path.addRoundedRect(
             int(cart_x - cart_width/2 + shadow_offset),
-            int(cart_y - cart_height/2 + shadow_offset + 3),
-            cart_width, cart_height - 3, 3, 3
+            int(cart_y - cart_height/2 + shadow_offset + 4),
+            cart_width, cart_height - 4, 4, 4
         )
         painter.drawPath(shadow_path)
 
         # 2. 绘制车轮
-        wheel_radius = 5
+        wheel_radius = 7
         wheel_color = QColor('#2C3E50')
         rim_color = QColor('#85929E')
 
         left_wheel_x = cart_x - cart_width/3
         right_wheel_x = cart_x + cart_width/3
-        wheel_y = cart_y + cart_height/2 - 1
+        wheel_y = cart_y + cart_height/2 - 2
 
         painter.setBrush(QBrush(wheel_color))
         painter.setPen(QPen(QColor('#1C2833'), 1))
         painter.drawEllipse(int(left_wheel_x - wheel_radius), int(wheel_y - wheel_radius),
                           wheel_radius*2, wheel_radius*2)
         painter.setBrush(QBrush(rim_color))
-        painter.drawEllipse(int(left_wheel_x - 2), int(wheel_y - 2), 4, 4)
+        painter.drawEllipse(int(left_wheel_x - 3), int(wheel_y - 3), 6, 6)
 
         painter.setBrush(QBrush(wheel_color))
         painter.setPen(QPen(QColor('#1C2833'), 1))
         painter.drawEllipse(int(right_wheel_x - wheel_radius), int(wheel_y - wheel_radius),
                           wheel_radius*2, wheel_radius*2)
         painter.setBrush(QBrush(rim_color))
-        painter.drawEllipse(int(right_wheel_x - 2), int(wheel_y - 2), 4, 4)
+        painter.drawEllipse(int(right_wheel_x - 3), int(wheel_y - 3), 6, 6)
 
         # 3. 绘制车体主体
         body_gradient = QRadialGradient(cart_x, cart_y - cart_height/3, cart_width)
+        # 补料状态：有料流动且小车停止在目标位置时变成橙色
         is_discharging = has_material_on_belt and cart_stopped_at_target
         if is_discharging or cart_moving:
             body_gradient.setColorAt(0, QColor('#F5B041'))
@@ -1794,32 +1743,32 @@ class SimulationView(QWidget):
             body_gradient.setColorAt(1, QColor('#2E86C1'))
 
         body_rect = QRectF(cart_x - cart_width/2, cart_y - cart_height/2,
-                          cart_width, cart_height - 4)
+                          cart_width, cart_height - 6)
         painter.setBrush(QBrush(body_gradient))
-        painter.setPen(QPen(QColor('#1A5276') if not is_discharging and not cart_moving else QColor('#9A7D0A'), 1.5))
-        painter.drawRoundedRect(body_rect, 3, 3)
+        painter.setPen(QPen(QColor('#1A5276') if not is_discharging and not cart_moving else QColor('#9A7D0A'), 2))
+        painter.drawRoundedRect(body_rect, 5, 5)
 
         # 4. 绘制车体细节条纹
         stripe_color = QColor('#FFFFFF') if not is_discharging and not cart_moving else QColor('#1C2833')
         stripe_alpha = 100
         painter.setPen(Qt.NoPen)
-        for i in range(2):
-            stripe_y = cart_y - cart_height/2 + 3 + i * 3
+        for i in range(3):
+            stripe_y = cart_y - cart_height/2 + 4 + i * 4
             painter.setBrush(QBrush(QColor(stripe_color.red(), stripe_color.green(),
                                            stripe_color.blue(), stripe_alpha)))
-            painter.drawRect(int(cart_x - cart_width/2 + 2), int(stripe_y), int(cart_width - 4), 2)
+            painter.drawRect(int(cart_x - cart_width/2 + 3), int(stripe_y), cart_width - 6, 2)
 
         # 5. 绘制落料斗（朝上）
-        funnel_width = 10
-        funnel_height = 8
-        funnel_y = cart_y - cart_height/2 - 3
+        funnel_width = 16
+        funnel_height = 12
+        funnel_y = cart_y - cart_height/2 - 4
 
         funnel_gradient = QRadialGradient(cart_x, funnel_y, funnel_width)
         funnel_gradient.setColorAt(0, QColor('#7F8C8D'))
         funnel_gradient.setColorAt(1, QColor('#566573'))
 
         painter.setBrush(QBrush(funnel_gradient))
-        painter.setPen(QPen(QColor('#2C3E50'), 1))
+        painter.setPen(QPen(QColor('#2C3E50'), 1.5))
 
         funnel_path = QPainterPath()
         funnel_path.moveTo(int(cart_x - funnel_width/4), int(funnel_y))
@@ -1830,9 +1779,9 @@ class SimulationView(QWidget):
         painter.drawPath(funnel_path)
 
         # 6. 绘制电机
-        motor_width = 7
-        motor_height = 5
-        motor_x = cart_x + cart_width/2 - 1
+        motor_width = 10
+        motor_height = 8
+        motor_x = cart_x + cart_width/2 - 2
         motor_y = cart_y - 2
 
         motor_color = QColor('#566573')
@@ -1841,23 +1790,24 @@ class SimulationView(QWidget):
         painter.drawRect(int(motor_x), int(motor_y), motor_width, motor_height)
 
         motor_led = QColor('#2ECC71') if cart_moving else QColor('#E74C3C')
+        # 补料时LED变橙色
         if has_material_on_belt and cart_stopped_at_target:
             motor_led = QColor('#F5B041')
         painter.setBrush(QBrush(motor_led))
-        painter.drawEllipse(int(motor_x + 2), int(motor_y + 1), 3, 3)
+        painter.drawEllipse(int(motor_x + 3), int(motor_y + 2), 4, 4)
 
         # 7. 绘制护栏
         rail_color = QColor('#AED6F1') if not cart_moving else QColor('#F9E79F')
-        painter.setPen(QPen(rail_color, 1.5))
-        painter.drawLine(int(cart_x - cart_width/2 + 1), int(cart_y - cart_height/2 + 1),
-                       int(cart_x + cart_width/2 - 1), int(cart_y - cart_height/2 + 1))
-        painter.drawLine(int(cart_x - cart_width/2 + 1), int(cart_y - cart_height/2),
-                       int(cart_x - cart_width/2 + 1), int(cart_y - cart_height/2 + 4))
-        painter.drawLine(int(cart_x + cart_width/2 - 1), int(cart_y - cart_height/2),
-                       int(cart_x + cart_width/2 - 1), int(cart_y - cart_height/2 + 4))
+        painter.setPen(QPen(rail_color, 2))
+        painter.drawLine(int(cart_x - cart_width/2 + 2), int(cart_y - cart_height/2 + 2),
+                       int(cart_x + cart_width/2 - 2), int(cart_y - cart_height/2 + 2))
+        painter.drawLine(int(cart_x - cart_width/2 + 2), int(cart_y - cart_height/2),
+                       int(cart_x - cart_width/2 + 2), int(cart_y - cart_height/2 + 6))
+        painter.drawLine(int(cart_x + cart_width/2 - 2), int(cart_y - cart_height/2),
+                       int(cart_x + cart_width/2 - 2), int(cart_y - cart_height/2 + 6))
 
         # 8. 绘制状态指示灯
-        led_radius = 3
+        led_radius = 4
         led_center_x = cart_x
         led_center_y = cart_y - 2
         led_color = QColor('#2ECC71') if cart_moving else QColor('#E74C3C')
@@ -1870,8 +1820,8 @@ class SimulationView(QWidget):
         glow_color = QColor(led_color.red(), led_color.green(), led_color.blue(), 80)
         painter.setBrush(QBrush(glow_color))
         painter.setPen(Qt.NoPen)
-        painter.drawEllipse(int(led_center_x - led_radius - 1), int(led_center_y - led_radius - 1),
-                          led_radius*2 + 2, led_radius*2 + 2)
+        painter.drawEllipse(int(led_center_x - led_radius - 2), int(led_center_y - led_radius - 2),
+                          led_radius*2 + 4, led_radius*2 + 4)
 
         # 9. 小车对称设计，无右侧延伸线（已去除右侧灰色小方块）
 
@@ -1893,8 +1843,9 @@ class SimulationView(QWidget):
                 dist = math.sqrt(dx * dx + dy * dy)
 
                 if dist > 0:
-                    # 箭头改为紫色
-                    arrow_color = QColor('#9B59B6')  # 紫色
+                    # 紫色/黄色交替闪烁 (0.5s)
+                    flash = (self.animation_time % 1000) < 500
+                    arrow_color = QColor('#F1C40F') if flash else QColor('#9B59B6')
                     painter.setBrush(QBrush(arrow_color))
                     painter.setPen(QPen(arrow_color, 2))
 
@@ -1941,177 +1892,207 @@ class SimulationView(QWidget):
         font.setPointSize(7)
         font.setBold(False)
         painter.setFont(font)
-        pos_label = str(self.controller.cart4_position) if hasattr(self, 'controller') and self.controller else '1'
-        painter.drawText(int(cart_x - 6), int(cart_y - cart_height/2 - 8), pos_label)
+        painter.drawText(int(cart_x - 6), int(cart_y - cart_height/2 - 8), f"{cart4_pos:.0f}")
 
         # 恢复画笔状态
         painter.restore()
 
-    def _get_silo_comp_size(self, sil: dict) -> tuple:
-        """计算高位储料仓每个小仓的像素尺寸"""
-        col_count = sil['columns']
-        row_count = sil['rows']
-        comp_w = (sil['width'] - 10) / col_count
-        comp_h = (sil['height'] - 30) / row_count
-        return (comp_w, comp_h)
-
-    def _get_discharge_target(self) -> Optional[str]:
-        """获取路线⑤当前放料目标小仓ID，无放料时返回None"""
-        if hasattr(self, 'controller') and self.controller:
-            if hasattr(self.controller, 'route_to_bin'):
-                target = self.controller.route_to_bin.get('route5')
-                if target and 'route5' in self.active_routes:
-                    return target
-        return None
-
-    def _get_silo_discharge_source(self) -> Optional[str]:
-        """获取路线⑧⑨当前发料S仓ID（蓝色标记），无出料时返回None"""
-        if hasattr(self, 'controller') and self.controller:
-            active = self.active_routes
-            route8_active = 'route8' in active
-            route9_active = 'route9' in active
-            if route8_active or route9_active:
-                silo_bin = self.controller.route_silo_bin
-                if route8_active and 'route8' in silo_bin:
-                    return silo_bin['route8']
-                if route9_active and 'route9' in silo_bin:
-                    return silo_bin['route9']
-        return None
-
-    def _get_level_color(self, level_pct: float) -> QColor:
-        """根据料位百分比返回填充颜色（绿→黄→橙→红）"""
-        if level_pct > 0.88:
-            return QColor('#E74C3C')  # 满/危险 — 红色
-        elif level_pct > 0.70:
-            return QColor('#E67E22')  # 较高 — 橙色
-        elif level_pct > 0.40:
-            return QColor('#F1C40F')  # 中等 — 黄色
-        else:
-            return QColor('#27AE60')  # 较低 — 绿色
-
-    def _draw_silo_compartment(self, painter: QPainter, x: float, y: float,
-                                w: float, h: float, actual_id: str,
-                                target_bin_id: Optional[str],
-                                discharge_source_id: Optional[str] = None):
-        """绘制单个高位储料仓小仓：填充条 + 百分比 + 编号"""
-        is_target = target_bin_id is not None and target_bin_id == actual_id
-        is_discharge = discharge_source_id is not None and discharge_source_id == actual_id
-
-        # 获取当前料位
-        level_tons = 0.0
-        capacity = config.HIGH_SILO_BIN_CAPACITY
-        if actual_id in self.silo_compartments:
-            comp = self.silo_compartments[actual_id]
-            level_tons = comp.get('current_level', 0.0)
-        level_pct = level_tons / capacity if capacity > 0 else 0.0
-
-        # 背景
-        bg_color = QColor('#1a2e3a')
-        painter.setBrush(QBrush(bg_color))
-        if is_discharge:
-            painter.setPen(QPen(QColor('#3498DB'), 2.0))
-        elif is_target:
-            painter.setPen(QPen(QColor('#E67E22'), 1.5))
-        else:
-            painter.setPen(QPen(QColor('#34495E'), 0.5))
-        painter.drawRect(int(x), int(y), int(w), int(h))
-
-        # 出料仓蓝色边框（闪烁）
-        if is_discharge:
-            painter.setBrush(Qt.NoBrush)
-            if int(self.animation_time * 3) % 2 == 0:
-                painter.setPen(QPen(QColor('#3498DB'), 2.0))
-                painter.drawRect(int(x), int(y), int(w), int(h))
-
-        # 填充条（从底部向上）
-        if level_pct > 0.01:
-            fill_color = self._get_level_color(level_pct)
-            fill_h = max(2, int(h * level_pct))
-            fill_y = y + h - fill_h
-            painter.setBrush(QBrush(fill_color))
-            painter.setPen(Qt.NoPen)
-            painter.drawRect(int(x + 1), int(fill_y), int(w - 2), int(fill_h))
-
-        # 目标仓高亮闪烁边
-        if is_target:
-            painter.setBrush(Qt.NoBrush)
-            painter.setPen(QPen(QColor('#E67E22'), 1.5))
-            painter.drawRect(int(x), int(y), int(w), int(h))
-
-        # 百分比文字
-        pct_text = f"{int(level_pct * 100)}%"
-        painter.setPen(QPen(QColor('#ECF0F1')))
-        font = QFont()
-        font.setPointSize(7)
-        font.setBold(True)
-        painter.setFont(font)
-        text_rect = painter.boundingRect(int(x), int(y), int(w), int(h),
-                                         Qt.AlignCenter, pct_text)
-        painter.drawText(text_rect, Qt.AlignCenter, pct_text)
-
-        # 小仓ID（顶部居中）
-        painter.setPen(QPen(QColor('#8B949E')))
-        font.setPointSize(6)
-        font.setBold(False)
-        painter.setFont(font)
-        id_rect = QRectF(x, y - 2, w, 8)
-        painter.drawText(id_rect, Qt.AlignHCenter | Qt.AlignTop, actual_id)
-
     def _draw_high_silo_top(self, painter: QPainter):
-        """绘制高位储料仓上半部分（第1行小仓）"""
+        """绘制高位储料仓上半部分（第1行小仓和边框上半部分）"""
         sil = config.HIGH_SILO
         x, y = sil['position']
         h = sil['height']
         full_w = sil['width']
-        col_count = sil['columns']
-        row_count = sil['rows']
-        comp_w, comp_h = self._get_silo_comp_size(sil)
-        target_bin_id = self._get_discharge_target()
-        discharge_source_id = self._get_silo_discharge_source()
 
-        top_h = y + 8 + comp_h
+        # 计算每个小仓的尺寸（满铺大矩形框）
+        col_count = sil['columns']  # 6列
+        row_count = sil['rows']     # 2行
+        margin = 2
+        spacing = 1
+        comp_w = (full_w - margin * 2 - (col_count - 1) * spacing) / col_count
+        comp_h = (h - margin * 2) / row_count  # 两行均分整个高度
+
+        # 检查是否正在补料（路线⑤激活 + 有物料 + 小车停止在目标位置）
+        is_discharging = False
+        target_bin_id = None
+        if hasattr(self, 'controller') and self.controller:
+            route5_active = 'route5' in self.active_routes
+            has_material_on_belt = any(
+                m.current_conveyor == 'D6' and m.is_active and m.route_id == 'route5'
+                for m in self.controller.materials
+            ) if hasattr(self.controller, 'materials') else False
+            cart_moving = self.controller.cart4_is_moving
+            cart4_target = self.controller.cart4_target_position
+            cart4_current = self.controller.cart4_position
+            cart_stopped = (not cart_moving and cart4_current == cart4_target)
+            is_discharging = route5_active and has_material_on_belt and cart_stopped
+            if is_discharging:
+                target_bin_id = self.controller.route_to_bin.get('route5')
+
+        # 绘制大矩形边框
         painter.setPen(QPen(QColor('#1A5276'), 2))
         painter.setBrush(QBrush(QColor('#1a2e3a')))
-        painter.drawRect(int(x), int(y), int(full_w), int(top_h - y))
+        painter.drawRect(int(x), int(y), int(full_w), int(h))
 
-        for col in range(col_count):
-            comp_idx = col  # row=0
-            actual_id = f"S{comp_idx + 1}"
-            comp_x = x + 2 + col * (comp_w + 1)
-            comp_y = y + 8
-            self._draw_silo_compartment(painter, comp_x, comp_y, comp_w, comp_h,
-                                        actual_id, target_bin_id, discharge_source_id)
-
+        # 绘制上半部分小仓（第1行，贴近顶部）
+        painter.setPen(QPen(QColor(config.COLORS['text_secondary'])))
         font = QFont()
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+
+        # 绘制第1行小仓
+        row = 0
+        for col in range(col_count):
+            comp_id = sil['column_names'][col]
+            comp_x = x + margin + col * (comp_w + spacing)
+            comp_y = y + margin
+
+            # 获取料仓ID（高位储料仓格式 S{1-12} 对应 S1-S12）
+            comp_idx = row * col_count + col
+            actual_id = f"S{comp_idx + 1}"
+            # 获取料位
+            level = 0.0
+            if hasattr(self, 'silo_compartments') and actual_id in self.silo_compartments:
+                comp = self.silo_compartments[actual_id]
+                level = comp['current_level'] / comp['capacity'] if comp['capacity'] > 0 else 0
+
+            # 检查是否正在补料
+            is_target = (target_bin_id == actual_id)
+
+            # 绘制料仓背景（与配料站一致：先画背景框）
+            bg_color = QColor('#F5B041') if is_target else QColor(config.COLORS['batching_compartment'])
+            painter.setBrush(QBrush(bg_color))
+            painter.setPen(QPen(QColor('#1A5276'), 1))
+            painter.drawRect(int(comp_x + 1), int(comp_y + 1), int(comp_w - 2), int(comp_h - 2))
+
+            # 料位填充（与配料站颜色方案完全一致）
+            if level > 0:
+                if level > 0.8:
+                    fill_color = QColor('#27AE60')   # 绿色 - 满
+                elif level > 0.6:
+                    fill_color = QColor('#2ECC71')   # 浅绿 - 高
+                elif level > 0.4:
+                    fill_color = QColor('#F39C12')   # 橙黄 - 中高
+                elif level > 0.2:
+                    fill_color = QColor('#E67E22')   # 橙色 - 中低
+                else:
+                    fill_color = QColor('#E74C3C')   # 红色 - 低
+
+                fill_height = max(2, int((comp_h - 2) * level))
+                fill_y = comp_y + comp_h - 1 - fill_height
+                painter.setBrush(QBrush(fill_color))
+                painter.setPen(QPen(fill_color, 0))
+                painter.drawRect(int(comp_x + 2), int(fill_y), int(comp_w - 4), int(fill_height))
+
+            # 料位百分比
+            level_pct = int(level * 100)
+            text_c = '#FFFFFF' if level > 0.3 else '#888888'
+            painter.setPen(QPen(QColor(text_c)))
+            f = QFont()
+            f.setPointSize(7)
+            f.setBold(True)
+            painter.setFont(f)
+            painter.drawText(int(comp_x + 3), int(comp_y + comp_h/2 + 3), f"{level_pct}%")
+
+            # 仓编号
+            painter.setPen(QPen(QColor(config.COLORS['text'])))
+            f.setPointSize(6)
+            f.setBold(False)
+            painter.setFont(f)
+            painter.drawText(int(comp_x + comp_w - 22), int(comp_y + comp_h/2 + 3), actual_id)
+
+        # 绘制标题
+        painter.setPen(QPen(QColor(config.COLORS['text'])))
         font.setPointSize(10)
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QPen(QColor(config.COLORS['text'])))
         painter.drawText(int(x + full_w/2 - 40), int(y - 8), sil['name'])
 
     def _draw_high_silo_bottom(self, painter: QPainter):
-        """绘制高位储料仓下半部分（第2行小仓）"""
+        """绘制高位储料仓下半部分（第2行小仓，贴近底部）"""
         sil = config.HIGH_SILO
         x, y = sil['position']
         h = sil['height']
         full_w = sil['width']
+
+        # 与大矩形框统一计算
         col_count = sil['columns']
-        comp_w, comp_h = self._get_silo_comp_size(sil)
-        target_bin_id = self._get_discharge_target()
-        discharge_source_id = self._get_silo_discharge_source()
+        row_count = sil['rows']
+        margin = 2
+        spacing = 1
+        comp_w = (full_w - margin * 2 - (col_count - 1) * spacing) / col_count
+        comp_h = (h - margin * 2) / row_count
 
-        bottom_start_y = y + 8 + comp_h
-        painter.setPen(QPen(QColor('#1A5276'), 2))
-        painter.setBrush(QBrush(QColor('#1a2e3a')))
-        painter.drawRect(int(x), int(bottom_start_y), int(full_w), int(y + h - bottom_start_y))
+        # 检查是否正在补料
+        is_discharging = False
+        target_bin_id = None
+        if hasattr(self, 'controller') and self.controller:
+            route5_active = 'route5' in self.active_routes
+            has_material_on_belt = any(
+                m.current_conveyor == 'D6' and m.is_active and m.route_id == 'route5'
+                for m in self.controller.materials
+            ) if hasattr(self.controller, 'materials') else False
+            cart_moving = self.controller.cart4_is_moving
+            cart4_target = self.controller.cart4_target_position
+            cart4_current = self.controller.cart4_position
+            cart_stopped = (not cart_moving and cart4_current == cart4_target)
+            is_discharging = route5_active and has_material_on_belt and cart_stopped
+            if is_discharging:
+                target_bin_id = self.controller.route_to_bin.get('route5')
 
+        # 第2行起始位置（紧贴第1行下方，底部贴近大框底部）
+        bottom_start_y = y + margin + comp_h
+
+        font = QFont()
+        font.setPointSize(7)
+        painter.setFont(font)
+
+        row = 1
         for col in range(col_count):
-            comp_idx = 6 + col  # row=1
+            comp_x = x + margin + col * (comp_w + spacing)
+            comp_y = bottom_start_y
+
+            # 从simulator获取小仓料位
+            level = 0
+            comp_idx = row * col_count + col
             actual_id = f"S{comp_idx + 1}"
-            comp_x = x + 2 + col * (comp_w + 1)
-            comp_y = y + h - 4 - comp_h
-            self._draw_silo_compartment(painter, comp_x, comp_y, comp_w, comp_h,
-                                        actual_id, target_bin_id, discharge_source_id)
+            if hasattr(self, 'silo_compartments') and actual_id in self.silo_compartments:
+                comp = self.silo_compartments[actual_id]
+                level = comp['current_level'] / comp['capacity'] if comp['capacity'] > 0 else 0
+
+            # 检查是否正在补料到这个料仓
+            is_target = (target_bin_id == actual_id)
+
+            # 小仓颜色（根据填充状态和补料状态）
+            # 背景
+            bg_c = QColor('#F5B041') if is_target else QColor(config.COLORS['batching_compartment'])
+            painter.setBrush(QBrush(bg_c))
+            painter.setPen(QPen(QColor('#1A5276'), 1))
+            painter.drawRect(int(comp_x + 1), int(comp_y + 1), int(comp_w - 2), int(comp_h - 2))
+
+            # 料位填充（与配料站一致）
+            if level > 0:
+                if level > 0.8: fc = QColor('#27AE60')
+                elif level > 0.6: fc = QColor('#2ECC71')
+                elif level > 0.4: fc = QColor('#F39C12')
+                elif level > 0.2: fc = QColor('#E67E22')
+                else: fc = QColor('#E74C3C')
+                fh = max(2, int((comp_h - 2) * level))
+                fy = comp_y + comp_h - 1 - fh
+                painter.setBrush(QBrush(fc))
+                painter.setPen(QPen(fc, 0))
+                painter.drawRect(int(comp_x + 2), int(fy), int(comp_w - 4), int(fh))
+
+            # 百分比 + 编号
+            lp = int(level * 100)
+            tc = '#FFF' if level > 0.3 else '#888'
+            painter.setPen(QPen(QColor(tc)))
+            ff = QFont(); ff.setPointSize(7); ff.setBold(True); painter.setFont(ff)
+            painter.drawText(int(comp_x + 3), int(comp_y + comp_h/2 + 3), f'{lp}%')
+            painter.setPen(QPen(QColor(config.COLORS['text'])))
+            ff.setPointSize(6); ff.setBold(False); painter.setFont(ff)
+            painter.drawText(int(comp_x + comp_w - 22), int(comp_y + comp_h/2 + 3), actual_id)
 
     def _draw_sensors(self, painter: QPainter):
         """绘制所有接近开关传感器"""
@@ -2161,8 +2142,8 @@ class SimulationView(QWidget):
         font = QFont()
         font.setPointSize(7)
         painter.setFont(font)
-        # sensor_id 已经是完整ID如 "S-E1"
-        painter.drawText(int(x - 14), int(y + 18), sensor_id)
+        # 传感器ID贴紧右上方
+        painter.drawText(int(x + 6), int(y - 4), sensor_id)
 
     def _is_sensor_active(self, sensor_id: str) -> bool:
         """检查传感器是否激活"""
@@ -2176,8 +2157,9 @@ class SimulationView(QWidget):
             return
 
         for material in self.materials:
-            if hasattr(material, 'is_active') and material.is_active:
-                self._draw_single_material(painter, material)
+            if not getattr(material, 'is_active', False):
+                continue
+            self._draw_single_material(painter, material)
 
     def _draw_single_material(self, painter: QPainter, material):
         """绘制单个物料（堆状效果）"""
@@ -2293,15 +2275,15 @@ class SimulationView(QWidget):
         if not hasattr(self, 'controller') or not self.controller:
             return
 
+        route7_active = 'route7' in self.active_routes
         route8_active = 'route8' in self.active_routes
-        route9_active = 'route9' in self.active_routes
 
-        if not (route8_active or route9_active):
+        if not (route7_active or route8_active):
             return
 
-        # 获取起点仓（路线⑧⑨的S仓来自 route_silo_bin）
+        # 获取起点仓（路线⑦⑧的S仓来自 route_silo_bin）
+        start_bin_7 = self.controller.route_silo_bin.get('route7')
         start_bin_8 = self.controller.route_silo_bin.get('route8')
-        start_bin_9 = self.controller.route_silo_bin.get('route9')
 
         def draw_single_arrow(route_id, start_bin):
             """绘制单个出料箭头"""
@@ -2321,22 +2303,29 @@ class SimulationView(QWidget):
             if not has_material:
                 return
 
-            # D1皮带的起点位置（约 x=1157, y=522）
-            # D2皮带的起点位置（约 x=1157, y=542）
-            d1_x, d1_y = 1157, 522
+            # D1皮带起点 (更新为缩短后的位置)
+            # D2皮带起点
+            d1_x, d1_y = 1048, 522
             d2_x, d2_y = 1157, 542
 
-            # 箭头终点：连接到皮带起点
-            if route_id == 'route8':
+            # 箭头终点
+            if route_id == 'route7':
                 arrow_end_x, arrow_end_y = d1_x, d1_y
-            else:  # route9
+            else:
                 arrow_end_x, arrow_end_y = d2_x, d2_y
 
-            # 绘制垂直向下的箭头（从料仓底部到皮带起点）
             painter.save()
 
-            # 箭头颜色：绿色
-            arrow_color = QColor('#27AE60')
+            # 出料仓红色高亮框
+            hl_margin = 6
+            painter.setPen(QPen(QColor('#E74C3C'), 3))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(int(bin_x - hl_margin), int(bin_y - hl_margin),
+                           int(hl_margin * 2), int(hl_margin * 2))
+
+            # 箭头颜色：绿色闪烁
+            flash = (self.animation_time % 1000) < 500
+            arrow_color = QColor('#2ECC71') if flash else QColor('#27AE60')
             painter.setPen(QPen(arrow_color, 3))
             painter.setBrush(QBrush(arrow_color))
 
@@ -2372,9 +2361,9 @@ class SimulationView(QWidget):
 
             painter.restore()
 
-        # 绘制路线⑧和⑨的出料箭头
+        # 绘制路线⑦和⑧的出料箭头
+        draw_single_arrow('route7', start_bin_7)
         draw_single_arrow('route8', start_bin_8)
-        draw_single_arrow('route9', start_bin_9)
 
     def resizeEvent(self, event):
         """窗口大小改变事件"""

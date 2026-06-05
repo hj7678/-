@@ -272,7 +272,7 @@ FEED_POINT_PRIORITY = {
     'P1': {'feed1_1': 1, 'feed2_1': 2, 'feed1_2': 3},
     'P2': {'feed3': 1, 'silo_out': 2},
     'P3': {'feed3': 1, 'silo_out': 2},
-    'P4': {'silo_out': 1, 'feed3': 2, 'feed2_2': 3},
+    'P4': {'silo_out': 1, 'feed2_2': 2},
 }
 
 # 有激光传感器的上料点（silo_out 是储料仓，无激光传感器，默认为有料）
@@ -313,37 +313,43 @@ def _build_bin_available_routes():
             ('feed2_1', 'route3'),
         ]
 
-    # P4配料站 -> 路线④⑥⑧
+    # P4配料站 -> 路线④⑦ (D9皮带)
     for row in range(1, 8):
         bin_id = f'P4-{row}'
         result[bin_id] = [
             ('feed2_2', 'route4'),
+            ('silo_out', 'route7'),
+        ]
+
+    # P2配料站 -> 路线⑥⑧ (D8皮带)
+    for row in range(1, 8):
+        bin_id = f'P2-{row}'
+        result[bin_id] = [
             ('feed3', 'route6'),
             ('silo_out', 'route8'),
         ]
 
-    # P2配料站 -> 路线⑦⑨
-    for row in range(1, 8):
-        bin_id = f'P2-{row}'
-        result[bin_id] = [
-            ('feed3', 'route7'),
-            ('silo_out', 'route9'),
-        ]
-
-    # P3配料站 -> 路线⑦⑨
+    # P3配料站 -> 路线⑥⑧ (D8皮带)
     for row in range(1, 8):
         bin_id = f'P3-{row}'
         result[bin_id] = [
-            ('feed3', 'route7'),
-            ('silo_out', 'route9'),
+            ('feed3', 'route6'),
+            ('silo_out', 'route8'),
         ]
 
-    # 高位储料仓 -> 路线⑤（仅补料）
+    # 高位储料仓隔间 S1-1~S6-2 -> 路线⑤（仅补料）
+    for i in range(1, 7):
+        for row in range(1, 3):
+            bin_id = f'S{i}-{row}'
+            result[bin_id] = [
+                ('feed2_2', 'route5'),
+            ]
     for i in range(1, 13):
         bin_id = f'S{i}'
-        result[bin_id] = [
-            ('feed2_2', 'route5'),
-        ]
+        if bin_id not in result:
+            result[bin_id] = [
+                ('feed2_2', 'route5'),
+            ]
 
     return result
 

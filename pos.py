@@ -65,17 +65,6 @@ HIGH_SILO = {
     }
 
 # =============================================================================
-# 高位储料仓料仓物料类型映射
-# =============================================================================
-SILO_BIN_MATERIALS = {
-    'S1': 'aggregate_20mm', 'S2': 'aggregate_20mm', 'S3': 'aggregate_20mm',
-    'S4': 'aggregate_20mm', 'S5': 'aggregate_20mm', 'S6': 'aggregate_20mm',
-    'S7': 'stone_powder', 'S8': 'stone_powder',
-    'S9': 'aggregate_10mm', 'S10': 'aggregate_10mm',
-    'S11': 'aggregate_10mm', 'S12': 'aggregate_10mm',
-}
-
-# =============================================================================
 # 上料点
 # =============================================================================
 FEED_POINTS = {
@@ -129,7 +118,7 @@ SENSORS = {
     "S-E9": {"name": "S-E9", "x": 440, "y": 280, "conveyor": "E9", "distance_from_start": 0.05},  # 皮带起点5%处
     "S-E10": {"name": "S-E10", "x": 430, "y": 355, "conveyor": "E10", "distance_from_start": 0.05}, # 皮带起点5%处
     # D系列传感器（路线⑤-⑨）
-    "S-D1": {"name": "S-D1", "x": 1130, "y": 520, "conveyor": "D1", "distance_from_start": 0.05}, # 皮带起点5%处
+    "S-D1": {"name": "S-D1", "x": 1043, "y": 520, "conveyor": "D1", "distance_from_start": 0.05}, # D1起点5%处
     "S-D2": {"name": "S-D2", "x": 1130, "y": 540, "conveyor": "D2", "distance_from_start": 0.05}, # 皮带起点5%处
     "S-D2-2": {"name": "S-D2-2", "x": 880, "y": 542, "conveyor": "D2", "distance_from_start": 0.8}, # 皮带80%处
     "S-D3": {"name": "S-D3", "x": 920, "y": 480, "conveyor": "D3", "distance_from_start": 0.05}, # 皮带起点5%处
@@ -155,7 +144,7 @@ CONVEYORS = {
     "E8": {"x1": 217, "y1": 412, "x2": 397, "y2": 352, "name": "E8", "length": 59.7, "type": "NORMAL"},
     "E9": {"x1": 425, "y1": 272, "x2": 795, "y2": 390, "name": "E9", "length": 48, "type": "NORMAL"},
     "E10": {"x1": 410, "y1": 350, "x2": 608, "y2": 428, "name": "E10", "length": 35, "type": "NORMAL"},
-    "D1": {"x1": 1157, "y1": 522, "x2": 940, "y2": 520, "name": "D1", "length": 65.8, "type": "NORMAL"},
+    "D1": {"x1": 1048, "y1": 522, "x2": 940, "y2": 520, "name": "D1", "length": 65.8, "type": "NORMAL"},
     "D13": {"x1": 1157, "y1": 392, "x2": 1157, "y2": 542, "name": "D13", "length": 15.8, "type": "NORMAL"},
     "D2": {"x1": 1157, "y1": 542, "x2": 807, "y2": 542, "name": "D2", "length": 65.8, "type": "NORMAL"},
     "D3": {"x1": 940, "y1": 520, "x2": 820, "y2": 360, "name": "D3", "length": 36.6, "type": "NORMAL"},
@@ -171,76 +160,60 @@ CONVEYORS = {
 # 上料路线配置（生产模式使用）
 # =============================================================================
 FEED_ROUTES = {
-    # 路线①: 上料点1-1 → E1 → E4 → 中转斗1 → E8 → 中转斗3 → E10 → 中转斗4 → D7 → P1
-    # D7皮带终点 → 石粉
+    # 路线①: feed1_1 → E1 → E4 → hopper1 → E8 → hopper3 → E10 → hopper4 → D7 → P1
     'route1': {
         'name': '路线①', 'conveyors': ['E1', 'E4', 'E8', 'E10', 'D7'],
         'hoppers': [None, 'hopper1', 'hopper3', 'hopper4', None],
         'destination': 'P1', 'material_types': ['stone_powder'],
         'feed_point': 'feed1_1'
     },
-    # 路线②: 上料点1-2 → E2 → E4 → 中转斗1 → E8 → 中转斗3 → E10 → 中转斗4 → D7 → P1
-    # D7皮带终点 → 石粉
+    # 路线②: feed1_2 → E2 → E4 → hopper1 → E8 → hopper3 → E10 → hopper4 → D7 → P1
     'route2': {
         'name': '路线②', 'conveyors': ['E2', 'E4', 'E8', 'E10', 'D7'],
         'hoppers': [None, 'hopper1', 'hopper3', 'hopper4', None],
         'destination': 'P1', 'material_types': ['stone_powder'],
         'feed_point': 'feed1_2'
     },
-    # 路线③: 上料点2-1 → E5 →中转斗1- E8 → 中转斗3 → E10 → 中转斗4 → D7 → P1
-    # D7皮带终点 → 石粉
+    # 路线③: feed2_1 → E5 → hopper1 → E8 → hopper3 → E10 → hopper4 → D7 → P1
     'route3': {
         'name': '路线③', 'conveyors': ['E5', 'E8', 'E10', 'D7'],
         'hoppers': ['hopper1', 'hopper3', 'hopper4', None],
         'destination': 'P1', 'material_types': ['stone_powder'],
         'feed_point': 'feed2_1'
     },
-    # 路线④: 上料点2-2 → E6 → E7 → 中转斗2 → E9 → 中转斗6 → D9 → P4
-    # D9皮带终点 → 20mm碎石
+    # 路线④: feed2_2 → E6 → E7 → hopper2 → E9 → hopper6 → D9 → P4
     'route4': {
         'name': '路线④', 'conveyors': ['E6', 'E7', 'E9', 'D9'],
-        'hoppers': [None,'hopper2', 'hopper6',  None],
+        'hoppers': [None, 'hopper2', 'hopper6', None],
         'destination': 'P4', 'material_types': ['aggregate_20mm'],
         'feed_point': 'feed2_2'
     },
-    # 路线⑤: 上料点2-2 → E6 → E7 → 中转斗2 → E9 → 中转斗6 → D5 → 中转斗7 → D6 → C1-C2-6
-    # D6皮带/高位储料仓终点 → 物料种类由目标S仓决定
+    # 路线⑤: feed2_2 → E6 → E7 → hopper2 → E9 → hopper6 → D5 → hopper7 → D6 → silo
     'route5': {
         'name': '路线⑤', 'conveyors': ['E6', 'E7', 'E9', 'D5', 'D6'],
         'hoppers': [None, 'hopper2', 'hopper6', 'hopper7', None],
-        'destination': '高位仓', 'material_types': ['stone_powder', 'aggregate_10mm', 'aggregate_20mm'],
+        'destination': '高位仓', 'material_types': None,
         'feed_point': 'feed2_2'
     },
-    # 路线⑥: 上料点3 → D13 → D1 → D3 → D9 → P4
-    # D9皮带终点 → 20mm碎石
+    # 路线⑥: feed3 → D13 → D2 → D4 → hopper5 → D8 → P2/P3
     'route6': {
-        'name': '路线⑥', 'conveyors': ['D13', 'D1', 'D3', 'D9'],
-        'hoppers': [None, None, None, None],
-        'destination': 'P4', 'material_types': ['aggregate_20mm'],
-        'feed_point': 'feed3'
-    },
-    # 路线⑦: 上料点3 → D13 → D2 → D4 → 中转斗5 → D8 → P2/P3
-    # D8皮带终点 → P2列石粉，P3列10mm碎石
-    'route7': {
-        'name': '路线⑦', 'conveyors': ['D13', 'D2', 'D4', 'D8'],
+        'name': '路线⑥', 'conveyors': ['D13', 'D2', 'D4', 'D8'],
         'hoppers': [None, None, 'hopper5', None],
-        'destination': 'P2/P3', 'material_types': None,  # 根据选择的小仓P2/P3决定
+        'destination': 'P2/P3', 'material_types': None,
         'feed_point': 'feed3'
     },
-    # 路线⑧: 高位料仓某小仓 → D1 → D3 → D9 → P4
-    # D9皮带终点 → 20mm碎石
-    'route8': {
-        'name': '路线⑧', 'conveyors': ['D1', 'D3', 'D9'],
+    # 路线⑦: silo_out → D1 → D3 → D9 → P4 (无中转斗)
+    'route7': {
+        'name': '路线⑦', 'conveyors': ['D1', 'D3', 'D9'],
         'hoppers': [None, None, None],
         'destination': 'P4', 'material_types': ['aggregate_20mm'],
         'feed_point': 'silo_out'
     },
-    # 路线⑨: 高位料仓某小仓 → D2 → D4 → 中转斗5 → D8 → P2/P3
-    # D8皮带终点 → P2列石粉，P3列10mm碎石
-    'route9': {
-        'name': '路线⑨', 'conveyors': [ 'D2', 'D4', 'D8'],
+    # 路线⑧: silo_out → D2 → D4 → hopper5 → D8 → P2/P3
+    'route8': {
+        'name': '路线⑧', 'conveyors': ['D2', 'D4', 'D8'],
         'hoppers': [None, 'hopper5', None],
-        'destination': 'P2/P3', 'material_types': None,  # 根据选择的小仓P2/P3决定
+        'destination': 'P2/P3', 'material_types': None,
         'feed_point': 'silo_out'
     },
 }
@@ -285,17 +258,13 @@ CLEARING_ROUTE_CONVEYORS = {
     ('hopper6', 'route5'): ['E9'],
     ('hopper7', 'route5'): ['D5'],
 
-    # 路线⑥: 上料点3 → feed3 → D13 → D1 → D3 → D9 → P4（无中转斗）
-    # 无中转斗，料仓接收整条路线所有皮带
+    # 路线⑥: feed3 → D13 → D2 → D4 → hopper5 → D8 → P2/P3
+    ('hopper5', 'route6'): ['D13', 'D2', 'D4'],
 
-    # 路线⑦: 上料点3 → feed3 → D13 → D2 → hopper5 → D4 → D8 → P2/P3
-    ('hopper5', 'route7'): ['D13', 'D2'],
+    # 路线⑦: silo_out → D1 → D3 → D9 → P4（无中转斗）
 
-    # 路线⑧: 高位料仓 → silo_out → D1 → D3 → D9 → P4（无中转斗）
-    # 无中转斗，料仓接收整条路线所有皮带
-
-    # 路线⑨: 高位料仓 → silo_out → D2 → hopper5 → D4 → D8 → P2/P3
-    ('hopper5', 'route9'): ['D2'],
+    # 路线⑧: silo_out → D2 → D4 → hopper5 → D8 → P2/P3
+    ('hopper5', 'route8'): ['D2', 'D4'],
 }
 
 # =============================================================================
@@ -364,6 +333,13 @@ CART_SENSORS = {
 # =============================================================================
 # 辅助函数
 # =============================================================================
+
+SILO_BIN_MATERIALS = {
+    'S1': 'aggregate_20mm', 'S2': 'aggregate_20mm', 'S3': 'aggregate_20mm',
+    'S4': 'aggregate_20mm', 'S5': 'aggregate_20mm', 'S6': 'aggregate_20mm',
+    'S7': 'stone_powder', 'S8': 'stone_powder',
+    'S9': 'aggregate_10mm', 'S10': 'aggregate_10mm', 'S11': 'aggregate_10mm', 'S12': 'aggregate_10mm',
+}
 
 def get_all_conveyors():
     result = {}

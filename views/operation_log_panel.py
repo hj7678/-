@@ -20,15 +20,14 @@ class LogSection(QWidget):
         self._title_label = QLabel(title)
         self._title_label.setStyleSheet("""
             QLabel {
-                font-size: 11px; font-weight: bold; color: #4A90D9;
-                padding: 1px 4px;
+                font-size: 14px; font-weight: bold; color: #4A90D9;
+                padding: 2px 6px;
             }
         """)
         layout.addWidget(self._title_label)
 
         self._text = QTextEdit()
         self._text.setReadOnly(True)
-        self._text.setMaximumHeight(120)
         self._text.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self._text.setStyleSheet(f"""
             QTextEdit {{
@@ -36,9 +35,9 @@ class LogSection(QWidget):
                 color: #C0C8D0;
                 border: 1px solid {config.COLORS['panel_border']};
                 border-radius: 4px;
-                font-size: 11px;
+                font-size: 13px;
                 font-family: "Consolas", "Microsoft YaHei", monospace;
-                padding: 2px;
+                padding: 3px;
             }}
             QScrollBar:vertical {{
                 background: #21262d; width: 6px;

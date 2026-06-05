@@ -16,6 +16,7 @@ class RouteState(Enum):
     FEEDING = "feeding"
     CLEARING = "clearing"
     WAITING = "waiting"
+    STANDBY = "standby"
 
 
 @dataclass

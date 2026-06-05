@@ -15,6 +15,7 @@ from scheduling.config import (
     SAFE_DURATION_THRESHOLD, URGENCY_PENALTY_FACTOR,
     STOCK_REFILL_BELOW, STOCK_REFILL_LINE_ORDER, STOCK_TRIGGER_BELOW,
     STOCK_REFILL_BELOW_BOOST, STOCK_TRIGGER_BELOW_BOOST,
+    STOCK_CRITICAL,
     COMPANY_STARVATION_PENALTY, LINE_STOP_PENALTY, PENALTY_BASE,
 )
 from scheduling.sched_types import BinState, StepDetail, ScheduleResult
@@ -266,7 +267,7 @@ class SchedulingEngine:
             if total_time <= eps:
                 score = PENALTY_BASE + urgency + company_penalty
             else:
-                score = 1000 * (total_time - total_tf) / total_time + urgency + company_penalty
+                score = 10 * (total_time - total_tf) + urgency + company_penalty
             return score, True, total_time, 0.0, res
         else:
             score = PENALTY_BASE + 1000 * total_stop + company_penalty
@@ -614,15 +615,33 @@ class SchedulingEngine:
         eligible_ids = [fwd_func(b.bin_id) for b in eligible]
 
         if self.col_count == 1:
-            start_pos = cart_position if cart_position is not None else 7
+            start_pos = cart_position if cart_position is not None else 1
             start_prev = start_pos
         else:
-            start_pos = cart_position if cart_position is not None else 7
+            start_pos = self._get_pos(cart_position) if cart_position is not None else self._get_pos(CAR_START_WH)
             start_prev = cart_position if cart_position is not None else CAR_START_WH
 
         current_state = {'sum_tf': 0.0, 'pos': start_pos, 'prev_wh': start_prev}
 
-        opt_ids, info = self.optimize(eligible_ids, current_state, wh_data, eligible_ids)
+        # 关键料仓优先：料位 ≤ STOCK_CRITICAL 的料仓置顶
+        critical_bins = [(b, fwd_func(b.bin_id)) for b in eligible
+                         if b.stock <= STOCK_CRITICAL]
+        if critical_bins:
+            if self.col_count == 2:
+                critical_bins.sort(key=lambda x: (x[1] <= 7, x[0].stock))
+            else:
+                critical_bins.sort(key=lambda x: x[0].stock)
+            priority_prefix = [wh_id for _, wh_id in critical_bins]
+            remaining_ids = [wid for wid in eligible_ids if wid not in priority_prefix]
+            if remaining_ids:
+                opt_ids, info = self.optimize(
+                    remaining_ids, current_state, wh_data, remaining_ids)
+                opt_ids = priority_prefix + opt_ids
+            else:
+                opt_ids = priority_prefix
+                info = {}
+        else:
+            opt_ids, info = self.optimize(eligible_ids, current_state, wh_data, eligible_ids)
 
         # 按最优序列逐步仿真，收集 StepDetail
         current_state = {'sum_tf': 0.0, 'pos': start_pos, 'prev_wh': start_prev}

@@ -28,6 +28,7 @@ class RouteState(Enum):
     FEEDING = "feeding"     # 正常补料
     CLEARING = "clearing"   # 清空余料
     WAITING = "waiting"     # 停机待料
+    STANDBY = "standby"     # 节能待机
     MOVING_TO_TARGET = "moving_to_target"  # 小车移动到目标位置中
 
 
@@ -48,6 +49,10 @@ class RouteContext:
     cart_target_position: int = 1               # 小车目标位置（Cart1-3使用）
     cart_moving: bool = False                  # 小车是否在移动中
     previous_state: Optional[str] = None       # 上一状态（用于检测CLEARING→FEEDING切换）
+    clearing_strategy: str = 'reverse'         # 清空策略: reverse/sequential/column_switch
+    clearing_start_time: float = 0.0           # 清空开始时间
+    early_moved_from_clearing: bool = False    # 是否已提前移动小车
+    feeding_start_time: float = 0.0            # 开始FEEDING的时间戳
 
 
 class RouteStateManager:
@@ -56,54 +61,37 @@ class RouteStateManager:
     # 路线到中转斗的映射
     # 注意：中转斗对应关系应与pos.py中FEED_ROUTES的hoppers列表一致
     ROUTE_HOPPERS = {
-        'route1': ['hopper1', 'hopper3', 'hopper4'],  # 无hopper5
-        'route2': ['hopper1', 'hopper3', 'hopper4'],  # 无hopper5
-        'route3': ['hopper1', 'hopper3', 'hopper4'],  # 无hopper5
+        'route1': ['hopper1', 'hopper3', 'hopper4'],
+        'route2': ['hopper1', 'hopper3', 'hopper4'],
+        'route3': ['hopper1', 'hopper3', 'hopper4'],
         'route4': ['hopper2', 'hopper6'],
         'route5': ['hopper2', 'hopper6', 'hopper7'],
-        'route6': [],  # 无中转斗
-        'route7': ['hopper5'],
-        'route8': [],  # 无中转斗
-        'route9': ['hopper5'],
+        'route6': ['hopper5'],
+        'route7': [],
+        'route8': ['hopper5'],
     }
 
-    # 路线到终点小车的映射
     ROUTE_CARTS = {
-        'route1': 'Cart1',
-        'route2': 'Cart1',
-        'route3': 'Cart1',
-        'route4': 'Cart3',
-        'route5': 'Cart4',
-        'route6': 'Cart3',
-        'route7': 'Cart2',
-        'route8': 'Cart3',
-        'route9': 'Cart2',
+        'route1': 'Cart1', 'route2': 'Cart1', 'route3': 'Cart1',
+        'route4': 'Cart3', 'route5': 'Cart4',
+        'route6': 'Cart2', 'route7': 'Cart3', 'route8': 'Cart2',
     }
 
-    # 路线到上料点的映射
     ROUTE_FEED_POINTS = {
-        'route1': 'feed1_1',
-        'route2': 'feed1_2',
-        'route3': 'feed2_1',
-        'route4': 'feed2_2',
-        'route5': 'feed2_2',
-        'route6': 'feed3',
-        'route7': 'feed3',
-        'route8': 'silo_out',
-        'route9': 'silo_out',
+        'route1': 'feed1_1', 'route2': 'feed1_2', 'route3': 'feed2_1',
+        'route4': 'feed2_2', 'route5': 'feed2_2',
+        'route6': 'feed3', 'route7': 'silo_out', 'route8': 'silo_out',
     }
 
-    # 路线经过的皮带上接近开关列表
     ROUTE_PROXIMITY_SENSORS = {
         'route1': ['S-E1', 'S-E4', 'S-E8', 'S-E10', 'S-D7'],
         'route2': ['S-E2', 'S-E4', 'S-E8', 'S-E10', 'S-D7'],
         'route3': ['S-E5', 'S-E8', 'S-E10', 'S-D7'],
         'route4': ['S-E6', 'S-E7', 'S-E9', 'S-D9'],
-        'route5': ['S-E6', 'S-E7', 'S-E9', 'S-D9', 'S-D5', 'S-D6'],
-        'route6': ['S-D13', 'S-D1', 'S-D3', 'S-D9'],
-        'route7': ['S-D13', 'S-D2', 'S-D4', 'S-D8'],
-        'route8': ['S-D1', 'S-D3', 'S-D9'],
-        'route9': ['S-D2', 'S-D4', 'S-D8'],
+        'route5': ['S-E6', 'S-E7', 'S-E9', 'S-D5', 'S-D6'],
+        'route6': ['S-D13', 'S-D2', 'S-D2-2', 'S-D4', 'S-D8'],
+        'route7': ['S-D1', 'S-D3', 'S-D9'],
+        'route8': ['S-D2', 'S-D2-2', 'S-D4', 'S-D8'],
     }
 
     # 资源锁
@@ -257,6 +245,34 @@ class RouteStateManager:
         ctx.cleared_sensors.clear()
         ctx.feeding_start_time = 0.0
         print(f"[RECOVER_FEEDING] route={route_id} previous_state=clearing pending_release={dict(ctx.pending_release_weights)} final_weights={dict(ctx.final_weights)}")
+        return True
+
+    def enter_standby(self, route_id: str):
+        """从WAITING进入STANDBY（节能待机）"""
+        ctx = self.routes.get(route_id)
+        if ctx and ctx.state == RouteState.WAITING:
+            self._transition(ctx, RouteState.STANDBY)
+
+    def exit_standby(self, route_id: str, target_bin: str = None) -> bool:
+        """从STANDBY退出，进入MOVING_TO_TARGET"""
+        ctx = self.routes.get(route_id)
+        if not ctx or ctx.state != RouteState.STANDBY:
+            return False
+        if target_bin:
+            ctx.target_bin = target_bin
+        ctx.cart_moving = True
+        self._transition(ctx, RouteState.MOVING_TO_TARGET)
+        return True
+
+    def early_move_from_clearing(self, route_id: str, target_bin: str, cart_target_position: int) -> bool:
+        """顺序策略：清空3秒后提前移动小车到下一料仓（保持CLEARING状态）"""
+        ctx = self.routes.get(route_id)
+        if not ctx or ctx.state != RouteState.CLEARING:
+            return False
+        ctx.target_bin = target_bin
+        ctx.cart_target_position = cart_target_position
+        ctx.cart_moving = True
+        ctx.early_moved_from_clearing = True
         return True
 
     def update_sensor_cleared(self, route_id: str, sensor_id: str):

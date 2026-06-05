@@ -21,49 +21,50 @@ BELT_TO_COL_PREFIX = {'D7': 'P1', 'D8': 'P2', 'D9': 'P4'}
 
 # D8 14仓模式的产线名称映射
 LINE_NAMES_D8 = {
-    1: "1 石粉", 8: "1 碎石",
-    2: "2 石粉", 9: "2 碎石",
-    3: "3 石粉", 10: "3 碎石",
+    1: "7 石粉", 8: "7 碎石",
+    2: "6 石粉", 9: "6 碎石",
+    3: "5 石粉", 10: "5 碎石",
     4: "4 石粉", 11: "4 碎石",
-    5: "5 石粉", 12: "5 碎石",
-    6: "6 石粉", 13: "6 碎石",
-    7: "7 石粉", 14: "7 碎石",
+    5: "3 石粉", 12: "3 碎石",
+    6: "2 石粉", 13: "2 碎石",
+    7: "1 石粉", 14: "1 碎石",
 }
 
 # D8 14仓模式公司归属
 COMPANY_LINES_D8 = {
-    'A': [5, 6, 7],
-    'B': [3, 4],
-    'C': [1, 2],
+    'A': [1, 2, 3],    # P2 rows 7,6,5
+    'B': [4, 5],       # P2 rows 4,3
+    'C': [6, 7],       # P2 rows 2,1
 }
 
 
 def bin_id_to_wh(bin_id: str) -> int:
-    """P1-3 -> 3, P4-7 -> 7（7仓单列模式）"""
-    return int(bin_id.split('-')[1])
+    """P1-7 -> 1, P1-1 -> 7（底行→小号，7仓单列模式）"""
+    row_num = int(bin_id.split('-')[1])
+    return 7 - row_num + 1  # 反序: 7→1, 1→7
 
 
 def d8_bin_id_to_wh(bin_id: str) -> int:
-    """P2-1 -> 1, P2-7 -> 7, P3-1 -> 8, P3-7 -> 14"""
+    """P2-7 -> 1, P2-1 -> 7, P3-7 -> 8, P3-1 -> 14（底行→小号）"""
     col, row = bin_id.split('-')
     row_num = int(row)
     if col == 'P2':
-        return row_num
+        return 7 - row_num + 1  # P2反序: 7→1, 1→7
     else:
-        return row_num + 7
+        return 14 - row_num + 1  # P3反序: 7→8, 1→14
 
 
 def d8_wh_to_bin_id(wh_id: int) -> str:
-    """1 -> P2-1, 8 -> P3-1"""
+    """1 -> P2-7(底), 7 -> P2-1(顶), 8 -> P3-7(底), 14 -> P3-1(顶)"""
     if wh_id <= 7:
-        return f"P2-{wh_id}"
+        return f"P2-{7 - wh_id + 1}"  # 反序: 1→7, 7→1
     else:
-        return f"P3-{wh_id - 7}"
+        return f"P3-{14 - wh_id + 1}"  # 反序: 8→7, 14→1
 
 
 def make_wh_to_bin_id(prefix: str):
-    """返回 wh_id → bin_id 函数（7仓模式），如 prefix='P1' → 'P1-3'"""
+    """返回 wh_id → bin_id 函数（7仓反序），如 wh1→P1-7, wh7→P1-1"""
     def _convert(wh_id: int) -> str:
-        return f"{prefix}-{wh_id}"
+        return f"{prefix}-{7 - wh_id + 1}"  # 反序: 1→7, 7→1
     return _convert
 

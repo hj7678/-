@@ -21,11 +21,11 @@ FEED_POINTS_WITH_LASER_SENSOR = ['feed1_1', 'feed1_2', 'feed2_1', 'feed2_2', 'fe
 
 # 激光传感器到路线的映射
 LASER_TO_ROUTE_MAPPING = {
-    'feed1_1': ['route1'],  # 上料点1-1 -> 路线①
-    'feed1_2': ['route2'],  # 上料点1-2 -> 路线②
-    'feed2_1': ['route3'],  # 上料点2-1 -> 路线③
-    'feed2_2': ['route4', 'route5'],  # 上料点2-2 -> 路线④⑤
-    'feed3': ['route6', 'route7'],  # 上料点3 -> 路线⑥⑦
+    'feed1_1': ['route1'],
+    'feed1_2': ['route2'],
+    'feed2_1': ['route3'],
+    'feed2_2': ['route4', 'route5'],
+    'feed3': ['route6'],
 }
 
 
@@ -35,10 +35,10 @@ LASER_TO_ROUTE_MAPPING = {
 # D9 -> P4-1 到 P4-7
 # D6 -> S1 到 S12（高位储料仓）
 ROUTES_REQUIRING_BIN_SELECTION: Set[str] = {
-    'route1', 'route2', 'route3',  # D7
-    'route4', 'route6', 'route8',   # D9
-    'route7', 'route9',             # D8
-    'route5',                       # D6 -> 高位储料仓
+    'route1', 'route2', 'route3',  # D7 → P1
+    'route4', 'route7',             # D9 → P4
+    'route6', 'route8',             # D8 → P2/P3
+    'route5',                       # D6 → 高位储料仓
 }
 
 
@@ -59,15 +59,16 @@ class ControlPanel(QWidget):
     cart_sensor_changed = pyqtSignal(str, dict)  # 小车传感器改变信号 (cart_id, {sensor_type: value})
     bin_levels_uniform_requested = pyqtSignal(float)  # 统一料位百分比 0-100
     bin_levels_random_requested = pyqtSignal()  # 随机初始化料位
-    consumption_random_requested = pyqtSignal()
-    consumption_uniform_requested = pyqtSignal(float)
-    consumption_toggled = pyqtSignal(bool)
     tcp_communication_toggled = pyqtSignal(bool)  # 下位机通信开关
     udp_sender_toggled = pyqtSignal(bool)  # UDP 二进制发送开关
     diagnosis_mode_changed = pyqtSignal(str)   # 诊断模式切换 "local" / "tcp"
     diagnosis_tcp_toggled = pyqtSignal(bool)   # TCP 诊断服务连接开关
     scheduling_tcp_toggled = pyqtSignal(bool)  # TCP 调度服务连接开关
-    auto_mode_toggled = pyqtSignal(bool)  # 手动/自动模式切换
+    auto_mode_toggled = pyqtSignal(bool)  # 手动/自动模式切换（兼容保留）
+    belt_auto_mode_toggled = pyqtSignal(str, bool)  # 单条皮带的手动/自动模式切换 (belt_id, enabled)
+    consumption_toggled = pyqtSignal(bool)
+    consumption_uniform_requested = pyqtSignal(float)
+    consumption_random_requested = pyqtSignal()
     maintenance_line_added = pyqtSignal(int)    # 产线检修添加 (line_num)
     maintenance_bin_added = pyqtSignal(str)     # 料仓检修添加 (bin_id)
     maintenance_clear_requested = pyqtSignal()  # 清除全部检修
@@ -96,6 +97,8 @@ class ControlPanel(QWidget):
 
         # 激光传感器状态复选框
         self.laser_sensor_checkboxes: Dict[str, QCheckBox] = {}
+        # 皮带自动模式按钮
+        self.belt_auto_buttons: Dict[str, QPushButton] = {}
 
         self._init_ui()
 
@@ -120,9 +123,15 @@ class ControlPanel(QWidget):
         """)
         main_layout.addWidget(title)
 
+        # 通信/诊断
+        operation_group = self._create_operation_group()
+        main_layout.addWidget(operation_group)
+
+        # 料位初始化
         bin_level_group = self._create_bin_level_init_group()
         main_layout.addWidget(bin_level_group)
 
+        # 消耗速度设置（紧邻料位）
         consumption_group = self._create_consumption_rate_group()
         main_layout.addWidget(consumption_group)
 
@@ -130,7 +139,7 @@ class ControlPanel(QWidget):
         speed_group = self._create_speed_control_group()
         main_layout.addWidget(speed_group)
 
-        # 激光传感器设置组（上料点原料状态）
+        # 激光传感器设置组
         laser_group = self._create_laser_sensor_group()
         main_layout.addWidget(laser_group)
 
@@ -141,10 +150,6 @@ class ControlPanel(QWidget):
         # 上料路线控制组
         route_group = self._create_route_control_group()
         main_layout.addWidget(route_group)
-
-        # 操作按钮组
-        operation_group = self._create_operation_group()
-        main_layout.addWidget(operation_group)
 
         # 传感器故障诊断组
         fault_group = self._create_fault_diagnosis_group()
@@ -165,9 +170,7 @@ class ControlPanel(QWidget):
 
         # 速度标签和滑块一行
         speed_row_layout = QHBoxLayout()
-        speed_label = QLabel("速度:")
-        speed_label.setStyleSheet("color: #ECF0F1;")
-        speed_row_layout.addWidget(speed_label)
+        speed_row_layout.addWidget(QLabel("速度:"))
         self.speed_label = QLabel(f"{config.DEFAULT_SPEED:.1f}")
         self.speed_label.setAlignment(Qt.AlignRight)
         self.speed_label.setStyleSheet("font-weight: bold; color: #4A90D9;")
@@ -213,12 +216,9 @@ class ControlPanel(QWidget):
         layout.addWidget(info)
 
         row = QHBoxLayout()
-        level_label = QLabel("料位%:")
-        level_label.setStyleSheet("color: #ECF0F1;")
-        row.addWidget(level_label)
+        row.addWidget(QLabel("料位%:"))
         self._bin_level_edit = QLineEdit()
         self._bin_level_edit.setPlaceholderText("0–100，一位小数")
-        self._bin_level_edit.setStyleSheet("color: #ECF0F1; background-color: #21262d;")
         self._bin_level_edit.setFixedWidth(72)
         val = QDoubleValidator(0.0, 100.0, 1, self)
         val.setNotation(QDoubleValidator.StandardNotation)
@@ -255,72 +255,131 @@ class ControlPanel(QWidget):
         self.bin_levels_uniform_requested.emit(v)
 
     def _create_consumption_rate_group(self) -> QGroupBox:
-        """消耗速度设置（各配料站料仓）"""
+        """创建消耗速度设置组"""
         group = QGroupBox("消耗速度设置")
         group.setStyleSheet(styles.get_group_box_style())
         layout = QVBoxLayout()
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
-        info = QLabel("统一设置全部料仓消耗速度(t/s)，或随机 0.05–0.1。")
-        info.setStyleSheet("color: #8B949E; font-size: 10px;")
-        layout.addWidget(info)
-
-        row = QHBoxLayout()
-        rate_label = QLabel("速度:")
-        rate_label.setStyleSheet("color: #ECF0F1;")
-        row.addWidget(rate_label)
         self._consumption_rate_edit = QLineEdit()
-        self._consumption_rate_edit.setPlaceholderText("0.05–0.2 t/s")
-        self._consumption_rate_edit.setStyleSheet("color: #ECF0F1; background-color: #21262d;")
-        self._consumption_rate_edit.setFixedWidth(72)
-        val = QDoubleValidator(0.01, 1.0, 3, self)
-        val.setNotation(QDoubleValidator.StandardNotation)
-        self._consumption_rate_edit.setValidator(val)
-        row.addWidget(self._consumption_rate_edit)
+        self._consumption_rate_edit.setPlaceholderText("消耗速度 (t/s), 默认0.01")
+        self._consumption_rate_edit.setStyleSheet(styles.get_line_edit_style())
+        layout.addWidget(self._consumption_rate_edit)
 
+        btn_row = QHBoxLayout()
         apply_btn = QPushButton("应用")
-        apply_btn.setStyleSheet(styles.get_small_button_style('#27AE60'))
+        apply_btn.setStyleSheet("""
+            QPushButton { background-color: #2C3E50; color: #8B949E; border: 2px solid #34495E;
+            border-radius: 4px; font-weight: bold; padding: 4px 8px; }
+            QPushButton:hover { border-color: #4A90D9; }
+        """)
         apply_btn.clicked.connect(self._on_consumption_rate_uniform_apply)
-        row.addWidget(apply_btn)
-        layout.addLayout(row)
+        btn_row.addWidget(apply_btn)
 
-        rand_btn = QPushButton("随机初始化 (0.05–0.1 t/s)")
-        rand_btn.setStyleSheet(styles.get_small_button_style('#8E44AD'))
+        rand_btn = QPushButton("随机 (0.05-0.1)")
+        rand_btn.setStyleSheet(apply_btn.styleSheet())
         rand_btn.clicked.connect(lambda: self.consumption_random_requested.emit())
-        layout.addWidget(rand_btn)
+        btn_row.addWidget(rand_btn)
+        layout.addLayout(btn_row)
 
-        self._consumption_toggle_btn = QPushButton("启动消耗")
+        self._consumption_toggle_btn = QPushButton("消耗: 关")
         self._consumption_toggle_btn.setCheckable(True)
-        self._consumption_toggle_btn.setStyleSheet(styles.get_small_button_style('#E67E22'))
+        self._consumption_toggle_btn.setChecked(False)
+        self._consumption_toggle_btn.setMinimumHeight(28)
+        self._consumption_toggle_btn.setStyleSheet("""
+            QPushButton { background-color: #2C3E50; color: #8B949E; border: 2px solid #34495E;
+            border-radius: 4px; font-weight: bold; }
+            QPushButton:checked { background-color: #1B5E20; color: #00FF00; border-color: #00FF00; }
+        """)
         self._consumption_toggle_btn.clicked.connect(self._on_consumption_toggle)
         layout.addWidget(self._consumption_toggle_btn)
 
         group.setLayout(layout)
         return group
 
-    def _on_consumption_toggle(self, checked: bool):
-        if checked:
-            self._consumption_toggle_btn.setText("停止消耗")
-            self._consumption_toggle_btn.setStyleSheet(styles.get_small_button_style('#E74C3C'))
-        else:
-            self._consumption_toggle_btn.setText("启动消耗")
-            self._consumption_toggle_btn.setStyleSheet(styles.get_small_button_style('#E67E22'))
-        self.consumption_toggled.emit(checked)
-
     def _on_consumption_rate_uniform_apply(self):
-        text = self._consumption_rate_edit.text().strip().replace(',', '.')
-        if not text:
-            QMessageBox.warning(self, "消耗速度设置", "请输入消耗速度。")
-            return
         try:
-            v = round(float(text), 3)
+            v = float(self._consumption_rate_edit.text())
         except ValueError:
-            QMessageBox.warning(self, "消耗速度设置", "请输入有效数字。")
-            return
-        if v < 0.01 or v > 1.0:
-            QMessageBox.warning(self, "消耗速度设置", "消耗速度应在 0.01–1.0 t/s 之间。")
+            QMessageBox.warning(self, "消耗速度", "请输入有效数值。")
             return
         self.consumption_uniform_requested.emit(v)
+
+    def _on_consumption_toggle(self, checked: bool):
+        self._consumption_toggle_btn.setText("消耗: 开" if checked else "消耗: 关")
+        self.consumption_toggled.emit(checked)
+
+    def _create_maintenance_group(self) -> QGroupBox:
+        """创建检修设置组"""
+        group = QGroupBox("检修设置")
+        group.setStyleSheet(styles.get_group_box_style())
+        layout = QVBoxLayout()
+        layout.setSpacing(4)
+
+        # 产线检修
+        line_layout = QHBoxLayout()
+        self.maintenance_line_combo = QComboBox()
+        self.maintenance_line_combo.addItems([f"产线 {i}" for i in range(1, 8)])
+        self.maintenance_line_combo.setStyleSheet(styles.get_combo_box_style())
+        line_layout.addWidget(self.maintenance_line_combo, 1)
+        line_add_btn = QPushButton("添加")
+        line_add_btn.setStyleSheet("""
+            QPushButton { background-color: #E67E22; color: white; border: none;
+            border-radius: 3px; font-weight: bold; padding: 4px 8px; }
+        """)
+        line_add_btn.clicked.connect(self._on_add_maintenance_line)
+        line_layout.addWidget(line_add_btn)
+        layout.addLayout(line_layout)
+
+        # 料仓检修
+        bin_layout = QHBoxLayout()
+        self.maintenance_bin_combo = QComboBox()
+        all_bins = []
+        for col in ['P1', 'P2', 'P3', 'P4']:
+            for row in range(1, 8):
+                all_bins.append(f"{col}-{row}")
+        for s in ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']:
+            for row in range(1, 3):
+                all_bins.append(f"{s}-{row}")
+        self.maintenance_bin_combo.addItems(all_bins)
+        self.maintenance_bin_combo.setStyleSheet(styles.get_combo_box_style())
+        bin_layout.addWidget(self.maintenance_bin_combo, 1)
+        bin_add_btn = QPushButton("添加")
+        bin_add_btn.setStyleSheet(line_add_btn.styleSheet())
+        bin_add_btn.clicked.connect(self._on_add_maintenance_bin)
+        bin_layout.addWidget(bin_add_btn)
+        layout.addLayout(bin_layout)
+
+        # 列表和清除
+        self.maintenance_list_label = QLabel("检修: 无")
+        self.maintenance_list_label.setStyleSheet("color: #E67E22; font-size: 10px;")
+        self.maintenance_list_label.setWordWrap(True)
+        layout.addWidget(self.maintenance_list_label)
+
+        clear_btn = QPushButton("清除全部检修")
+        clear_btn.setStyleSheet("""
+            QPushButton { background-color: #E74C3C; color: white; border: none;
+            border-radius: 4px; font-weight: bold; padding: 4px 8px; }
+        """)
+        clear_btn.clicked.connect(lambda: self.maintenance_clear_requested.emit())
+        layout.addWidget(clear_btn)
+
+        group.setLayout(layout)
+        return group
+
+    def _on_add_maintenance_line(self):
+        line_num = self.maintenance_line_combo.currentIndex() + 1
+        self.maintenance_line_added.emit(line_num)
+
+    def _on_add_maintenance_bin(self):
+        bin_id = self.maintenance_bin_combo.currentText()
+        self.maintenance_bin_added.emit(bin_id)
+
+    def set_maintenance_list(self, bins: list):
+        if bins:
+            self.maintenance_list_label.setText(f"检修: {', '.join(sorted(bins))}")
+        else:
+            self.maintenance_list_label.setText("检修: 无")
 
     def _create_laser_sensor_group(self) -> QGroupBox:
         """创建激光测距仪传感器设置组"""
@@ -627,22 +686,29 @@ class ControlPanel(QWidget):
         self.cart_sensor_changed.emit(cart_id, {sensor_type: value})
 
     def _write_cart_init_data(self, cart_id: str):
-        """将单个小车的初始化数据写入generate_data.json，并同步到控制器"""
+        """将单个小车的初始化数据写入generate_data.json并立即生效"""
         controls = self.cart_sensor_controls[cart_id]
         position = controls['position_combo'].currentIndex() + 1
         left_limit = controls['llimit_btn'].isChecked()
         right_limit = controls['rlimit_btn'].isChecked()
         left_divert = controls['ldiv_btn'].isChecked()
         right_divert = controls['rdiv_btn'].isChecked()
+        # 写入JSON持久化
         self._sensor_data_manager.write_all_cart_sensors(
             cart_id, position, left_limit, right_limit, left_divert, right_divert
         )
-        # 同步到控制器内存（Cart1/2/3），Cart4 在 _on_cart_position_changed 中已处理
-        if hasattr(self, '_controller') and self._controller and cart_id != 'Cart4':
-            self._controller.cart_positions[cart_id] = position
-            self._controller.cart_target_positions[cart_id] = position
-            self._controller.cart_sensor_positions[cart_id] = position
-            self._controller.cart_divert[cart_id] = (left_divert, right_divert)
+        # 立即更新控制器内存中的位置
+        if hasattr(self, '_controller') and self._controller:
+            if cart_id == 'Cart4':
+                self._controller.cart4_position = position
+            else:
+                self._controller.cart_positions[cart_id] = position
+                self._controller.cart_target_positions[cart_id] = position
+                self._controller.cart_sensor_positions[cart_id] = position
+                self._controller.cart_divert[cart_id] = (left_divert, right_divert)
+        # 通知主窗口
+        self.cart_sensor_changed.emit(cart_id, {'position': position,
+            'left_divert': left_divert, 'right_divert': right_divert})
         controls['apply_btn'].setText("已应用")
         controls['apply_btn'].setEnabled(False)
         self._cart_init_written.add(cart_id)
@@ -700,38 +766,87 @@ class ControlPanel(QWidget):
         btn.clicked.connect(lambda checked, rid=route_id: self._on_route_clicked(rid, checked))
         return btn
 
-    def _create_operation_group(self) -> QGroupBox:
-        """创建操作按钮组"""
+    def _create_system_ops_compact(self) -> QGroupBox:
+        """系统操作（紧凑版）"""
         group = QGroupBox("系统操作")
+        group.setStyleSheet(styles.get_group_box_style())
+        layout = QHBoxLayout()
+        layout.setSpacing(4)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        stop_btn = QPushButton("停止")
+        stop_btn.setMinimumHeight(30)
+        stop_btn.setStyleSheet("background-color:#E74C3C;color:white;border:none;border-radius:4px;font-weight:bold;font-size:11px;")
+        stop_btn.clicked.connect(self._on_stop_route_dialog)
+        layout.addWidget(stop_btn)
+
+        reset_btn = QPushButton("复位")
+        reset_btn.setMinimumHeight(30)
+        reset_btn.setStyleSheet("background-color:#9B59B6;color:white;border:none;border-radius:4px;font-weight:bold;font-size:11px;")
+        reset_btn.clicked.connect(self._on_reset_clicked)
+        layout.addWidget(reset_btn)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_auto_mode_compact(self) -> QGroupBox:
+        """自动上料模式（紧凑版）"""
+        group = QGroupBox("自动模式")
+        group.setStyleSheet(styles.get_group_box_style())
+        layout = QVBoxLayout()
+        layout.setSpacing(2)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        # 调度服务 + 全部自动
+        top_row = QHBoxLayout()
+        top_row.setSpacing(4)
+        self.sched_tcp_btn = QPushButton("调度")
+        self.sched_tcp_btn.setCheckable(True)
+        self.sched_tcp_btn.setChecked(False)
+        self.sched_tcp_btn.setMinimumHeight(28)
+        self.sched_tcp_btn.setStyleSheet("""
+            QPushButton {background-color:#2C3E50;color:#8B949E;border:2px solid #34495E;border-radius:3px;font-size:10px;}
+            QPushButton:checked {background-color:#1B5E20;color:#00FF00;border-color:#00FF00;}
+        """)
+        self.sched_tcp_btn.clicked.connect(self._on_scheduling_tcp_toggled)
+        top_row.addWidget(self.sched_tcp_btn)
+
+        self.auto_all_btn = QPushButton("全部自动")
+        self.auto_all_btn.setCheckable(True)
+        self.auto_all_btn.setChecked(False)
+        self.auto_all_btn.setMinimumHeight(28)
+        self.auto_all_btn.setStyleSheet(self.sched_tcp_btn.styleSheet())
+        self.auto_all_btn.clicked.connect(self._on_auto_mode_toggled)
+        top_row.addWidget(self.auto_all_btn)
+        layout.addLayout(top_row)
+
+        # 皮带按钮 D6/D7/D8/D9
+        belt_row = QHBoxLayout()
+        belt_row.setSpacing(3)
+        for belt_id in ['D6', 'D7', 'D8', 'D9']:
+            btn = QPushButton(belt_id)
+            btn.setCheckable(True)
+            btn.setChecked(False)
+            btn.setMinimumHeight(24)
+            btn.setMaximumWidth(50)
+            btn.setStyleSheet("""
+                QPushButton {background-color:#2C3E50;color:#8B949E;border:2px solid #34495E;border-radius:3px;font-size:9px;font-weight:bold;}
+                QPushButton:checked {background-color:#1B5E20;color:#00FF00;border-color:#00FF00;}
+            """)
+            btn.clicked.connect(lambda checked, b=belt_id: self._on_belt_auto_mode_toggled(b, checked))
+            self.belt_auto_buttons[belt_id] = btn
+            belt_row.addWidget(btn)
+        layout.addLayout(belt_row)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_operation_group(self) -> QGroupBox:
+        """创建通信/诊断组"""
+        group = QGroupBox("通信 / 诊断")
         group.setStyleSheet(styles.get_group_box_style())
         layout = QVBoxLayout()
         layout.setSpacing(8)
-
-        # 停止按钮
-        stop_btn = QPushButton("停止")
-        stop_btn.setMinimumHeight(36)
-        stop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #E74C3C;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #C0392B;
-            }
-            QPushButton:pressed {
-                background-color: #A93226;
-            }
-            QPushButton:disabled {
-                background-color: #555;
-                color: #999;
-            }
-        """)
-        stop_btn.clicked.connect(self._on_stop_route_dialog)
-        layout.addWidget(stop_btn)
 
         # 与下位机通信按钮
         self.tcp_btn = QPushButton("与下位机通信：关")
@@ -768,165 +883,34 @@ class ControlPanel(QWidget):
         self.udp_btn.setCheckable(True)
         self.udp_btn.setChecked(False)
         self.udp_btn.setMinimumHeight(36)
-        self.udp_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2C3E50;
-                color: #8B949E;
-                border: 2px solid #34495E;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #34495E;
-                border-color: #4A90D9;
-            }
-            QPushButton:checked {
-                background-color: #1B5E20;
-                color: #00FF00;
-                border-color: #00FF00;
-            }
-            QPushButton:checked:hover {
-                background-color: #2E7D32;
-            }
-        """)
+        self.udp_btn.setStyleSheet(self.tcp_btn.styleSheet())
         self.udp_btn.clicked.connect(self._on_udp_toggled)
         layout.addWidget(self.udp_btn)
 
-        # ---- 诊断模式选择 ----
-        diag_mode_label = QLabel("诊断模式")
-        diag_mode_label.setStyleSheet("color: #8B949E; font-weight: bold; font-size: 12px; margin-top: 4px;")
-        layout.addWidget(diag_mode_label)
-
+        # 诊断模式选择
+        diag_label = QLabel("故障诊断模式:")
+        diag_label.setStyleSheet("color: #8B949E; font-size: 11px; margin-top: 5px;")
+        layout.addWidget(diag_label)
         diag_mode_layout = QHBoxLayout()
-        self.diag_local_radio = QRadioButton("本地诊断")
+        self.diag_local_radio = QRadioButton("本地")
+        self.diag_tcp_radio = QRadioButton("TCP")
         self.diag_local_radio.setChecked(True)
-        self.diag_local_radio.setStyleSheet("color: #BDC3C7; font-size: 12px;")
+        self.diag_local_radio.setStyleSheet("color: #8B949E; font-size: 11px;")
+        self.diag_tcp_radio.setStyleSheet("color: #8B949E; font-size: 11px;")
         self.diag_local_radio.toggled.connect(self._on_diagnosis_mode_toggled)
         diag_mode_layout.addWidget(self.diag_local_radio)
-
-        self.diag_tcp_radio = QRadioButton("TCP 远程诊断")
-        self.diag_tcp_radio.setStyleSheet("color: #BDC3C7; font-size: 12px;")
-        self.diag_tcp_radio.toggled.connect(self._on_diagnosis_mode_toggled)
         diag_mode_layout.addWidget(self.diag_tcp_radio)
         layout.addLayout(diag_mode_layout)
 
-        # ---- TCP 诊断服务连接按钮 ----
-        self.diag_tcp_btn = QPushButton("诊断服务：断开")
+        # TCP 诊断服务按钮
+        self.diag_tcp_btn = QPushButton("诊断服务：未连接")
         self.diag_tcp_btn.setCheckable(True)
         self.diag_tcp_btn.setChecked(False)
+        self.diag_tcp_btn.setMinimumHeight(32)
         self.diag_tcp_btn.setEnabled(False)
-        self.diag_tcp_btn.setMinimumHeight(34)
-        self.diag_tcp_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2C3E50;
-                color: #8B949E;
-                border: 2px solid #34495E;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #34495E;
-                border-color: #4A90D9;
-            }
-            QPushButton:checked {
-                background-color: #1B5E20;
-                color: #00FF00;
-                border-color: #00FF00;
-            }
-            QPushButton:disabled {
-                background-color: #1a1a2e;
-                color: #555;
-                border-color: #333;
-            }
-        """)
+        self.diag_tcp_btn.setStyleSheet(self.tcp_btn.styleSheet())
         self.diag_tcp_btn.clicked.connect(self._on_diagnosis_tcp_toggled)
         layout.addWidget(self.diag_tcp_btn)
-
-        self.diag_tcp_status = QLabel("状态：未连接")
-        self.diag_tcp_status.setStyleSheet("color: #6E7681; font-size: 11px;")
-        layout.addWidget(self.diag_tcp_status)
-
-        # ---- TCP 调度服务连接按钮 ----
-        self.sched_tcp_btn = QPushButton("调度服务：断开")
-        self.sched_tcp_btn.setCheckable(True)
-        self.sched_tcp_btn.setChecked(False)
-        self.sched_tcp_btn.setMinimumHeight(34)
-        self.sched_tcp_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2C3E50;
-                color: #8B949E;
-                border: 2px solid #34495E;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #34495E;
-                border-color: #4A90D9;
-            }
-            QPushButton:checked {
-                background-color: #1B5E20;
-                color: #00FF00;
-                border-color: #00FF00;
-            }
-        """)
-        self.sched_tcp_btn.clicked.connect(self._on_scheduling_tcp_toggled)
-        layout.addWidget(self.sched_tcp_btn)
-
-        self.sched_tcp_status = QLabel("状态：D6○ D7○ D8○ D9○")
-        self.sched_tcp_status.setStyleSheet("color: #6E7681; font-size: 11px;")
-        layout.addWidget(self.sched_tcp_status)
-
-        # ---- 手动/自动模式切换按钮 ----
-        self.auto_mode_btn = QPushButton("手动模式")
-        self.auto_mode_btn.setCheckable(True)
-        self.auto_mode_btn.setChecked(False)
-        self.auto_mode_btn.setMinimumHeight(36)
-        self.auto_mode_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1A5276;
-                color: #85C1E9;
-                border: 2px solid #2E86C1;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #2E86C1;
-                border-color: #3498DB;
-            }
-            QPushButton:checked {
-                background-color: #1B5E20;
-                color: #00FF00;
-                border-color: #00FF00;
-            }
-        """)
-        self.auto_mode_btn.clicked.connect(self._on_auto_mode_toggled)
-        layout.addWidget(self.auto_mode_btn)
-
-        # 系统复位按钮
-        reset_btn = QPushButton("系统复位")
-        reset_btn.setMinimumHeight(36)
-        reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9B59B6;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #8E44AD;
-            }
-            QPushButton:pressed {
-                background-color: #7D3C98;
-            }
-        """)
-        reset_btn.clicked.connect(self._on_reset_clicked)
-        layout.addWidget(reset_btn)
 
         group.setLayout(layout)
         return group
@@ -938,10 +922,9 @@ class ControlPanel(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(8)
 
-        # ===== 接近开关故障 (诊断类别: proximity) =====
-        sensor_fault_label = QLabel("接近开关故障 → 诊断: 卡低(0.90)/卡高(0.90)")
+        # ===== 传感器故障 =====
+        sensor_fault_label = QLabel("传感器故障:")
         sensor_fault_label.setStyleSheet("color: #4A90D9; font-weight: bold; font-size: 11px;")
-        sensor_fault_label.setToolTip("诊断规则（仅取上游邻位传感器）:\n- 上游邻居true稳定10s + 本传感器false持续30s → stuck_low (0.90)\n- 上游邻居false稳定10s + 本传感器true持续30s → stuck_high (0.90)")
         layout.addWidget(sensor_fault_label)
 
         # 故障模式选择
@@ -955,6 +938,7 @@ class ControlPanel(QWidget):
             "关闭",
             "卡在低电平(常0)",
             "卡在高电平(常1)",
+            "随机0/1",
             "灵敏度降低",
             "响应延迟",
             "间歇性故障"
@@ -977,11 +961,10 @@ class ControlPanel(QWidget):
         count_layout.addWidget(self.fault_count_combo, 1)
         layout.addLayout(count_layout)
 
-        # ===== 中转斗故障 (诊断类别: hopper_switch / hopper_weight) =====
-        hopper_fault_label = QLabel("中转斗故障 → 诊断: 卡关(0.85)/卡开(0.85)/称重异常(0.80)")
+        # ===== 中转斗故障 =====
+        hopper_fault_label = QLabel("中转斗故障:")
         hopper_fault_label.setStyleSheet("color: #8E44AD; font-weight: bold; font-size: 11px;")
         hopper_fault_label.setContentsMargins(0, 10, 0, 0)
-        hopper_fault_label.setToolTip("诊断规则:\n- 开关开+称重递增+下游无物料 → hopper_switch_stuck_closed (0.85)\n- 开关关+下游有物料+称重≈0 → hopper_switch_stuck_open (0.85)\n- 称重不变+应有物料进入 → weight_stuck (0.80)")
         layout.addWidget(hopper_fault_label)
 
         # 中转斗选择
@@ -1006,14 +989,16 @@ class ControlPanel(QWidget):
         hopper_select_layout.addWidget(self.hopper_select_combo, 1)
         layout.addLayout(hopper_select_layout)
 
-        # 中转斗故障类型选择（括号内为对应的诊断规则+置信度）
+        # 中转斗故障类型选择
         self.hopper_fault_combo = QComboBox()
         self.hopper_fault_combo.addItems([
             "无故障",
-            "开关卡在关 → 诊断: 卡关(0.85)",
-            "开关卡在开 → 诊断: 卡开(0.85)",
-            "称重显示0 → 诊断: 称重卡住(0.80)",
-            "称重偏移 → 诊断: 变化率异常(0.70)",
+            "开关卡在关",
+            "开关卡在开",
+            "称重显示0",
+            "称重偏移",
+            "皮带打滑",
+            "皮带速度波动"
         ])
         self.hopper_fault_combo.setStyleSheet(styles.get_combo_box_style())
         self.hopper_fault_combo.setFixedHeight(28)
@@ -1054,15 +1039,7 @@ class ControlPanel(QWidget):
         layout.addLayout(btn_layout)
 
         # 诊断信息提示
-        diagnosis_tip = QLabel(
-            "诊断引擎(独立模块) 6类规则:\n"
-            "接近开关: 邻居全true+本false持续30s→卡低(0.90) | 邻居全false+本true持续30s→卡高(0.90)\n"
-            "中转斗开关: 开关开+称重增+下游无→卡关(0.85) | 开关关+下游有+称重≈0→卡开(0.85)\n"
-            "中转斗称重: 变化率异常(0.70) | 卡住无变化(0.80) | 抖动(0.60) | 开关开称重非零(0.65)\n"
-            "小车传感器: 极限互斥(0.95) | 分料互斥(0.95)\n"
-            "皮带转速: 运行为0(0.90) | 停止非0(0.90) | 波动>30%(0.50)\n"
-            "跨传感器: 开关称重矛盾(0.75) | 全false(0.55) | 时序异常(0.70)"
-        )
+        diagnosis_tip = QLabel("诊断说明: 当路线上前后传感器都为1时，\n但当前传感器为0，则判定为故障")
         diagnosis_tip.setStyleSheet("""
             QLabel {
                 color: #6E7681;
@@ -1073,11 +1050,10 @@ class ControlPanel(QWidget):
         diagnosis_tip.setWordWrap(True)
         layout.addWidget(diagnosis_tip)
 
-        # ===== 皮带故障 (诊断类别: conveyor) =====
-        conveyor_fault_label = QLabel("皮带转速故障 → 诊断: 运行为0(0.90)/停止非0(0.90)/波动(0.50)")
+        # ===== 皮带故障设置 =====
+        conveyor_fault_label = QLabel("皮带故障:")
         conveyor_fault_label.setStyleSheet("color: #E74C3C; font-weight: bold; font-size: 11px;")
         conveyor_fault_label.setContentsMargins(0, 10, 0, 0)
-        conveyor_fault_label.setToolTip("诊断规则（均需持续10s以上）:\n- 皮带运行+转速=0 → speed_zero_while_running (0.90)\n- 皮带停止+转速≠0 → speed_nonzero_while_stopped (0.90)\n- 匀速阶段波动>30% → speed_volatile (0.50)")
         layout.addWidget(conveyor_fault_label)
 
         # 皮带选择
@@ -1097,13 +1073,12 @@ class ControlPanel(QWidget):
         conv_select_layout.addWidget(self.conveyor_fault_combo, 1)
         layout.addLayout(conv_select_layout)
 
-        # 皮带故障类型选择（诊断对齐）
+        # 皮带故障类型选择
         self.conveyor_fault_type_combo = QComboBox()
         self.conveyor_fault_type_combo.addItems([
-            "正常（跟随仿真）",
-            "皮带运行但转速为0 → 诊断: 运行为0(0.90,持续10s)",
-            "皮带停止但转速非0 → 诊断: 停止非0(0.90,持续10s)",
-            "皮带转速波动 → 诊断: 波动(0.50,持续10s)",
+            "正常",
+            "关闭",
+            "异常"
         ])
         self.conveyor_fault_type_combo.setStyleSheet(styles.get_combo_box_style())
         self.conveyor_fault_type_combo.setFixedHeight(28)
@@ -1142,11 +1117,10 @@ class ControlPanel(QWidget):
 
         layout.addLayout(conv_btn_layout)
 
-        # ===== 小车传感器故障 (诊断类别: cart) =====
-        cart_fault_label = QLabel("小车传感器故障 → 诊断: 极限互斥(0.95)/分料互斥(0.95)")
+        # ===== 运料小车传感器故障 =====
+        cart_fault_label = QLabel("运料小车传感器故障:")
         cart_fault_label.setStyleSheet("color: #3498DB; font-weight: bold; font-size: 11px;")
         cart_fault_label.setContentsMargins(0, 10, 0, 0)
-        cart_fault_label.setToolTip("诊断规则:\n- 左右极限同时true → limit_mutual_exclusion (0.95)\n- 左右分料同时true → divert_mutual_exclusion (0.95)")
         layout.addWidget(cart_fault_label)
 
         # 小车选择
@@ -1251,97 +1225,6 @@ class ControlPanel(QWidget):
         group.setLayout(layout)
         return group
 
-    def _create_maintenance_group(self) -> QGroupBox:
-        """创建检修设置组"""
-        group = QGroupBox("检修设置")
-        group.setStyleSheet(styles.get_group_box_style())
-        layout = QVBoxLayout()
-        layout.setSpacing(6)
-
-        # ---- 产线检修 ----
-        line_label = QLabel("产线检修（该产线全部4个料仓检修）")
-        line_label.setStyleSheet("color: #F39C12; font-size: 10px;")
-        layout.addWidget(line_label)
-
-        line_row = QHBoxLayout()
-        self.maintenance_line_combo = QComboBox()
-        self.maintenance_line_combo.setStyleSheet(styles.get_combo_box_style())
-        self.maintenance_line_combo.setFixedHeight(28)
-        for i in range(1, 8):
-            self.maintenance_line_combo.addItem(f"产线 {i}", i)
-        line_row.addWidget(self.maintenance_line_combo, 1)
-
-        add_line_btn = QPushButton("添加")
-        add_line_btn.setMinimumHeight(28)
-        add_line_btn.setStyleSheet(styles.get_button_style('#F39C12'))
-        add_line_btn.clicked.connect(self._on_add_maintenance_line)
-        line_row.addWidget(add_line_btn)
-        layout.addLayout(line_row)
-
-        # ---- 料仓检修 ----
-        bin_label = QLabel("料仓检修（单个料仓）")
-        bin_label.setStyleSheet("color: #F39C12; font-size: 10px;")
-        layout.addWidget(bin_label)
-
-        bin_row = QHBoxLayout()
-        self.maintenance_bin_combo = QComboBox()
-        self.maintenance_bin_combo.setStyleSheet(styles.get_combo_box_style())
-        self.maintenance_bin_combo.setFixedHeight(28)
-        all_bins = []
-        for col in ['P1', 'P2', 'P3', 'P4']:
-            for row in range(1, 8):
-                all_bins.append(f"{col}-{row}")
-        for i in range(1, 13):
-            all_bins.append(f"S{i}")
-        for b in all_bins:
-            self.maintenance_bin_combo.addItem(b, b)
-        bin_row.addWidget(self.maintenance_bin_combo, 1)
-
-        add_bin_btn = QPushButton("添加")
-        add_bin_btn.setMinimumHeight(28)
-        add_bin_btn.setStyleSheet(styles.get_button_style('#F39C12'))
-        add_bin_btn.clicked.connect(self._on_add_maintenance_bin)
-        bin_row.addWidget(add_bin_btn)
-        layout.addLayout(bin_row)
-
-        # ---- 当前检修列表 ----
-        self.maintenance_list_label = QLabel("当前检修：无")
-        self.maintenance_list_label.setStyleSheet("color: #E74C3C; font-size: 10px;")
-        self.maintenance_list_label.setWordWrap(True)
-        layout.addWidget(self.maintenance_list_label)
-
-        clear_btn = QPushButton("清除全部检修")
-        clear_btn.setMinimumHeight(28)
-        clear_btn.setStyleSheet(styles.get_button_style('#E74C3C'))
-        clear_btn.clicked.connect(self._on_clear_maintenance)
-        layout.addWidget(clear_btn)
-
-        group.setLayout(layout)
-        return group
-
-    def _on_add_maintenance_line(self):
-        line_num = self.maintenance_line_combo.currentData()
-        if line_num:
-            self.maintenance_line_added.emit(line_num)
-
-    def _on_add_maintenance_bin(self):
-        bin_id = self.maintenance_bin_combo.currentData()
-        if bin_id:
-            bin = str(bin_id)
-            if bin.startswith('S'):
-                self.maintenance_bin_added.emit(bin)
-            else:
-                self.maintenance_bin_added.emit(bin)
-
-    def _on_clear_maintenance(self):
-        self.maintenance_clear_requested.emit()
-
-    def set_maintenance_list(self, bins: list):
-        if bins:
-            self.maintenance_list_label.setText("当前检修：" + "、".join(bins))
-        else:
-            self.maintenance_list_label.setText("当前检修：无")
-
     def _on_route_clicked(self, route_id: str, checked: bool):
         """路线按钮点击"""
         if checked:
@@ -1372,6 +1255,34 @@ class ControlPanel(QWidget):
 
     def _on_bin_selected_from_dialog(self, route_id: str, bin_id: str):
         """从小仓选择对话框接收选择"""
+        # 特殊处理路线⑧和⑨：需要两次选仓（起点仓和终点仓）
+        if route_id in ('route7', 'route8'):
+            if not hasattr(self, '_route_selection_step'):
+                self._route_selection_step = {}
+
+            # 判断当前是选起点还是终点
+            if route_id not in self._route_selection_step:
+                # 第一次选择：起点仓（S仓）—— 暂存，后续发射时使用
+                self._route_selection_step[route_id] = 'start'
+                self._pending_silo_bin = bin_id  # 暂存S仓（不在 route_to_bin 中）
+                self._show_end_bin_selection(route_id, bin_id)
+                return
+            elif self._route_selection_step[route_id] == 'start':
+                # 第二次选择：终点仓（P仓）—— 完成双选流程
+                self._route_selection_step[route_id] = 'end'
+                silo_bin = getattr(self, '_pending_silo_bin', None)
+                dest_bin = bin_id  # P仓是真正的终点
+                del self._route_selection_step[route_id]
+                self.active_routes.add(route_id)
+
+                # 使用新的信号携带完整信息（S仓 + P仓）
+                # 注意：不在这里发射 route_toggled，让 _on_route_clicked 在 dialog.exec_() 返回后发射
+                if silo_bin:
+                    self.route_silo_bin_selected.emit(route_id, silo_bin, dest_bin)
+                else:
+                    self.route_bin_selected.emit(route_id, dest_bin)
+                return
+
         self.route_to_bin[route_id] = bin_id
         self.route_bin_selected.emit(route_id, bin_id)
 
@@ -1391,6 +1302,27 @@ class ControlPanel(QWidget):
                 if hasattr(self, '_controller') and self._controller:
                     self._controller.set_cart4_target_position(cart4_pos)
 
+    def _show_end_bin_selection(self, route_id: str, start_bin: str):
+        """显示终点仓选择对话框（路线⑧⑨专用）"""
+        route_name = config.FEED_ROUTES[route_id]['name']
+        
+        # 路线⑧终点是P4，路线⑨终点是P2/P3
+        if route_id == 'route8':
+            target_conveyor = 'D9'
+            available_bins = [f'P4-{i}' for i in range(1, 8)]
+            dialog_title = f"选择{route_name}终点仓 (起点: {start_bin})"
+        else:  # route8
+            target_conveyor = 'D8'
+            import pos
+            available_bins = pos.CONVEYOR_TO_BINS.get('D8', [])
+            dialog_title = f"选择{route_name}终点仓 (起点: {start_bin})"
+        
+        dialog = SmallBinSelectDialog(
+            route_id, dialog_title, target_conveyor, available_bins, self
+        )
+        dialog.bin_selected.connect(self._on_bin_selected_from_dialog)
+        dialog.exec_()
+
     def _get_target_conveyor(self, route_id: str) -> str:
         """获取路线终点皮带"""
         route = config.FEED_ROUTES[route_id]
@@ -1402,6 +1334,10 @@ class ControlPanel(QWidget):
     def _get_available_bins(self, route_id: str) -> List[str]:
         """获取路线的可用小仓列表"""
         import pos
+
+        # 特殊处理路线8和9：从高位储料仓出料
+        if route_id in ('route7', 'route8'):
+            return [f'S{i}' for i in range(1, 13)]
 
         target_conveyor = self._get_target_conveyor(route_id)
         if target_conveyor in pos.CONVEYOR_TO_BINS:
@@ -1576,93 +1512,84 @@ class ControlPanel(QWidget):
         else:
             self.tcp_btn.setText("与下位机通信：关")
 
-    def _on_udp_toggled(self, checked: bool):
-        """UDP 二进制发送按钮切换"""
-        if checked:
-            self.udp_btn.setText("UDP 二进制发送：开")
-        else:
-            self.udp_btn.setText("UDP 二进制发送：关")
-        self.udp_sender_toggled.emit(checked)
-
-    def set_udp_status(self, active: bool):
-        """更新 UDP 发送按钮状态（由外部调用）"""
-        self.udp_btn.setChecked(active)
-        if active:
-            self.udp_btn.setText("UDP 二进制发送：开")
-        else:
-            self.udp_btn.setText("UDP 二进制发送：关")
-
-    def _on_diagnosis_mode_toggled(self):
-        """诊断模式 RadioButton 切换"""
-        if self.diag_tcp_radio.isChecked():
-            self.diag_tcp_btn.setEnabled(True)
-            self.diagnosis_mode_changed.emit("tcp")
-        else:
-            self.diag_tcp_btn.setEnabled(False)
-            self.diag_tcp_btn.setChecked(False)
-            self.diag_tcp_btn.setText("诊断服务：断开")
-            self.diag_tcp_status.setText("状态：未连接")
-            self.diagnosis_mode_changed.emit("local")
-
-    def _on_diagnosis_tcp_toggled(self, checked: bool):
-        """TCP 诊断服务连接按钮切换"""
-        if checked:
-            self.diag_tcp_btn.setText("诊断服务：连接中...")
-        else:
-            self.diag_tcp_btn.setText("诊断服务：断开")
-            self.diag_tcp_status.setText("状态：未连接")
-        self.diagnosis_tcp_toggled.emit(checked)
-
-    def set_diagnosis_tcp_status(self, connected: bool):
-        """更新诊断 TCP 连接状态（由外部调用）"""
-        if connected:
-            self.diag_tcp_btn.setText("诊断服务：已连接")
-            self.diag_tcp_status.setText("状态：已连接")
-            self.diag_tcp_status.setStyleSheet("color: #00FF00; font-size: 11px;")
-        else:
-            self.diag_tcp_btn.setText("诊断服务：断开")
-            self.diag_tcp_status.setText("状态：未连接")
-            self.diag_tcp_status.setStyleSheet("color: #6E7681; font-size: 11px;")
-
-    def _on_scheduling_tcp_toggled(self, checked: bool):
-        """TCP 调度服务连接按钮切换"""
-        if checked:
-            self.sched_tcp_btn.setText("调度服务：连接中...")
-        else:
-            self.sched_tcp_btn.setText("调度服务：断开")
-            self.sched_tcp_status.setText("状态：D6○ D7○ D8○ D9○")
-            self.sched_tcp_status.setStyleSheet("color: #6E7681; font-size: 11px;")
-        self.scheduling_tcp_toggled.emit(checked)
-
-    def _on_auto_mode_toggled(self, checked: bool):
-        """手动/自动模式切换"""
-        if checked:
-            self.auto_mode_btn.setText("自动模式")
-        else:
-            self.auto_mode_btn.setText("手动模式")
-        self.auto_mode_toggled.emit(checked)
-
-    def set_scheduling_tcp_status(self, connections: dict):
-        """更新调度 TCP 连接状态（由外部调用）
-        connections: {'D7': True, 'D8': False, 'D9': True}
-        """
-        parts = []
-        for belt_id in ['D6', 'D7', 'D8', 'D9']:
-            status = "●" if connections.get(belt_id, False) else "○"
-            parts.append(f"{belt_id}{status}")
-        text = "状态：" + " ".join(parts)
-        self.sched_tcp_status.setText(text)
-        connected_count = sum(1 for v in connections.values() if v)
-        if connected_count > 0:
-            self.sched_tcp_status.setStyleSheet("color: #00FF00; font-size: 11px;")
-            self.sched_tcp_btn.setText("调度服务：已连接")
-        else:
-            self.sched_tcp_status.setStyleSheet("color: #6E7681; font-size: 11px;")
-            self.sched_tcp_btn.setText("调度服务：断开")
-
     def _on_reset_clicked(self):
         """复位按钮点击"""
         self.reset_requested.emit()
+
+    def _on_auto_mode_toggled(self, checked: bool):
+        """全部自动/手动模式切换"""
+        if hasattr(self, 'auto_all_btn') and self.auto_all_btn:
+            self.auto_all_btn.setText("全部自动（调度中）" if checked else "全部手动 / 自动切换")
+        self.auto_mode_toggled.emit(checked)
+        if hasattr(self, 'belt_auto_buttons'):
+            for belt_id in ['D6', 'D7', 'D8', 'D9']:
+                btn = self.belt_auto_buttons.get(belt_id)
+                if btn:
+                    btn.setChecked(checked)
+                    btn.setText(f"{belt_id} 自动" if checked else f"{belt_id} 手动")
+
+    def _on_belt_auto_mode_toggled(self, belt_id: str, checked: bool):
+        """单条皮带自动/手动模式切换"""
+        if hasattr(self, 'belt_auto_buttons'):
+            btn = self.belt_auto_buttons.get(belt_id)
+            if btn:
+                btn.setText(f"{belt_id} 自动" if checked else f"{belt_id} 手动")
+        self.belt_auto_mode_toggled.emit(belt_id, checked)
+
+    def _on_scheduling_tcp_toggled(self, checked: bool):
+        """调度服务连接切换"""
+        if hasattr(self, 'sched_tcp_btn') and self.sched_tcp_btn:
+            self.sched_tcp_btn.setText("调度服务：已连接" if checked else "调度服务：未连接")
+        self.scheduling_tcp_toggled.emit(checked)
+
+    def set_scheduling_tcp_status(self, connections: dict):
+        """更新调度服务连接状态"""
+        if not hasattr(self, 'sched_tcp_btn') or not self.sched_tcp_btn:
+            return
+        if connections:
+            self.sched_tcp_btn.setText(f"调度服务：{len(connections)}个已连接")
+        else:
+            self.sched_tcp_btn.setText("调度服务：未连接")
+            self.sched_tcp_btn.setChecked(False)
+
+    def set_tcp_status(self, connected: bool):
+        """更新下位机 TCP 状态"""
+        if connected:
+            self.tcp_btn.setText("与下位机通信：开")
+        else:
+            self.tcp_btn.setText("与下位机通信：关")
+
+    def _on_udp_toggled(self, checked: bool):
+        """UDP 发送开关"""
+        if hasattr(self, 'udp_btn') and self.udp_btn:
+            self.udp_btn.setText("UDP 二进制发送：开" if checked else "UDP 二进制发送：关")
+        self.udp_sender_toggled.emit(checked)
+
+    def _on_diagnosis_mode_toggled(self, checked: bool):
+        """诊断模式切换"""
+        if hasattr(self, 'diag_local_radio') and self.diag_local_radio:
+            mode = "local" if self.diag_local_radio.isChecked() else "tcp"
+            if hasattr(self, 'diag_tcp_btn') and self.diag_tcp_btn:
+                self.diag_tcp_btn.setEnabled(mode == "tcp")
+            self.diagnosis_mode_changed.emit(mode)
+
+    def _on_diagnosis_tcp_toggled(self, checked: bool):
+        """TCP 诊断服务连接切换"""
+        if hasattr(self, 'diag_tcp_btn') and self.diag_tcp_btn:
+            self.diag_tcp_btn.setText("诊断服务：已连接" if checked else "诊断服务：未连接")
+        self.diagnosis_tcp_toggled.emit(checked)
+
+    def set_udp_status(self, active: bool):
+        """更新 UDP 发送状态"""
+        if hasattr(self, 'udp_btn') and self.udp_btn:
+            self.udp_btn.setText("UDP 二进制发送：开" if active else "UDP 二进制发送：关")
+            self.udp_btn.setChecked(active)
+
+    def set_diagnosis_tcp_status(self, connected: bool):
+        """更新诊断服务状态"""
+        if hasattr(self, 'diag_tcp_btn') and self.diag_tcp_btn:
+            self.diag_tcp_btn.setText("诊断服务：已连接" if connected else "诊断服务：未连接")
+            self.diag_tcp_btn.setChecked(connected)
 
     def _on_emergency_stop(self):
         """紧急停止按钮点击（已废弃，由停止按钮替代）"""
@@ -1679,9 +1606,10 @@ class ControlPanel(QWidget):
             0: FaultMode.OFF,
             1: FaultMode.STUCK_LOW,
             2: FaultMode.STUCK_HIGH,
-            3: FaultMode.SENSITIVITY_LOSS,
-            4: FaultMode.RESPONSE_DELAY,
-            5: FaultMode.INTERMITTENT,
+            3: FaultMode.RANDOM,
+            4: FaultMode.SENSITIVITY_LOSS,
+            5: FaultMode.RESPONSE_DELAY,
+            6: FaultMode.INTERMITTENT,
         }
         mode = mode_mapping.get(mode_index, FaultMode.OFF)
 
@@ -1693,6 +1621,8 @@ class ControlPanel(QWidget):
             2: 'switch_stuck_open',
             3: 'weight_stuck_zero',
             4: 'weight_offset',
+            5: 'belt_slip',
+            6: 'belt_variance',
         }
         hopper_fault_type = hopper_fault_mapping.get(hopper_fault_index)
 
@@ -1722,8 +1652,9 @@ class ControlPanel(QWidget):
             faulty_sensors = list(self.fault_diagnosis.get_faulty_sensor_ids())
 
             mode_names = {
-                FaultMode.STUCK_LOW: "卡在低电平 → 诊断: 卡低(0.90)",
-                FaultMode.STUCK_HIGH: "卡在高电平 → 诊断: 卡高(0.90)",
+                FaultMode.STUCK_LOW: "卡在低电平",
+                FaultMode.STUCK_HIGH: "卡在高电平",
+                FaultMode.RANDOM: "随机",
                 FaultMode.SENSITIVITY_LOSS: "灵敏度降低",
                 FaultMode.RESPONSE_DELAY: "响应延迟",
                 FaultMode.INTERMITTENT: "间歇性故障",
@@ -1827,13 +1758,16 @@ class ControlPanel(QWidget):
         fault_type_index = self.conveyor_fault_type_combo.currentIndex()
 
         if conv_index == 0:
+            # 选择"无故障"时，清除所有皮带状态设置
             for conv_id in config.CONVEYOR_STATES:
                 config.CONVEYOR_STATES[conv_id] = None
+                # 清除传感器数据管理器中的故障
                 speed_sensor_id = config.CONVEYOR_SPEED_SENSORS.get(conv_id)
                 if speed_sensor_id:
                     self._sensor_data_manager.set_conveyor_speed_fault(speed_sensor_id, None)
             self.conveyor_fault_status_label.setText("已清除所有皮带设置")
         else:
+            # 获取选中的皮带ID
             conv_ids = [
                 "E1", "E2", "E4", "E5", "E6", "E7", "E8", "E9", "E10",
                 "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D13"
@@ -1841,31 +1775,27 @@ class ControlPanel(QWidget):
             conv_id = conv_ids[conv_index - 1]
             speed_sensor_id = config.CONVEYOR_SPEED_SENSORS.get(conv_id)
 
+            # 设置状态类型
             if fault_type_index == 0:
                 # 正常：跟随仿真运行
                 config.CONVEYOR_STATES[conv_id] = None
                 if speed_sensor_id:
                     self._sensor_data_manager.set_conveyor_speed_fault(speed_sensor_id, None)
-                self.conveyor_fault_status_label.setText(f"{conv_id}: 正常（跟随仿真）")
+                self.conveyor_fault_status_label.setText(f"{conv_id}: 正常")
             elif fault_type_index == 1:
-                # 皮带运行但转速为0 → 诊断: speed_zero_while_running(0.90)
-                config.CONVEYOR_STATES[conv_id] = 'speed_abnormal'
-                if speed_sensor_id:
-                    self._sensor_data_manager.set_conveyor_speed_fault(speed_sensor_id, 'force_zero')
-                self.conveyor_fault_status_label.setText(f"{conv_id}: 运行但转速为0 → 诊断: speed_zero_while_running(0.90)")
-            elif fault_type_index == 2:
-                # 皮带停止但转速非0 → 诊断: speed_nonzero_while_stopped(0.90)
+                # 关闭：皮带停止
                 config.CONVEYOR_STATES[conv_id] = 'stopped'
                 if speed_sensor_id:
-                    self._sensor_data_manager.set_conveyor_speed_fault(speed_sensor_id, 'force_nonzero')
-                self.conveyor_fault_status_label.setText(f"{conv_id}: 停止但转速非0 → 诊断: speed_nonzero_while_stopped(0.90)")
+                    self._sensor_data_manager.set_conveyor_speed_fault(speed_sensor_id, 'stopped')
+                self.conveyor_fault_status_label.setText(f"{conv_id}: 关闭")
             else:
-                # 皮带转速波动 → 诊断: speed_volatile(0.50)
-                config.CONVEYOR_STATES[conv_id] = None
+                # 异常：转速异常
+                config.CONVEYOR_STATES[conv_id] = 'speed_abnormal'
                 if speed_sensor_id:
-                    self._sensor_data_manager.set_conveyor_speed_fault(speed_sensor_id, 'volatile')
-                self.conveyor_fault_status_label.setText(f"{conv_id}: 转速波动 → 诊断: speed_volatile(0.50)")
+                    self._sensor_data_manager.set_conveyor_speed_fault(speed_sensor_id, 'speed_abnormal')
+                self.conveyor_fault_status_label.setText(f"{conv_id}: 异常")
 
+        # 发送信号
         self.conveyor_fault_changed.emit('update', dict(config.CONVEYOR_STATES))
 
     def _on_clear_conveyor_fault(self):
@@ -1929,15 +1859,11 @@ class ControlPanel(QWidget):
 
     def _on_cart_sensor_type_changed(self, index: int):
         """小车传感器类型改变时，更新故障类型下拉框"""
-        if not hasattr(self, 'cart_fault_type_combo'):
-            return
         self._update_cart_fault_type_combo(index)
         self._update_cart_fault_extra_visibility()
 
     def _update_cart_fault_type_combo(self, sensor_type_index: int):
         """根据传感器类型更新故障类型下拉框"""
-        if not hasattr(self, 'cart_fault_type_combo'):
-            return
         self.cart_fault_type_combo.clear()
         if sensor_type_index == 0:
             # 位置传感器
@@ -1972,6 +1898,8 @@ class ControlPanel(QWidget):
         """应用小车传感器故障"""
         if not hasattr(self, '_controller') or not self._controller:
             QMessageBox.warning(self, "提示", "控制器尚未初始化")
+            return
+        if not hasattr(self, 'cart_fault_extra_combo'):
             return
 
         cart_index = self.cart_select_combo.currentIndex()

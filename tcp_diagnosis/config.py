@@ -32,8 +32,8 @@ FEED_SIGNAL_TO_ROUTES = {
     'feed1_2': ['route2'],
     'feed2_1': ['route3'],
     'feed2_2': ['route4', 'route5'],
-    'feed3': ['route6', 'route7'],
-    'silo_out': ['route8', 'route9'],
+    'feed3': ['route6'],
+    'silo_out': ['route7', 'route8'],
 }
 
 # 路线定义（从 pos.py 复制，零仿真依赖）
@@ -65,23 +65,18 @@ FEED_ROUTES = {
         'proximity_sensors': ['S-E6', 'S-E7', 'S-E9', 'S-D5', 'S-D6'],
     },
     'route6': {
-        'conveyors': ['D13', 'D1', 'D3', 'D9'],
-        'hoppers': [None, None, None, None],
-        'proximity_sensors': ['S-D13', 'S-D1', 'S-D3', 'S-D9'],
+        'conveyors': ['D13', 'D2', 'D4', 'D8'],
+        'hoppers': ['hopper5'],
+        'proximity_sensors': ['S-D13', 'S-D2', 'S-D2-2', 'S-D4', 'S-D8'],
     },
     'route7': {
-        'conveyors': ['D13', 'D2', 'D4', 'D8'],
-        'hoppers': [None, None, 'hopper5', None],
-        'proximity_sensors': ['S-D13', 'S-D2', 'S-D4', 'S-D8'],
-    },
-    'route8': {
         'conveyors': ['D1', 'D3', 'D9'],
-        'hoppers': [None, None, None],
+        'hoppers': [],
         'proximity_sensors': ['S-D1', 'S-D3', 'S-D9'],
     },
-    'route9': {
+    'route8': {
         'conveyors': ['D2', 'D4', 'D8'],
-        'hoppers': [None, 'hopper5', None],
-        'proximity_sensors': ['S-D2', 'S-D4', 'S-D8'],
+        'hoppers': ['hopper5'],
+        'proximity_sensors': ['S-D2', 'S-D2-2', 'S-D4', 'S-D8'],
     },
 }

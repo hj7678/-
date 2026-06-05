@@ -169,10 +169,15 @@ class SchedulingServer:
         left_divert = data.get("left_divert", False)
         right_divert = data.get("right_divert", False)
 
-        # D8 双列皮带：右分料时位置+7（P2=1-7, P3=8-14）
-        if self.belt_id == 'D8' and cart_position is not None:
-            if right_divert and not left_divert:
-                cart_position = cart_position + 7
+        # 所有皮带：cart_position 转换为调度引擎 wh_id（底行→小号）
+        if cart_position is not None and self.belt_id != 'D6':
+            from scheduling.bin_config import d8_bin_id_to_wh, bin_id_to_wh, BELT_TO_COL_PREFIX
+            if self.belt_id == 'D8':
+                col = 'P3' if (right_divert and not left_divert) else 'P2'
+                cart_position = d8_bin_id_to_wh(f'{col}-{cart_position}')
+            else:
+                prefix = BELT_TO_COL_PREFIX.get(self.belt_id, 'P1')
+                cart_position = bin_id_to_wh(f'{prefix}-{cart_position}')
 
         stock_summary = ", ".join(f"{b.bin_id}={b.stock:.1f}t" for b in bins[:3])
         if len(bins) > 3:

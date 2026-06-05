@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="e76ade89-4884-4b2a-9ae7-268d0f4108bc" name="更改" comment="">
+      <change beforePath="$PROJECT_DIR$/control_strategy_generator.py" beforeDir="false" afterPath="$PROJECT_DIR$/control_strategy_generator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/controllers/simulation_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/controllers/simulation_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/fault_diagnosis/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/fault_diagnosis/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pos.py" beforeDir="false" afterPath="$PROJECT_DIR$/pos.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scheduling/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/scheduling/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scheduling/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/scheduling/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sensor_data_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/sensor_data_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/control_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/control_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/main_window.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/main_window.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/simulation_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/simulation_view.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/status_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/status_panel.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 7
+}]]></component>
+  <component name="ProjectId" id="3EbZ5moYd89SEJdAHCPyGGub3Xb" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "master",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "C:/Users/HJ/PycharmProjects/zsysl/sensor_simulate"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-0978a7220b69-9867c7d4c0a4-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.28294.336" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="默认任务">
+      <changelist id="e76ade89-4884-4b2a-9ae7-268d0f4108bc" name="更改" comment="" />
+      <created>1780449051163</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1780449051163</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="OPEN_GENERIC_TABS">
+      <map>
+        <entry key="e9fa7da4-5696-43fa-8a84-730592009a75" value="TOOL_WINDOW" />
+      </map>
+    </option>
+    <option name="TAB_STATES">
+      <map>
+        <entry key="e9fa7da4-5696-43fa-8a84-730592009a75">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="HEAD" />
+                      </list>
+                    </value>
+                  </entry>
+                  <entry key="roots">
+                    <value>
+                      <list>
+                        <option value="$PROJECT_DIR$" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+              <option name="SHOW_ONLY_AFFECTED_CHANGES" value="true" />
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

@@ -7,7 +7,7 @@ D = 5.4           # 相邻仓中心点间距 (m)
 VB = 2.5          # 皮带传输速度 (m/s)
 E = 0.195         # 皮带上料效率 (t/s)
 MAX_CAP = 110.0   # 料仓最大容量 (t)
-CAR_START_WH = 14  # 小车起始仓位（D8 14仓模式）
+CAR_START_WH = 8   # 小车起始仓位（D8 14仓模式，P3-7 → wh_id=8）
 
 # 反向等料距离（每条皮带不同）
 BASE_DIST_CONSTANT = {
@@ -18,16 +18,17 @@ BASE_DIST_CONSTANT = {
 LONG_DIST_CONSTANT = 124.9    # 换料等料距离（仅D8 14仓跨列使用）
 
 # 库存阈值
-SAFE_DURATION_THRESHOLD = 600    # 库存告急状态阈值 (s)
+SAFE_DURATION_THRESHOLD = 1200     # 库存告急状态阈值 (s)
 STOCK_REFILL_BELOW = 90.0        # 补料条件A：库存 < 90t
 STOCK_REFILL_LINE_ORDER = 100.0  # 补料条件B：库存 < 100t 且产线有未来订单
 STOCK_TRIGGER_BELOW = 70.0       # 触发一轮调度：存在库存 < 70t 的仓
 STOCK_REFILL_BELOW_BOOST = 80.0  # Boost 模式补料阈值
 STOCK_TRIGGER_BELOW_BOOST = 80.0  # Boost 模式触发阈值
+STOCK_CRITICAL = 5.0            # 料位 ≤ 1t 的料仓置顶优先补料（~1% 容量）
 
 # D6 高位储料仓调度参数
 SILO_MAX_CAP = 420.0             # 高位储料仓料仓最大容量 (t)
-SILO_TRIGGER_PCT = 60.0          # 触发补料的料位百分比
+SILO_TRIGGER_PCT = 95.0          # 触发补料的料位百分比
 
 # 惩罚系数（14仓公司连续性约束使用）
 URGENCY_PENALTY_FACTOR = 100000
