@@ -679,9 +679,11 @@ class SimulationView(QWidget):
         font.setBold(True)
         painter.setFont(font)
 
-        # 简化名称贴紧组件右侧
+        # 名称标签绘制在组件正上方
         short_name = name.replace('上料点', '点').replace('中转斗', '斗')
-        painter.drawText(int(x + w + 2), int(y + 4), short_name)
+        fm = painter.fontMetrics()
+        tw = fm.horizontalAdvance(short_name)
+        painter.drawText(int(x - tw/2), int(y - h/2 - 6), short_name)
 
     def _draw_laser_sensors(self, painter: QPainter):
         """绘制所有激光测距仪传感器"""
@@ -820,6 +822,14 @@ class SimulationView(QWidget):
             label_x = int(conveyor.start_pos[0] + 15)
             label_y = int(center_y)
 
+        # 特定皮带标签微调
+        if conveyor.id == 'D7':
+            label_y -= 30  # 上移
+        elif conveyor.id == 'D8':
+            label_y -= 30  # 上移
+        elif conveyor.id == 'D4':
+            label_x -= 40  # 左移
+
         painter.drawText(label_x, label_y, name)
 
     def _draw_conveyor_arrows(self, painter: QPainter, conveyor):
@@ -885,6 +895,16 @@ class SimulationView(QWidget):
         """绘制所有中转斗"""
         for hp_id, hp_config in config.TRANSFER_HOPPERS.items():
             self._draw_single_hopper(painter, hp_config, hp_id)
+            # 中转斗4/5/6名称标签绘制在正下方
+            if hp_id in ('hopper4', 'hopper5', 'hopper6'):
+                x, y = hp_config['position']
+                w, h = hp_config['width'], hp_config['height']
+                name = hp_config['name']
+                painter.setPen(QPen(QColor(config.COLORS['text'])))
+                f = QFont(); f.setPointSize(8); f.setBold(True); painter.setFont(f)
+                fm = painter.fontMetrics()
+                tw = fm.horizontalAdvance(name)
+                painter.drawText(int(x - tw/2 + w/2), int(y + h/2 + 14), name)
 
     def _draw_single_hopper(self, painter: QPainter, hopper: dict, hopper_id: str):
         """绘制单个中转斗（工业写实风格 - 更精细）"""

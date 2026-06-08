@@ -529,6 +529,13 @@ class MainWindow(QMainWindow):
     def _on_scheduling_tcp_toggled(self, enabled: bool):
         """调度服务连接开关"""
         if enabled:
+            # D7皮带：弹窗让用户选择上料点
+            fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
+            item, ok = QInputDialog.getItem(self, "选择D7上料点",
+                "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
+            if ok:
+                fp_id = item.split()[0]
+                self.controller._d7_feed_override = fp_id
             self.controller.start_tcp_scheduling()
             # 同步顶栏：启动调度时自动开启所有皮带
             if hasattr(self, 'top_auto_btn'):
@@ -558,8 +565,18 @@ class MainWindow(QMainWindow):
 
     def _on_belt_auto_mode_toggled(self, belt_id: str, enabled: bool):
         """单条皮带自动模式切换"""
+        if enabled and belt_id == 'D7':
+            # D7皮带：弹窗让用户选择上料点
+            fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
+            item, ok = QInputDialog.getItem(self, f"选择{belt_id}上料点",
+                f"请选择{belt_id}皮带自动上料使用的上料点:", fps, 0, False)
+            if ok:
+                fp_id = item.split()[0]
+                self.controller._d7_feed_override = fp_id
+                self._update_status_bar(f"{belt_id} 自动模式: {fp_id}")
+            else:
+                return  # 用户取消，不启用自动模式
         self.controller.set_belt_auto_mode(belt_id, enabled)
-        # 同步顶栏按钮
         if hasattr(self, '_top_belt_btns') and belt_id in self._top_belt_btns:
             self._top_belt_btns[belt_id].setChecked(enabled)
         self._update_status_bar(f"{belt_id} 自动模式: {'开' if enabled else '关'}")
@@ -618,7 +635,9 @@ class MainWindow(QMainWindow):
 
     def _on_top_stop_clicked(self):
         """顶栏停止按钮 - 停止任意运行中的路线（含自动模式启动的）"""
-        active = list(self.controller.active_routes)
+        # 过滤掉节能待机(STANDBY)的路线
+        active = [rid for rid in self.controller.active_routes
+                  if self.controller.route_state_manager.get_route_state(rid) != 'standby']
         if not active:
             self._update_status_bar("当前没有运行中的路线")
             return

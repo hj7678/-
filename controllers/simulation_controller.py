@@ -560,6 +560,7 @@ class SimulationController(QObject):
         self._belt_auto_mode: Dict[str, bool] = {  # 每条终点皮带独立的手动/自动模式
             'D6': False, 'D7': False, 'D8': False, 'D9': False,
         }
+        self._d7_feed_override: Optional[str] = None  # D7用户自选上料点
         self._executing_bin: Dict[str, str] = {}     # belt_id → bin_id
         self._executing_route: Dict[str, str] = {}    # belt_id → route_id
         self._scheduled_sequence: Dict[str, list] = {}   # belt_id → [剩余待执行料仓序列]
@@ -1629,6 +1630,8 @@ class SimulationController(QObject):
                             # 更新分料方向（跨列移动时切换P2↔P3）
                             expected_divert = self._calculate_cart_divert(cart_id, next_bin)
                             self.cart_divert[cart_id] = expected_divert
+                            # 同步 executing_bin（保持显示与实际一致）
+                            self._executing_bin[belt_id] = next_bin
                             continue
 
                 if ctx.early_moved_from_clearing:
@@ -1862,6 +1865,10 @@ class SimulationController(QObject):
         self._belt_auto_mode[belt_id] = enabled
         if enabled and self._auto_feeding_active and self._tcp_scheduling_client is not None:
             self._request_immediate_scheduling(belt_id)
+        if not enabled:
+            # 关闭自动模式：清除缓存序列，当前上料完成后不再自动执行下一仓
+            self._scheduled_sequence.pop(belt_id, None)
+            print(f"[自动模式] {belt_id} 已切换为手动，缓存序列已清除", flush=True)
 
     def is_belt_auto_mode(self, belt_id: str) -> bool:
         """查询单条终点皮带是否处于自动模式"""
@@ -2048,6 +2055,13 @@ class SimulationController(QObject):
         available = config.BIN_TO_AVAILABLE_ROUTES.get(bin_id, [])
         if not available:
             return None, None
+
+        # D7用户自选上料点覆盖
+        if hasattr(self, '_d7_feed_override') and self._d7_feed_override:
+            override = self._d7_feed_override
+            for fp, rid in available:
+                if fp == override:
+                    return fp, rid
 
         prefix = bin_id.split('-')[0]
         priority_map = config.FEED_POINT_PRIORITY.get(prefix, {})
