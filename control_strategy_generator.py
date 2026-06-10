@@ -294,6 +294,10 @@ class ControlStrategyGenerator:
                 # 上料完成阶段（阶段四）：关闭，保持最终值
                 switch_value = False
                 weight_value = self._get_weight_for_waiting_phase(ctx, hopper_id)
+            elif state == RouteState.STANDBY:
+                # 节能待机：关闭，保持最终称重值（与WAITING一致）
+                switch_value = False
+                weight_value = self._get_weight_for_waiting_phase(ctx, hopper_id)
             else:  # IDLE 或非活跃路线：初始状态为开
                 switch_value = True
                 weight_value = 0.0

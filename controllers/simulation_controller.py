@@ -1441,6 +1441,8 @@ class SimulationController(QObject):
         # 检查料位是否达到阈值，触发清空状态
         self._check_level_thresholds()
 
+        # 更新清空传感器计时器
+        self._update_clearing_sensor_timers()
         # 检查CLEARING状态是否完成余料清空
         self._check_clearing_completion()
 
@@ -1468,6 +1470,10 @@ class SimulationController(QObject):
         ctx = self.route_state_manager.get_route_context(route_id)
         if not ctx or not ctx.target_bin:
             return 'reverse'
+
+        # D6皮带（Cart4）：一律使用换列策略（中转斗保持开放不屯料）
+        if ctx.assigned_cart == 'Cart4':
+            return 'column_switch'
 
         cart_to_belt = {'Cart1': 'D7', 'Cart2': 'D8', 'Cart3': 'D9'}
         belt_id = cart_to_belt.get(ctx.assigned_cart, '')
@@ -1527,16 +1533,15 @@ class SimulationController(QObject):
                     self._target_mismatch_logged.add(key)
                     print(f"[WARN] {route_id} target_bin mismatch: ctx={ctx_bin} route_to_bin={target_bin}", flush=True)
 
-            # 动态阈值：Cart1/2/3 使用策略阈值，Cart4 使用旧逻辑
-            if ctx.assigned_cart in ('Cart1', 'Cart2', 'Cart3'):
-                strategy = getattr(ctx, 'clearing_strategy', 'reverse')
-                threshold = strategy_thresholds.get(strategy, 95)
-                # D9 皮带（Cart3）：上料将满阈值固定 90%
-                if ctx.assigned_cart == 'Cart3':
-                    threshold = 90
-            else:
-                has_hopper = len(ctx.assigned_hoppers) > 0
-                threshold = self.level_threshold_with_hopper if has_hopper else self.level_threshold_without_hopper
+            # 动态阈值：所有小车使用策略阈值
+            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
+            threshold = strategy_thresholds.get(strategy, 95)
+            # D9 皮带（Cart3）：上料将满阈值固定 90%
+            if ctx.assigned_cart == 'Cart3':
+                threshold = 90
+            # D6 皮带（Cart4）：换列行为但阈值95%
+            if ctx.assigned_cart == 'Cart4':
+                threshold = 95
 
             level = 0.0
             if target_bin in self.small_bins:
@@ -1589,6 +1594,101 @@ class SimulationController(QObject):
                             self.conveyors[final_conveyor].stop()
                     ctx.clearing_start_time = self.total_runtime
 
+    # ========================================================================
+    # 传感器清空检测 — 每段皮带独立判定时间
+    # 距离(m) / 2.5(m/s) + 2s容错
+    # ========================================================================
+
+    # 终点皮带基础距离（传感器到最近料仓P-7的距离）
+    _ENDPOINT_BASE = {'D7': 22.1, 'D8': 17.4, 'D9': 12.1}
+    _LINE_SPACING = 5.4  # 相邻料仓间距
+
+    # 连接中转斗的皮带：固定判定时间(秒)
+    _HOPPER_BELT_TIMEOUTS = {
+        # route1/2/3
+        ('route1', 'S-E1'): 8.4, ('route1', 'S-E4'): 34.4,
+        ('route2', 'S-E2'): 9.6, ('route2', 'S-E4'): 34.4,
+        ('route3', 'S-E5'): 12.3,
+        ('route1', 'S-E8'): 24.7, ('route2', 'S-E8'): 24.7, ('route3', 'S-E8'): 24.7,
+        ('route1', 'S-E10'): 15.3, ('route2', 'S-E10'): 15.3, ('route3', 'S-E10'): 15.3,
+        # route4
+        ('route4', 'S-E6'): 10.6, ('route4', 'S-E7'): 23.3, ('route4', 'S-E9'): 20.2,
+        # route5
+        ('route5', 'S-E6'): 10.6, ('route5', 'S-E7'): 23.3, ('route5', 'S-E9'): 20.2,
+        ('route5', 'S-D5'): 12.3,
+        # route6
+        ('route6', 'S-D13'): 8.0, ('route6', 'S-D2'): 27.0, ('route6', 'S-D4'): 9.6,
+        # route7
+        ('route7', 'S-D1'): 27.0, ('route7', 'S-D3'): 15.9,
+        # route8
+        ('route8', 'S-D4'): 9.6, ('route8', 'S-D2-2'): 7.3,
+    }
+
+    # 终点皮带传感器映射
+    _ENDPOINT_SENSORS = {'D7': 'S-D7', 'D8': 'S-D8', 'D9': 'S-D9', 'D6': 'S-D6'}
+
+    def _calc_endpoint_timeout(self, belt_id: str, target_bin: str) -> float:
+        """计算终点皮带传感器判定时间"""
+        if belt_id not in self._ENDPOINT_BASE:
+            return 30.0
+        # 提取行号
+        try:
+            row = int(target_bin.split('-')[1])
+        except (ValueError, IndexError):
+            row = 7
+        base = self._ENDPOINT_BASE[belt_id]
+        # 总距离 = 基础距离 + 5.4 × (8 - row)
+        distance = base + self._LINE_SPACING * (8 - row)
+        return distance / 2.5 + 2.0
+
+    def _update_clearing_sensor_timers(self):
+        """更新清空传感器计时器（传感器→false后开始倒计时）"""
+        now = self.total_runtime
+        for route_id in list(self.active_routes):
+            ctx = self.route_state_manager.get_route_context(route_id)
+            if not ctx or ctx.state != RouteState.CLEARING:
+                continue
+            if ctx.early_moved_from_clearing:
+                continue  # 顺序策略提前移动时由小车到达处理
+
+            route = config.FEED_ROUTES.get(route_id)
+            if not route:
+                continue
+
+            # 确定终点皮带
+            final_conveyor = route['conveyors'][-1] if route['conveyors'] else None
+            endpoint_sensor = self._ENDPOINT_SENSORS.get(final_conveyor, '')
+
+            # 遍历路线关联的所有传感器
+            for sensor_id in self.route_state_manager.ROUTE_PROXIMITY_SENSORS.get(route_id, []):
+                if sensor_id in ctx.sensor_clear_completed:
+                    continue
+
+                sensor = self.sensors.get(sensor_id)
+                if not sensor:
+                    continue
+
+                # 获取判定时间
+                if sensor_id == endpoint_sensor:
+                    timeout = self._calc_endpoint_timeout(final_conveyor, ctx.target_bin or 'P1-7')
+                else:
+                    timeout = self._HOPPER_BELT_TIMEOUTS.get((route_id, sensor_id), 30.0)
+
+                # 传感器当前状态
+                if sensor.is_active:
+                    # 传感器仍触发→重置计时
+                    if sensor_id in ctx.sensor_clear_timers:
+                        del ctx.sensor_clear_timers[sensor_id]
+                else:
+                    # 传感器熄灭→开始/继续计时
+                    if sensor_id not in ctx.sensor_clear_timers:
+                        ctx.sensor_clear_timers[sensor_id] = now
+                    elapsed = now - ctx.sensor_clear_timers[sensor_id]
+                    if elapsed >= timeout:
+                        ctx.sensor_clear_completed.add(sensor_id)
+                        route_name = route.get('name', route_id)
+                        print(f"[清空传感器] {route_id} {sensor_id} 判定完成 (熄灭{elapsed:.1f}s ≥ {timeout:.1f}s)", flush=True)
+
     def _check_clearing_completion(self):
         """检查CLEARING状态的路线是否完成余料清空（支持策略差异化）"""
         for route_id in list(self.active_routes):
@@ -1637,26 +1737,16 @@ class SimulationController(QObject):
                 if ctx.early_moved_from_clearing:
                     continue
 
-                # 顺序：终点皮带已停止，检查非终点皮带物料是否全部清空进入中转斗
-                has_material = False
-                for material in self.active_materials:
-                    if not material.is_active or not material.current_conveyor:
-                        continue
-                    if material.current_conveyor in route_conveyors and material.current_conveyor != final_conveyor:
-                        has_material = True
-                        break
-                if not has_material:
+                # 传感器判定：检查非终点皮带传感器是否全部完成清空
+                all_sensors = self.route_state_manager.ROUTE_PROXIMITY_SENSORS.get(route_id, [])
+                endpoint_sensor = self._ENDPOINT_SENSORS.get(final_conveyor, '')
+                non_endpoint = [s for s in all_sensors if s != endpoint_sensor]
+                if all(s in ctx.sensor_clear_completed for s in non_endpoint):
                     should_complete = True
             else:
-                # 反序 / 换列：检查路线上所有皮带是否还有物料
-                has_material = False
-                for material in self.active_materials:
-                    if not material.is_active or not material.current_conveyor:
-                        continue
-                    if material.current_conveyor in route_conveyors:
-                        has_material = True
-                        break
-                if not has_material:
+                # 反序/换列：传感器判定所有皮带传感器清空完成
+                all_sensors = self.route_state_manager.ROUTE_PROXIMITY_SENSORS.get(route_id, [])
+                if all(s in ctx.sensor_clear_completed for s in all_sensors):
                     should_complete = True
 
             if should_complete:
@@ -1688,6 +1778,7 @@ class SimulationController(QObject):
                         hopper = self.hoppers[hopper_id]
                         hopper.is_open = True
                         hopper.current_weight = 0.0
+                        hopper.stored_materials.clear()  # 清空残留囤积物料
                         # 阻止称重累加，换列时中转斗不屯料
                         ctx.current_weights[hopper_id] = 0.0
                         # 覆盖生成器写入的数据
@@ -1978,12 +2069,18 @@ class SimulationController(QObject):
 
         seq = result.get('sequence', [])
         if not seq:
+            # D7皮带：下一轮无需补料 → 当前FEEDING清空策略设为反序(95%)
+            if belt_id == 'D7' and belt_id in self._executing_route:
+                route_id = self._executing_route[belt_id]
+                ctx = self.route_state_manager.get_route_context(route_id)
+                if ctx and ctx.state == RouteState.FEEDING:
+                    ctx.clearing_strategy = 'reverse'
+                    print(f"[调度] {belt_id} 无需补料，当前{ctx.target_bin}清空策略→反序(95%)", flush=True)
             # D8皮带：下一轮无需补料时，当前FEEDING路线改用换列规则（阈值88%）
             if belt_id == 'D8' and belt_id in self._executing_route:
                 route_id = self._executing_route[belt_id]
                 ctx = self.route_state_manager.get_route_context(route_id)
                 if ctx and ctx.state == RouteState.FEEDING:
-                    # 当前序列还有剩余（非最后一仓）→ 换列清空
                     remaining = self._scheduled_sequence.get(belt_id, [])
                     if remaining:
                         ctx.clearing_strategy = 'column_switch'
@@ -3311,6 +3408,8 @@ class SimulationController(QObject):
             else:
                 self.cart4_position -= 1
             print(f"[Cart4] 移动: {old_pos} → {self.cart4_position} (目标={self.cart4_target_position})", flush=True)
+            # 同步传感器上报值
+            self.cart4_sensor_position = self.cart4_position
             if self.cart4_position == self.cart4_target_position:
                 self._check_cart_arrival('Cart4')
                 self.cart4_is_moving = False
@@ -3405,6 +3504,8 @@ class SimulationController(QObject):
                         self.cart_positions[cart_id] = current_pos + 1
                     else:
                         self.cart_positions[cart_id] = current_pos - 1
+                    # 同步传感器上报值（实时跟踪实际位置）
+                    self.cart_sensor_positions[cart_id] = self.cart_positions[cart_id]
 
                     # 检查是否有小车到达
                     self._check_virtual_cart_arrival(cart_id)
@@ -3424,7 +3525,7 @@ class SimulationController(QObject):
                     continue
                 print(f"[VirtualArrival] {cart_id} route={route_id} CLEARING+early_moved → 处理到达", flush=True)
 
-            current_pos = self.cart_positions.get(cart_id, 1)
+            current_pos = self.cart_sensor_positions.get(cart_id, 1)
             if current_pos != ctx.cart_target_position:
                 continue
 

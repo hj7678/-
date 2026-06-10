@@ -53,6 +53,8 @@ class RouteContext:
     clearing_start_time: float = 0.0           # 清空开始时间
     early_moved_from_clearing: bool = False    # 是否已提前移动小车
     feeding_start_time: float = 0.0            # 开始FEEDING的时间戳
+    sensor_clear_timers: Dict[str, float] = field(default_factory=dict)  # 传感器ID → 首次熄灭时刻
+    sensor_clear_completed: Set[str] = field(default_factory=set)  # 已完成清空的传感器
 
 
 class RouteStateManager:
@@ -212,6 +214,8 @@ class RouteStateManager:
         ctx.final_weights.clear()
         ctx.material_on_belt.clear()
         ctx.cleared_sensors.clear()
+        ctx.sensor_clear_timers.clear()
+        ctx.sensor_clear_completed.clear()
         # 如果current_weights为空，用pending_release_weights初始化
         if not ctx.current_weights and ctx.pending_release_weights:
             ctx.current_weights = ctx.pending_release_weights.copy()

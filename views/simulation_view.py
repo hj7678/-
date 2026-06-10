@@ -895,16 +895,6 @@ class SimulationView(QWidget):
         """绘制所有中转斗"""
         for hp_id, hp_config in config.TRANSFER_HOPPERS.items():
             self._draw_single_hopper(painter, hp_config, hp_id)
-            # 中转斗4/5/6名称标签绘制在正下方
-            if hp_id in ('hopper4', 'hopper5', 'hopper6'):
-                x, y = hp_config['position']
-                w, h = hp_config['width'], hp_config['height']
-                name = hp_config['name']
-                painter.setPen(QPen(QColor(config.COLORS['text'])))
-                f = QFont(); f.setPointSize(8); f.setBold(True); painter.setFont(f)
-                fm = painter.fontMetrics()
-                tw = fm.horizontalAdvance(name)
-                painter.drawText(int(x - tw/2 + w/2), int(y + h/2 + 14), name)
 
     def _draw_single_hopper(self, painter: QPainter, hopper: dict, hopper_id: str):
         """绘制单个中转斗（工业写实风格 - 更精细）"""
@@ -1181,20 +1171,21 @@ class SimulationView(QWidget):
         font.setBold(True)
         painter.setFont(font)
 
-        # 标签背景
+        # 标签（hopper4/5/6绘制在下方，其余在上方）
         text_width = painter.fontMetrics().horizontalAdvance(name)
-        label_bg_rect = QRectF(int(x + w/2 - text_width/2 - 4), int(y - 22), text_width + 8, 15)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
-        painter.drawRoundedRect(label_bg_rect, 4, 4)
-
-        # 标签边框
-        painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
-        painter.drawRoundedRect(label_bg_rect, 4, 4)
-
-        # 标签文字
-        painter.setPen(QPen(QColor('#FFFFFF')))
-        painter.drawText(int(x + w/2 - text_width/2), int(y - 11), name)
+        if hopper_id in ('hopper4', 'hopper5', 'hopper6'):
+            label_y = int(y + h + 22)
+            painter.setPen(QPen(QColor('#FFFFFF')))
+            painter.drawText(int(x + w/2 - text_width/2), label_y, name)
+        else:
+            label_bg_rect = QRectF(int(x + w/2 - text_width/2 - 4), int(y - 22), text_width + 8, 15)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
+            painter.drawRoundedRect(label_bg_rect, 4, 4)
+            painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
+            painter.drawRoundedRect(label_bg_rect, 4, 4)
+            painter.setPen(QPen(QColor('#FFFFFF')))
+            painter.drawText(int(x + w/2 - text_width/2), int(y - 11), name)
 
         # ========== 12. 状态指示灯 ==========
         status_x = int(x + w - 8)
