@@ -43,6 +43,7 @@ from controllers.fault_diagnosis_adapter import FaultDiagnosisAdapter
 from controllers.tcp_diagnosis_client import TcpDiagnosisClient
 from controllers.tcp_scheduling_client import TcpSchedulingClient
 from scheduling.bin_config import BELT_BINS
+from state_transition_engine import StateTransitionEngine
 from scheduling.config import SILO_MAX_CAP
 
 
@@ -561,6 +562,9 @@ class SimulationController(QObject):
             'D6': False, 'D7': False, 'D8': False, 'D9': False,
         }
         self._d7_feed_override: Optional[str] = None  # D7用户自选上料点
+        # 状态转换引擎（调度回调解耦）
+        self._state_engine = StateTransitionEngine()
+        self._state_engine.set_schedule_callback(self._on_engine_schedule_request)
         self._executing_bin: Dict[str, str] = {}     # belt_id → bin_id
         self._executing_route: Dict[str, str] = {}    # belt_id → route_id
         self._scheduled_sequence: Dict[str, list] = {}   # belt_id → [剩余待执行料仓序列]
@@ -663,6 +667,16 @@ class SimulationController(QObject):
         self._load_initial_levels()
         # 初始化小车位置与分料状态
         self._load_initial_cart_positions()
+        # 配置状态转换引擎路线
+        for rid, r in config.FEED_ROUTES.items():
+            cart = self.route_state_manager.ROUTE_CARTS.get(rid, '')
+            self._state_engine.configure_route(
+                rid,
+                belts=r['conveyors'],
+                hoppers=[h for h in r['hoppers'] if h],
+                cart=cart,
+                endpoint=r['conveyors'][-1] if r['conveyors'] else '',
+            )
         # 初始化消耗速度
         self._load_initial_consumption_rates()
 
@@ -1438,6 +1452,9 @@ class SimulationController(QObject):
             if old_count != len(self.materials):
                 print(f"[清理] materials: {old_count} → {len(self.materials)} (移除{old_count - len(self.materials)}个)", flush=True)
 
+        # 双轨测试：引擎并行判定（仅输出差异，不改变实际状态）
+        self._test_engine_consistency()
+
         # 检查料位是否达到阈值，触发清空状态
         self._check_level_thresholds()
 
@@ -1502,6 +1519,50 @@ class SimulationController(QObject):
             return 'reverse'
         return 'reverse'
 
+    def _test_engine_consistency(self):
+        """双轨测试：对比引擎输出与现有逻辑，每30秒打印差异（不影响实际状态）"""
+        if not hasattr(self, '_last_engine_test'):
+            self._last_engine_test = 0.0
+        if self.total_runtime - self._last_engine_test < 30.0:
+            return
+        self._last_engine_test = self.total_runtime
+        match_count = 0
+        mismatch_count = 0
+
+        for route_id in list(self.active_routes):
+            ctx = self.route_state_manager.get_route_context(route_id)
+            if not ctx:
+                continue
+            # 用引擎判定该路线应进入的状态
+            cart_id = ctx.assigned_cart or ''
+            cart_pos = self.cart_sensor_positions.get(cart_id, 1) if cart_id != 'Cart4' else self.cart4_sensor_position
+            cart_target = ctx.cart_target_position if cart_id != 'Cart4' else self.cart4_target_position
+            cart_moving = ctx.cart_moving
+            level = self._read_level_sensor(ctx.target_bin or '')
+            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
+            has_next = bool(self._scheduled_sequence.get(
+                {'Cart1':'D7','Cart2':'D8','Cart3':'D9'}.get(cart_id,''), []))
+            engine_state, _ = self._state_engine.evaluate(
+                route_id, ctx.state,
+                level_sensors={'__target__': level},
+                cart_sensor={cart_id: cart_pos} if cart_id else {},
+                cart_target=cart_target, cart_moving=cart_moving,
+                proximity_sensors={},
+                clearing_strategy=strategy,
+                schedule_has_next=has_next,
+            )
+            actual = ctx.state.value
+            predicted = engine_state.value
+            if actual != predicted:
+                mismatch_count += 1
+                print(f"[引擎测试] {route_id} 当前={actual} 引擎判定={predicted} "
+                      f"level={level:.1f}% cart={cart_pos}/{cart_target} strategy={strategy}", flush=True)
+            else:
+                match_count += 1
+
+        if match_count + mismatch_count > 0:
+            print(f"[引擎测试] 心跳: {match_count}匹配/{mismatch_count}差异 (共{len(list(self.active_routes))}条活跃路线)", flush=True)
+
     def _check_level_thresholds(self):
         """检查料位是否达到阈值，触发清空状态（支持动态策略阈值）"""
         strategy_thresholds = {'sequential': 98, 'reverse': 95, 'column_switch': 88}
@@ -1543,14 +1604,7 @@ class SimulationController(QObject):
             if ctx.assigned_cart == 'Cart4':
                 threshold = 95
 
-            level = 0.0
-            if target_bin in self.small_bins:
-                level = self.small_bins[target_bin].level_percent
-            elif target_bin.startswith('S'):
-                if hasattr(self, 'view') and self.view:
-                    silo = self.view.silo_compartments.get(target_bin)
-                    if silo:
-                        level = (silo.get('current_level', 0) / silo.get('capacity', 100)) * 100
+            level = self._read_level_sensor(target_bin)
 
             # 缓存序列为空（最后一个料仓）且料位≥80%时，提前请求下一轮调度
             if ctx.assigned_cart in ('Cart1', 'Cart2', 'Cart3') and level >= 80.0:
@@ -2297,6 +2351,10 @@ class SimulationController(QObject):
         print(f"[上料] {route_name} → {bin_name} 开始（上料点：{feed_point}，从待机恢复）", flush=True)
         return True
 
+    def _on_engine_schedule_request(self, belt_id: str):
+        """状态引擎调度回调（解耦：引擎不直调调度服务）"""
+        self._request_immediate_scheduling(belt_id)
+
     def _request_immediate_scheduling(self, belt_id: str, force: bool = False):
         if self._tcp_scheduling_client is None:
             return
@@ -2373,6 +2431,20 @@ class SimulationController(QObject):
                 hopper.belt_speed_multiplier
             )
 
+        # 仅在状态变化时同步中转斗状态到 SensorDataManager（避免每帧写文件）
+        if not hasattr(self, '_last_hopper_write'):
+            self._last_hopper_write = {}
+        for hopper_id, hopper in self.hoppers.items():
+            last = self._last_hopper_write.get(hopper_id, {})
+            sw = hopper.is_open
+            wt = hopper.get_display_weight()
+            if last.get('switch') != sw:
+                self.sensor_data_manager.write_hopper_switch(hopper_id, sw)
+                last['switch'] = sw
+            if abs(last.get('weight', -1) - wt) > 0.001:
+                self.sensor_data_manager.write_hopper_weight(hopper_id, wt)
+                last['weight'] = wt
+            self._last_hopper_write[hopper_id] = last
 
     def _update_materials(self, delta_seconds: float):
         """更新物料位置"""
@@ -3883,6 +3955,19 @@ class SimulationController(QObject):
     def get_level_sensor(self, bin_id: str) -> float:
         """获取料位传感器值"""
         return self.sensor_data_manager.read_level_sensor(bin_id) or 0.0
+
+    def _read_level_sensor(self, bin_id: str) -> float:
+        """统一传感器抽象：读取料位百分比（仿真/真实共用接口）"""
+        if bin_id in self.small_bins:
+            return self.small_bins[bin_id].level_percent
+        if bin_id.startswith('S'):
+            if hasattr(self, 'view') and self.view:
+                silo = self.view.silo_compartments.get(bin_id)
+                if silo:
+                    cap = silo.get('capacity', 100)
+                    cur = silo.get('current_level', 0)
+                    return cur / cap * 100 if cap > 0 else 0.0
+        return 0.0
 
     def get_all_level_sensors(self) -> Dict[str, float]:
         """获取所有料位传感器值"""

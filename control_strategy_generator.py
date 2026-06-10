@@ -302,18 +302,14 @@ class ControlStrategyGenerator:
                 switch_value = True
                 weight_value = 0.0
 
-            # 调试日志
-            if should_print or self._hopper_debug_counter == 1:
-                ctx_state = ctx.state.value if ctx else 'None'
-                prev_state = getattr(ctx, 'previous_state', None) if ctx else None
-                print(f"[HOPPER] t={self._hopper_debug_counter} hopper={hopper_id} route={route_id} "
-                      f"state={ctx_state} prev={prev_state} switch={switch_value} weight={weight_value:.4f}")
+            # [调试] HOPPER日志已注释
+            # if should_print or self._hopper_debug_counter == 1:
+            #     ctx_state = ctx.state.value if ctx else 'None'
+            #     prev_state = getattr(ctx, 'previous_state', None) if ctx else None
+            #     print(f"[HOPPER] t={self._hopper_debug_counter} hopper={hopper_id} route={route_id} "
+            #           f"state={ctx_state} prev={prev_state} switch={switch_value} weight={weight_value:.4f}")
 
-            # 实际更新中转斗的开关状态（用于控制物料流动）
-            if hasattr(hopper, 'is_open'):
-                hopper.is_open = switch_value
-
-            # 收集数据，稍后批量写入
+            # 传感器数据收集（统一通过 SensorDataManager 输出，不直接操作 hopper 对象）
             hopper_switches[hopper_id] = switch_value
             hopper_weights[hopper_id] = weight_value
 
@@ -363,7 +359,7 @@ class ControlStrategyGenerator:
             delta = min(decrement_per_sec * self.last_update_interval, pending_weight)
             new_pending = pending_weight - delta
             ctx.pending_release_weights[hopper_id] = new_pending
-            print(f"[HOPPER FEEDING] hopper={hopper_id} releasing residual: {pending_weight:.4f} -> {new_pending:.4f}")
+            # print(f"[HOPPER FEEDING] hopper={hopper_id} releasing residual: {pending_weight:.4f} -> {new_pending:.4f}")
             return max(0.0, new_pending)
         else:
             # 无余料，返回0（正常上料时称重显示为0）
@@ -391,7 +387,7 @@ class ControlStrategyGenerator:
             )
             ctx.final_weights[hopper_id] = final_weight
             ctx.current_weights[hopper_id] = 0.0
-            print(f"[HOPPER CLEARING] hopper={hopper_id} calculated final_weight={final_weight:.4f}")
+            # print(f"[HOPPER CLEARING] hopper={hopper_id} calculated final_weight={final_weight:.4f}")
 
         # 获取当前值和最终值
         final_weight = ctx.final_weights.get(hopper_id, 0.0)
@@ -403,7 +399,7 @@ class ControlStrategyGenerator:
             delta = min(increment_per_sec * self.last_update_interval, final_weight - current_weight)
             weight_value = current_weight + delta
             ctx.current_weights[hopper_id] = weight_value
-            print(f"[HOPPER CLEARING] hopper={hopper_id} accumulating: {current_weight:.4f} -> {weight_value:.4f} (final={final_weight:.4f})")
+            # print(f"[HOPPER CLEARING] hopper={hopper_id} accumulating: {current_weight:.4f} -> {weight_value:.4f} (final={final_weight:.4f})")
             return weight_value
         else:
             return final_weight
