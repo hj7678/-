@@ -30,6 +30,10 @@ class DiagnosisServer:
         self._server: Optional[socket.socket] = None
         self._running = False
 
+        # 真实诊断引擎
+        from fault_diagnosis.engine import DiagnosisEngine
+        self._engine = DiagnosisEngine()
+
         # 最新诊断结果缓存
         self._latest_results: List[dict] = []
         self._results_lock = threading.Lock()
@@ -121,26 +125,62 @@ class DiagnosisServer:
         return {"ok": False, "error": f"unknown type: {msg_type}"}
 
     def _run_diagnosis(self, snapshot: dict) -> List[dict]:
-        """运行诊断规则 — 当前为桩实现，后续接入真实诊断引擎"""
-        results = []
+        """运行真实诊断引擎"""
+        from fault_diagnosis.types import SystemSnapshot
 
-        # 接近开关诊断：检测卡低/卡高
-        sensors = snapshot.get("sensors", [])
-        belts = {b["id"]: b for b in snapshot.get("belts", [])}
+        # 构建 SystemSnapshot
+        sys_snap = SystemSnapshot()
 
-        for s in sensors:
-            sid = s.get("id", "")
-            is_active = s.get("is_active", False)
-            conv_id = s.get("conveyor", "")
-            belt = belts.get(conv_id, {})
+        # 路线状态
+        for route_id, info in snapshot.get("active_routes", {}).items():
+            sys_snap.route_states[route_id] = info.get("state", "idle")
 
-            # 皮带运行中但传感器无信号 → 可能卡低
-            if belt.get("is_running") and belt.get("speed", 0) > 0 and not is_active:
-                results.append({
-                    "sensor_id": sid,
-                    "fault_type": "stuck_low",
-                    "confidence": 0.7,
-                    "description": f"{sid} 皮带运行中无触发信号",
-                })
+        # 皮带
+        for b in snapshot.get("belts", []):
+            cid = b["id"]
+            sys_snap.conveyors[cid] = type('obj', (), {
+                'is_running': b.get("is_running", False),
+                'speed': b.get("speed", 0),
+            })()
 
-        return results
+        # 接近开关
+        for s in snapshot.get("sensors", []):
+            sid = s["id"]
+            sys_snap.sensors[sid] = type('obj', (), {
+                'is_active': s.get("is_active", False),
+                'conveyor': s.get("conveyor", ""),
+            })()
+
+        # 中转斗
+        for h in snapshot.get("hoppers", []):
+            hid = h["id"]
+            sys_snap.hoppers[hid] = type('obj', (), {
+                'is_open': h.get("is_open", False),
+                'weight': h.get("weight", 0),
+                'stored_materials': [None] * h.get("stored_count", 0),
+            })()
+
+        # 小车
+        for c in snapshot.get("carts", []):
+            cid = c["id"]
+            sys_snap.carts[cid] = type('obj', (), {
+                'position': c.get("position", 1),
+                'target': c.get("target", 1),
+                'moving': c.get("moving", False),
+                'divert': c.get("divert", [False, False]),
+            })()
+
+        # 运行诊断
+        try:
+            results = self._engine.diagnose(sys_snap)
+            return [
+                {
+                    "sensor_id": r.sensor_id if hasattr(r, 'sensor_id') else "",
+                    "fault_type": r.fault_type if hasattr(r, 'fault_type') else "unknown",
+                    "confidence": r.confidence if hasattr(r, 'confidence') else 0.0,
+                    "description": r.description if hasattr(r, 'description') else str(r),
+                }
+                for r in results
+            ]
+        except Exception as e:
+            return [{"fault_type": "error", "description": str(e), "confidence": 0.0}]

@@ -146,6 +146,8 @@ class SimulationController(QObject):
         self._tcp_diagnosis_client = None
         # TCP 调度客户端（调度算法服务 :8891/:8892/:8893）
         self._tcp_scheduling_client = None
+        # FeedingMaster 桥接 (仿真 → 上料主控)
+        self._feeding_bridge = None
         # 诊断模式："local" / "tcp"
         self._diagnosis_mode = "local"
         # 最新调度结果 belt_id → dict
@@ -1035,6 +1037,10 @@ class SimulationController(QObject):
         # 累加到总运行时间
         self.total_runtime += delta_seconds
 
+        # FeedingMaster 桥接: 发送传感器状态
+        if self._feeding_bridge is not None:
+            self._feeding_bridge.tick()
+
         self._update_hoppers(delta_seconds)
         self._update_materials(delta_seconds)
         self._update_sensors()
@@ -1707,6 +1713,35 @@ class SimulationController(QObject):
         self._scheduled_sequence.clear()
         self._last_auto_schedule_request.clear()
         self._last_emergency_schedule.clear()
+
+    # ============ FeedingMaster 桥接 ============
+
+    def start_feeding_bridge(self):
+        """启动 FeedingMaster 桥接（仿真 → 上料主控）"""
+        from controllers.simulation_feeding_bridge import SimulationFeedingBridge
+        if self._feeding_bridge is None:
+            self._feeding_bridge = SimulationFeedingBridge(self)
+            self._feeding_bridge.command_received.connect(self._on_feeding_commands)
+            self._feeding_bridge.stock_updated.connect(self._on_stock_levels_updated)
+        self._feeding_bridge.start()
+        print("[桥接] FeedingMaster 桥接已启动", flush=True)
+
+    def stop_feeding_bridge(self):
+        if self._feeding_bridge is not None:
+            self._feeding_bridge.stop()
+        print("[桥接] FeedingMaster 桥接已停止", flush=True)
+
+    def _on_feeding_commands(self, commands: list):
+        """收到 FeedingMaster 控制指令，应用到仿真对象"""
+        if self._feeding_bridge is not None:
+            self._feeding_bridge.apply_commands(commands)
+
+    def _on_stock_levels_updated(self, levels: list):
+        """Stock Management 料位更新 → 同步到仿真显示"""
+        for b in levels:
+            bin_id = b.get('bin_id', '')
+            if bin_id in self.small_bins:
+                self.small_bins[bin_id].current_level = b.get('level_tons', 0)
 
     def _on_tcp_schedule_received(self, belt_id, result):
         self._tcp_schedules[belt_id] = result
