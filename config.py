@@ -88,20 +88,57 @@ def _calc_pixel_length(p1, p2):
     import math
     return int(math.sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2))
 
+def _apply_external_overrides():
+    """从 config.json 加载外部覆盖（透明地合并到 config_loader）"""
+    try:
+        from config_loader import get_config_loader
+        loader = get_config_loader()
+        loader.load()
+        return loader
+    except Exception:
+        return None
+
+_loader = _apply_external_overrides()
+
+def _build_conveyors():
+    """从pos.py构建皮带配置，config.json 中的 conveyors 节可覆盖 length/x/y"""
+    all_conv = pos.get_all_conveyors()
+    result = {}
+    overrides = (_loader._overrides.get('conveyors', {}) if _loader else {})
+    for cid, c in all_conv.items():
+        ov = overrides.get(cid, {})
+        result[cid] = {
+            'name': c.get('name', cid),
+            'length': ov.get('length', c.get('length', 20)),
+            'speed': c.get('speed', DEFAULT_SPEED),
+            'pixel_length': _calc_pixel_length(
+                (ov.get('x1', c['start_pos'][0]), ov.get('y1', c['start_pos'][1])),
+                (ov.get('x2', c['end_pos'][0]), ov.get('y2', c['end_pos'][1])),
+            ),
+            'start_pos': (ov.get('x1', c['start_pos'][0]), ov.get('y1', c['start_pos'][1])),
+            'end_pos': (ov.get('x2', c['end_pos'][0]), ov.get('y2', c['end_pos'][1])),
+            'direction': c.get('direction', 'forward'),
+            'color': '#FFFFFF',
+            'type': c.get('type', 'NORMAL'),
+        }
+    return result
+
 CONVEYORS = _build_conveyors()
 
 # =============================================================================
-# 传感器配置 - 从pos.py读取（包含 conveyor 和 distance_from_start）
+# 传感器配置 - 从pos.py读取，config.json 中的 sensors 节可覆盖 x/y/distance
 # =============================================================================
 def _build_sensors():
     """从pos.py构建传感器配置"""
     result = {}
+    overrides = (_loader._overrides.get('sensors', {}) if _loader else {})
     for sid, s in pos.SENSORS.items():
+        ov = overrides.get(sid, {})
         result[sid] = {
             'name': s['name'],
-            'position': (s['x'], s['y']),
+            'position': (ov.get('x', s['x']), ov.get('y', s['y'])),
             'conveyor': s.get('conveyor', sid),
-            'distance_from_start': s.get('distance_from_start', 0),
+            'distance_from_start': ov.get('distance_from_start', s.get('distance_from_start', 0)),
         }
     return result
 
@@ -111,14 +148,16 @@ SENSORS = _build_sensors()
 # 中转斗配置 - 从pos.py读取（包含 input/output 皮带关联）
 # =============================================================================
 def _build_hoppers():
-    """从pos.py构建中转斗配置"""
+    """从pos.py构建中转斗配置，config.json 中的 hoppers 节可覆盖 x/y/width/height"""
     result = {}
+    overrides = (_loader._overrides.get('hoppers', {}) if _loader else {})
     for hid, h in pos.TRANSFER_HOPPERS.items():
+        ov = overrides.get(hid, {})
         result[hid] = {
             'name': h['name'],
-            'position': (h['x'], h['y']),
-            'width': h['width'],
-            'height': h['height'],
+            'position': (ov.get('x', h['x']), ov.get('y', h['y'])),
+            'width': ov.get('width', h['width']),
+            'height': ov.get('height', h['height']),
             'input_conveyor': h.get('input', []),
             'output_conveyor': h.get('output', ''),
             'capacity': 20,
