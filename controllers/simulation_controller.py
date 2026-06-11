@@ -45,415 +45,11 @@ from controllers.tcp_scheduling_client import TcpSchedulingClient
 from scheduling.bin_config import BELT_BINS
 from state_transition_engine import StateTransitionEngine
 from scheduling.config import SILO_MAX_CAP
-
-
-class Conveyor:
-    """皮带模型
-    
-    每条皮带使用自己的像素/米比例来计算速度，确保物料以真实的速度移动。
-    """
-
-    def __init__(self, conv_id: str, conv_config: dict):
-        self.id = conv_id
-        self.name = conv_config['name']
-        self.length = conv_config['length']  # 米
-        self.pixel_length = conv_config['pixel_length']  # 像素
-        self.start_pos = conv_config['start_pos']
-        self.end_pos = conv_config['end_pos']
-        self.direction = conv_config.get('direction', 'forward')
-        self.color = conv_config.get('color', '#FFFFFF')
-
-        # 当前速度（像素/秒）
-        self.current_speed_pps = 0
-        self.is_running = False
-        self.materials_on_belt: List[Material] = []
-
-    @property
-    def current_speed(self) -> float:
-        return self.current_speed_pps
-
-    @property
-    def is_vertical(self) -> bool:
-        return self.start_pos[0] == self.end_pos[0]
-
-    def start(self, speed_mps: float):
-        """启动皮带
-
-        Args:
-            speed_mps: 速度（米/秒）
-        """
-        meter_to_pixel = self.pixel_length / self.length if self.length > 0 else 1
-        self.current_speed_pps = speed_mps * meter_to_pixel
-        self.is_running = True
-
-    def stop(self):
-        """停止皮带"""
-        self.is_running = False
-        self.current_speed_pps = 0
-
-    def get_position_at_distance(self, pixel_distance: float) -> tuple:
-        """根据像素距离获取位置"""
-        if self.pixel_length == 0:
-            return self.start_pos
-
-        t = min(pixel_distance / self.pixel_length, 1.0)
-        x = self.start_pos[0] + (self.end_pos[0] - self.start_pos[0]) * t
-        y = self.start_pos[1] + (self.end_pos[1] - self.start_pos[1]) * t
-        return (x, y)
-
-    def get_cart_stop_position(self, bin_id: str) -> tuple:
-        """根据目标小仓获取小车停靠位置（像素）"""
-        # 解析 bin_id (如 "P1-3" -> row=2)
-        parts = bin_id.split('-')
-        if len(parts) != 2:
-            return self.end_pos
-
-        row_num = int(parts[1]) - 1  # 1-7 -> 0-6
-
-        # 计算皮带上每个小仓对应的距离
-        # P1-1 对应皮带终点（顶部），P1-7 对应皮带起点（底部）
-        conveyor_height = abs(self.end_pos[1] - self.start_pos[1])
-        segment_height = conveyor_height / 7
-
-        # 计算Y坐标
-        target_y = self.end_pos[1] + row_num * segment_height
-
-        return (self.end_pos[0], target_y)
-
-    def get_distance_for_bin(self, bin_id: str) -> float:
-        """根据目标小仓获取物料需要停止的像素距离"""
-        parts = bin_id.split('-')
-        if len(parts) == 2:
-            row_num = int(parts[1]) - 1  # 1-7 -> 0-6
-
-            conveyor_height = abs(self.end_pos[1] - self.start_pos[1])
-            segment_height = conveyor_height / 7
-            stop_y = self.end_pos[1] + row_num * segment_height
-
-            # 计算从起点到停止点的像素距离
-            dx = self.end_pos[0] - self.start_pos[0]
-            dy = stop_y - self.start_pos[1]
-            return math.sqrt(dx * dx + dy * dy)
-
-        # 高位储料仓格式：S1-S12，D6皮带上需要根据小车位置计算停止距离
-        if bin_id.startswith('S') and bin_id[1:].isdigit():
-            # 这需要在SimulationController中获取小车4位置
-            # 这里返回估算值，实际距离在_check_material_at_cart4_position中计算
-            return self.pixel_length
-
-        return self.pixel_length
-
-
-class Sensor:
-    """接近开关传感器模型"""
-
-    def __init__(self, sensor_id: str, sensor_config: dict):
-        self.sensor_id = sensor_id
-        self.name = sensor_config['name']
-        # 支持 position 或 x/y 两种格式
-        if 'position' in sensor_config:
-            self.position = sensor_config['position']
-        else:
-            self.position = (sensor_config['x'], sensor_config['y'])
-        self.conveyor = sensor_config['conveyor']
-        self.distance_from_start = sensor_config.get('distance_from_start', 0)
-
-        self.is_active = False  # 展示给UI的状态（可能受故障模拟影响）
-        self.real_state = False  # 真实的物理状态
-        self.trigger_count = 0
-        self.last_trigger_time = 0
-        self.hold_timer = 0  # 传感器保持时间(ms)
-
-    def trigger(self, time_ms: int):
-        """触发传感器"""
-        if not self.real_state:
-            self.real_state = True
-            self.trigger_count += 1
-            self.last_trigger_time = time_ms
-            self.hold_timer = 200  # 保持200ms
-
-    def update(self, delta_time: int):
-        """更新传感器状态（延迟释放）"""
-        if self.hold_timer > 0:
-            self.hold_timer -= delta_time
-            if self.hold_timer <= 0:
-                self.hold_timer = 0
-                self.real_state = False
-
-    def release(self):
-        """释放传感器"""
-        self.real_state = False
-        self.hold_timer = 0
-
-
-class TransferHopper:
-    """中转斗模型"""
-
-    def __init__(self, hopper_id: str, hopper_config: dict):
-        self.id = hopper_id
-        self.hopper_id = hopper_id  # 别名，用于匹配route_hoppers配置
-        self.name = hopper_config['name']
-        self.position = hopper_config['position']
-        self.width = hopper_config['width']
-        self.height = hopper_config['height']
-        self.input_conveyor = hopper_config['input_conveyor']  # 可输入的皮带列表
-        self.output_conveyor = hopper_config['output_conveyor']  # 输出皮带
-
-        # 容量配置（吨）：8500kg
-        self.capacity_tons = 8.5
-        self.current_weight = 0.0  # 当前重量（吨）
-        self.fill_rate = 0.195  # 进料速率 t/s
-
-        # 斗开关状态：
-        # - is_open: 用户手动设置的开关状态（UI显示用）
-        # - switch_fault_mode: 故障模式（实际作用于上料过程，对UI不可见）
-        # 实际生效状态 = 故障模式? (故障状态) : (手动设置)
-        self.is_open = True  # 用户手动设置的开关状态
-        self._manual_switch_state = True  # 记录用户手动设置的开关状态
-
-        # 称重传感器值
-        self.weight = 0.0
-
-        # 清空阶段计算出的余料重量（吨）
-        # 当开关关闭时，用于显示皮带上剩余物料的重量
-        self.residual_weight = 0.0
-
-        self.is_active = False
-
-        # 故障相关属性
-        self.switch_fault_mode = None
-        self.weight_fault_mode = None
-        self.weight_offset = 0.0
-        self.belt_speed_multiplier = 1.0
-
-        # 斗内暂存的物料列表（当开关卡住时使用）
-        self.stored_materials = []  # [{'material': Material, 'arrival_time': float}, ...]
-
-    @property
-    def stored_count(self) -> int:
-        """存储的物料数量"""
-        return len(self.stored_materials)
-    def capacity(self) -> float:
-        """兼容旧代码，返回整数容量"""
-        return int(self.capacity_tons)
-
-    @property
-    def current_level(self) -> float:
-        """兼容旧代码，返回整数料位"""
-        return int(self.current_weight)
-
-    @property
-    def level_percent(self) -> float:
-        return (self.current_weight / self.capacity_tons) * 100
-
-    @property
-    def is_full(self) -> bool:
-        return self.current_weight >= self.capacity_tons
-
-    def get_display_weight(self) -> float:
-        """获取显示用的称重值
-
-        逻辑：
-        - 开关打开时（正常补料）：返回 stored_materials 数量对应的重量
-        - 开关关闭时（清空余料）：返回当前存储的物料重量
-        - 考虑故障模式的影响
-        """
-        if self.weight_fault_mode == 'stuck_zero':
-            return 0.0
-
-        # 基于存储的物料数量计算重量
-        # 每个物料 0.1t
-        stored_weight = len(self.stored_materials) * config.MATERIAL_WEIGHT
-
-        if self.weight_fault_mode == 'offset':
-            import random
-            effective_weight = stored_weight * random.uniform(0.8, 1.2) + self.weight_offset
-            return effective_weight
-        return stored_weight
-
-    def add_stored_weight(self, weight_tons: float):
-        """增加存储的物料重量"""
-        self.residual_weight += weight_tons
-
-    def subtract_stored_weight(self, weight_tons: float):
-        """减少存储的物料重量"""
-        self.residual_weight = max(0, self.residual_weight - weight_tons)
-
-    def get_stored_material_count(self) -> int:
-        """获取存储的物料数量"""
-        return len(self.stored_materials)
-
-    def get_current_weight(self) -> float:
-        """获取当前重量（吨）"""
-        return self.current_weight
-
-    def get_effective_switch_state(self) -> bool:
-        """
-        获取实际生效的开关状态（实际作用于上料过程）
-        优先级：故障模式 > 用户手动设置
-        """
-        # 故障模式决定实际状态
-        if self.switch_fault_mode == 'stuck_closed':
-            return False  # 卡在关
-        elif self.switch_fault_mode == 'stuck_open':
-            return True   # 卡在开
-        # 无故障时，使用用户手动设置的状态
-        return self.is_open
-
-    def get_display_switch_state(self) -> bool:
-        """
-        获取显示用的开关状态（用于UI显示）
-        返回用户手动设置的状态，而不是故障后的状态
-        """
-        return self.is_open
-
-    def store_material(self, material: Material, current_time: float):
-        """物料进入斗中存储（当开关关闭时）"""
-        self.stored_materials.append({
-            'material': material,
-            'arrival_time': current_time
-        })
-        # 累加到余料重量（用于显示）
-        self.residual_weight += config.MATERIAL_WEIGHT
-        self.current_weight = len(self.stored_materials) * config.MATERIAL_WEIGHT
-        self.weight = self.current_weight
-        self.is_active = True
-
-    def can_release_material(self) -> bool:
-        """检查是否可以释放物料"""
-        if not self.get_effective_switch_state():
-            return False  # 开关关着，不能释放
-        if self.current_weight <= 0 and len(self.stored_materials) == 0:
-            return False
-        return True
-
-    def release_material(self) -> Optional[Material]:
-        """释放一个物料到下一皮带"""
-        if not self.can_release_material():
-            return None
-        if len(self.stored_materials) == 0:
-            return None
-
-        stored = self.stored_materials.pop(0)
-        material = stored['material']
-        # 减少重量
-        self.current_weight -= config.MATERIAL_WEIGHT
-        self.current_weight = max(self.current_weight, 0)
-        # 同步更新 residual_weight
-        self.residual_weight = self.current_weight
-        self.weight = self.current_weight
-        return material
-
-    def receive_material_direct(self):
-        """物料直通通过（开关开着时）"""
-        self.is_active = True
-
-    def calculate_residual_weight(self, conveyors: dict, route_hoppers: list, route_conveyors: list, route_id: str = None) -> float:
-        """计算该中转斗在CLEARING状态下的余料称重
-
-        Args:
-            conveyors: 皮带字典 {conv_id: Conveyor对象}
-            route_hoppers: 路线的所有中转斗列表，如 [None, 'hopper1', 'hopper3', 'hopper4', None]
-            route_conveyors: 路线的所有皮带列表，如 ['E5', 'E8', 'E10', 'D7']
-            route_id: 路线ID，用于从 CLEARING_ROUTE_CONVEYORS 获取皮带对应关系
-
-        Returns:
-            余料重量（吨）
-
-        规则：
-        - 如果 CLEARING_ROUTE_CONVEYORS 中有该(中转斗,路线)组合的配置，累加所有皮带
-        - 否则使用原来的逻辑：只计算当前中转斗对应的一段皮带
-        """
-        import pos
-        hopper_id = self.hopper_id
-
-        # 尝试从 CLEARING_ROUTE_CONVEYORS 获取多皮带配置（仅清空余料模式）
-        if route_id:
-            key = (hopper_id, route_id)
-            conveyor_ids = pos.CLEARING_ROUTE_CONVEYORS.get(key)
-            if conveyor_ids:
-                total_weight = 0.0
-                for conv_id in conveyor_ids:
-                    conv = conveyors.get(conv_id)
-                    if conv and hasattr(conv, 'length'):
-                        material_count = (conv.length / 2.5) * 2
-                        total_weight += material_count * 0.1
-                return total_weight
-
-        # 回退：使用原来的单皮带逻辑
-        if hopper_id not in route_hoppers:
-            return 0.0
-
-        hopper_idx = route_hoppers.index(hopper_id)
-
-        if hopper_idx < len(route_conveyors):
-            conv_id = route_conveyors[hopper_idx]
-            conv = conveyors.get(conv_id)
-            if conv and hasattr(conv, 'length'):
-                total_length = conv.length
-                material_count = (total_length / 2.5) * 2
-                return material_count * 0.1
-
-        return 0.0
-
-    def reset(self):
-        """重置中转斗"""
-        self.current_weight = 0.0
-        self.weight = 0.0
-        self.residual_weight = 0.0
-        self.is_open = True
-        self._manual_switch_state = True
-        self.is_active = False
-        self.stored_materials = []
-
-
-class SmallBin:
-    """高位配料站小仓模型"""
-
-    def __init__(self, bin_id: str, bin_config: dict):
-        self.id = bin_id
-        self.name = bin_config['name']
-        self.column = bin_config['column']
-        self.row = bin_config['row']
-        self.target_conveyor = bin_config['target_conveyor']  # D7/D8/D9
-        self.capacity = bin_config.get('capacity', config.BATCHING_BIN_CAPACITY)  # 容量（吨）
-        self.current_level = 0.0  # 当前料位（吨）
-        self.consumption_rate = 0.01  # 消耗速度 (t/s)
-
-    @property
-    def level_percent(self) -> float:
-        """料位百分比"""
-        return (self.current_level / self.capacity) * 100 if self.capacity > 0 else 0
-
-    @property
-    def is_full(self) -> bool:
-        """是否满仓"""
-        return self.current_level >= self.capacity
-
-    def receive_material(self, weight_tons: float = None) -> bool:
-        """
-        接收物料（按吨计算）
-
-        Args:
-            weight_tons: 物料重量（吨），每个物料 0.1t
-
-        Returns:
-            是否接收成功
-        """
-        if weight_tons is None:
-            weight_tons = config.MATERIAL_WEIGHT  # 每个物料 0.1t
-
-        new_level = self.current_level + weight_tons
-        if new_level >= self.capacity:
-            self.current_level = self.capacity
-            return False
-        self.current_level = new_level
-        return True
-
-    def reset(self):
-        """重置小仓"""
-        self.current_level = 0.0
-        self.consumption_rate = 0.01
+from belt_logger import belt_log, sys_log
+from controllers.plc_runtime.models import (
+    Conveyor, Sensor, TransferHopper, SmallBin,
+    _FallbackSensor, _FALLBACK_SENSOR,
+)
 
 
 class SimulationController(QObject):
@@ -702,6 +298,7 @@ class SimulationController(QObject):
                     self.control_strategy_generator.set_level_sensor(bin_id, level_percent)
         except Exception as e:
             print(f"[初始化] 加载料位失败: {e}", flush=True)
+            belt_log('system').info(f"[初始化] 加载料位失败: {e}")
 
     def _load_initial_cart_positions(self):
         """从sensor_data_manager加载小车位置与分料状态"""
@@ -724,6 +321,7 @@ class SimulationController(QObject):
                         self.cart_divert[cart_id] = (left_div, right_div)
         except Exception as e:
             print(f"[初始化] 加载小车位置失败: {e}", flush=True)
+            belt_log('system').info(f"[初始化] 加载小车位置失败: {e}")
 
     def _load_initial_consumption_rates(self):
         """从sensor_data_manager加载消耗速度"""
@@ -735,6 +333,7 @@ class SimulationController(QObject):
                     self.small_bins[bin_id].consumption_rate = rate
         except Exception as e:
             print(f"[初始化] 加载消耗速度失败: {e}", flush=True)
+            belt_log('system').info(f"[初始化] 加载消耗速度失败: {e}")
 
     def _on_route_state_change(self, route_id: str, old_state, new_state):
         """路线状态变更回调"""
@@ -757,6 +356,7 @@ class SimulationController(QObject):
         if feed_point and feed_point != 'silo_out':
             if not self.is_route_available(route_id):
                 print(f"[启动失败] {route_id} 上料点{feed_point}无原料", flush=True)
+                belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[启动失败] {route_id} 上料点{feed_point}无原料")
                 return False
 
         # 获取目标料仓
@@ -782,6 +382,7 @@ class SimulationController(QObject):
         # 通过路线状态机启动路线（进入MOVING_TO_TARGET状态）
         if not self.route_state_manager.start_route(route_id, target_bin):
             print(f"[启动失败] {route_id} 资源被占用（中转斗被其他路线锁定）", flush=True)
+            belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[启动失败] {route_id} 资源被占用（中转斗被其他路线锁定）")
             return False
 
         # 获取小车ID
@@ -1004,14 +605,17 @@ class SimulationController(QObject):
         ctx = self.route_state_manager.get_route_context(route_id)
         if not ctx:
             print(f"[到达] {route_id} ctx为None!", flush=True)
+            belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} ctx为None!")
             return
 
         if ctx.state != RouteState.MOVING_TO_TARGET:
             print(f"[到达] {route_id} 状态={ctx.state.value} 非MOVING_TO_TARGET，跳过", flush=True)
+            belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 状态={ctx.state.value} 非MOVING_TO_TARGET，跳过")
             return
 
         if route_id in self._pending_stop_after_cart_arrival:
             print(f"[到达] {route_id} 在pending_stop中，执行停止", flush=True)
+            belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 在pending_stop中，执行停止")
             self._pending_stop_after_cart_arrival.discard(route_id)
             self._complete_stop_route(route_id)
             return
@@ -1032,10 +636,12 @@ class SimulationController(QObject):
                 if conv_id in self.conveyors:
                     self.conveyors[conv_id].start(self.speed)
                     print(f"[到达] {route_id} 启动皮带 {conv_id}", flush=True)
+                    belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 启动皮带 {conv_id}")
             for hopper_id in ctx.assigned_hoppers:
                 if hopper_id in self.hoppers:
                     self.hoppers[hopper_id].is_open = True
                     print(f"[到达] {route_id} 打开中转斗 {hopper_id}", flush=True)
+                    belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 打开中转斗 {hopper_id}")
 
     def set_route_silo_bin(self, route_id: str, silo_bin: str):
         """设置路线⑧⑨的起点发料仓（S仓）"""
@@ -1451,9 +1057,7 @@ class SimulationController(QObject):
             self.materials.extend(active)
             if old_count != len(self.materials):
                 print(f"[清理] materials: {old_count} → {len(self.materials)} (移除{old_count - len(self.materials)}个)", flush=True)
-
-        # 双轨测试：引擎并行判定（仅输出差异，不改变实际状态）
-        self._test_engine_consistency()
+                belt_log('system').info(f"[清理] materials: {old_count} → {len(self.materials)} (移除{old_count - len(self.materials)}个)")
 
         # 检查料位是否达到阈值，触发清空状态
         self._check_level_thresholds()
@@ -1519,49 +1123,49 @@ class SimulationController(QObject):
             return 'reverse'
         return 'reverse'
 
-    def _test_engine_consistency(self):
-        """双轨测试：对比引擎输出与现有逻辑，每30秒打印差异（不影响实际状态）"""
-        if not hasattr(self, '_last_engine_test'):
-            self._last_engine_test = 0.0
-        if self.total_runtime - self._last_engine_test < 30.0:
-            return
-        self._last_engine_test = self.total_runtime
-        match_count = 0
-        mismatch_count = 0
+    def _engine_transition(self, route_id: str) -> tuple:
+        """引擎驱动状态转换判定"""
+        ctx = self.route_state_manager.get_route_context(route_id)
+        if not ctx:
+            return None, {}
+        cart_id = ctx.assigned_cart or ''
+        cart_pos = self.cart_sensor_positions.get(cart_id, 1) if cart_id != 'Cart4' else int(self.cart4_sensor_position)
+        cart_target = ctx.cart_target_position if cart_id != 'Cart4' else self.cart4_target_position
+        cart_moving = ctx.cart_moving
+        target_bin = self.route_to_bin.get(route_id) or ctx.target_bin or ''
+        level = self._read_level_sensor(target_bin)
+        strategy = getattr(ctx, 'clearing_strategy', 'reverse')
+        has_next = bool(self._scheduled_sequence.get(
+            {'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,''), []))
+        empty_round = not has_next and not self._scheduled_sequence.get(
+            {'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,''), True)
 
-        for route_id in list(self.active_routes):
-            ctx = self.route_state_manager.get_route_context(route_id)
-            if not ctx:
-                continue
-            # 用引擎判定该路线应进入的状态
-            cart_id = ctx.assigned_cart or ''
-            cart_pos = self.cart_sensor_positions.get(cart_id, 1) if cart_id != 'Cart4' else self.cart4_sensor_position
-            cart_target = ctx.cart_target_position if cart_id != 'Cart4' else self.cart4_target_position
-            cart_moving = ctx.cart_moving
-            level = self._read_level_sensor(ctx.target_bin or '')
-            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
-            has_next = bool(self._scheduled_sequence.get(
-                {'Cart1':'D7','Cart2':'D8','Cart3':'D9'}.get(cart_id,''), []))
-            engine_state, _ = self._state_engine.evaluate(
-                route_id, ctx.state,
-                level_sensors={'__target__': level},
-                cart_sensor={cart_id: cart_pos} if cart_id else {},
-                cart_target=cart_target, cart_moving=cart_moving,
-                proximity_sensors={},
-                clearing_strategy=strategy,
-                schedule_has_next=has_next,
-            )
-            actual = ctx.state.value
-            predicted = engine_state.value
-            if actual != predicted:
-                mismatch_count += 1
-                print(f"[引擎测试] {route_id} 当前={actual} 引擎判定={predicted} "
-                      f"level={level:.1f}% cart={cart_pos}/{cart_target} strategy={strategy}", flush=True)
+        # Build sensor timeouts
+        timeouts = {}
+        endpoint = self._ENDPOINT_SENSORS.get(
+            config.FEED_ROUTES.get(route_id, {}).get('conveyors', [''])[-1], '')
+        for sid in self.route_state_manager.ROUTE_PROXIMITY_SENSORS.get(route_id, []):
+            if sid == endpoint:
+                timeouts[sid] = self._calc_endpoint_timeout(
+                    config.FEED_ROUTES.get(route_id, {}).get('conveyors', [''])[-1], target_bin)
             else:
-                match_count += 1
+                timeouts[sid] = self._HOPPER_BELT_TIMEOUTS.get((route_id, sid), 30.0)
 
-        if match_count + mismatch_count > 0:
-            print(f"[引擎测试] 心跳: {match_count}匹配/{mismatch_count}差异 (共{len(list(self.active_routes))}条活跃路线)", flush=True)
+        return self._state_engine.evaluate(
+            route_id, ctx.state,
+            level_sensors={'__target__': level},
+            cart_sensor={cart_id: cart_pos} if cart_id else {},
+            cart_target=cart_target, cart_moving=cart_moving,
+            cart=cart_id,
+            proximity_sensors={sid: self.sensors.get(sid, _FALLBACK_SENSOR).is_active
+                              for sid in self.route_state_manager.ROUTE_PROXIMITY_SENSORS.get(route_id, [])},
+            clearing_strategy=strategy,
+            schedule_has_next=has_next,
+            schedule_next_round_empty=empty_round,
+            current_time=self.total_runtime,
+            sensor_clear_timers=ctx.sensor_clear_timers,
+            sensor_clear_timeouts=timeouts,
+        )
 
     def _check_level_thresholds(self):
         """检查料位是否达到阈值，触发清空状态（支持动态策略阈值）"""
@@ -1593,46 +1197,26 @@ class SimulationController(QObject):
                 if key not in self._target_mismatch_logged:
                     self._target_mismatch_logged.add(key)
                     print(f"[WARN] {route_id} target_bin mismatch: ctx={ctx_bin} route_to_bin={target_bin}", flush=True)
+                    belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[WARN] {route_id} target_bin mismatch: ctx={ctx_bin} route_to_bin={target_bin}")
 
-            # 动态阈值：所有小车使用策略阈值
-            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
-            threshold = strategy_thresholds.get(strategy, 95)
-            # D9 皮带（Cart3）：上料将满阈值固定 90%
-            if ctx.assigned_cart == 'Cart3':
-                threshold = 90
-            # D6 皮带（Cart4）：换列行为但阈值95%
-            if ctx.assigned_cart == 'Cart4':
-                threshold = 95
-
+            # 引擎驱动判定：FEEDING → CLEARING
+            next_state, actions = self._engine_transition(route_id)
             level = self._read_level_sensor(target_bin)
+            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
 
-            # 缓存序列为空（最后一个料仓）且料位≥80%时，提前请求下一轮调度
+            # 提前请求下一轮调度
             if ctx.assigned_cart in ('Cart1', 'Cart2', 'Cart3') and level >= 80.0:
                 cart_to_belt = {'Cart1': 'D7', 'Cart2': 'D8', 'Cart3': 'D9'}
                 belt_id = cart_to_belt.get(ctx.assigned_cart, '')
                 if belt_id and belt_id not in self._scheduled_sequence:
-                    print(f"[调度] {belt_id} 最后一个料仓{target_bin}料位{level:.0f}%≥80%，提前请求调度", flush=True)
-                    self._request_immediate_scheduling(belt_id)
+                    last = self._last_auto_schedule_request.get(belt_id, 0)
+                    if self.total_runtime - last >= 120.0:
+                        print(f"[调度] {belt_id} 最后一个料仓{target_bin}料位{level:.0f}%≥80%，提前请求调度", flush=True)
+                        belt_log(belt_id).info(f"[调度] {belt_id} 最后一个料仓{target_bin}料位{level:.0f}%≥80%，提前请求调度")
+                        self._request_immediate_scheduling(belt_id)
 
-            # 每30秒打印一次诊断（帮助定位长时间FEEDING卡死问题）
-            diag_key = f'_feed_diag_{route_id}'
-            if not hasattr(self, diag_key):
-                setattr(self, diag_key, 0.0)
-            last_diag = getattr(self, diag_key)
-            if feeding_elapsed > 60.0 and self.total_runtime - last_diag > 30.0:
-                setattr(self, diag_key, self.total_runtime)
-                belt_status = []
-                route_cfg = config.FEED_ROUTES.get(route_id, {})
-                for cid in route_cfg.get('conveyors', []):
-                    cv = self.conveyors.get(cid)
-                    belt_status.append(f"{cid}={'R' if cv and cv.is_running else 'S'}")
-                print(f"[FEED-STUCK] {route_id} target={target_bin} level={level:.1f}% threshold={threshold}% "
-                      f"elapsed={feeding_elapsed:.0f}s belts=[{','.join(belt_status)}] "
-                      f"feed_timer={self.feed_timer.isActive()}", flush=True)
-
-            if level >= threshold:
+            if next_state is not None and next_state.value == 'clearing':
                 self.route_state_manager.trigger_clearing(route_id)
-                strategy = getattr(ctx, 'clearing_strategy', 'reverse')
 
                 # 立即关闭所有中转斗（清空时物料只进不出，囤积在斗内）
                 for hopper_id in ctx.assigned_hoppers:
@@ -1742,6 +1326,7 @@ class SimulationController(QObject):
                         ctx.sensor_clear_completed.add(sensor_id)
                         route_name = route.get('name', route_id)
                         print(f"[清空传感器] {route_id} {sensor_id} 判定完成 (熄灭{elapsed:.1f}s ≥ {timeout:.1f}s)", flush=True)
+                        belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[清空传感器] {route_id} {sensor_id} 判定完成 (熄灭{elapsed:.1f}s ≥ {timeout:.1f}s)")
 
     def _check_clearing_completion(self):
         """检查CLEARING状态的路线是否完成余料清空（支持策略差异化）"""
@@ -1778,6 +1363,7 @@ class SimulationController(QObject):
                             except (ValueError, IndexError):
                                 next_pos = 1
                             print(f"[提前移动] {route_id} 顺序清空3s，进入MOVING_TO_TARGET → {next_bin}", flush=True)
+                            belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[提前移动] {route_id} 顺序清空3s，进入MOVING_TO_TARGET → {next_bin}")
                             self.route_state_manager.early_move_from_clearing(route_id, next_bin, next_pos)
                             self.cart_target_positions[cart_id] = next_pos
                             self.route_to_bin[route_id] = next_bin
@@ -2014,6 +1600,7 @@ class SimulationController(QObject):
             # 关闭自动模式：清除缓存序列，当前上料完成后不再自动执行下一仓
             self._scheduled_sequence.pop(belt_id, None)
             print(f"[自动模式] {belt_id} 已切换为手动，缓存序列已清除", flush=True)
+            belt_log(belt_id).info(f"[自动模式] {belt_id} 已切换为手动，缓存序列已清除")
 
     def is_belt_auto_mode(self, belt_id: str) -> bool:
         """查询单条终点皮带是否处于自动模式"""
@@ -2066,8 +1653,12 @@ class SimulationController(QObject):
                     left_div, right_div = True, False
                 else:
                     cart_id = cart_map.get(belt_id, '')
-                    cart_pos = self.cart_positions.get(cart_id, 1)
+                    row = self.cart_positions.get(cart_id, 1)
                     left_div, right_div = self.cart_divert.get(cart_id, (False, False))
+                    if belt_id == 'D8':
+                        cart_pos = self._calc_d8_cart_pos(row, left_div, right_div)
+                    else:
+                        cart_pos = row
                 self._tcp_scheduling_client.update_bins(belt_id, bins, cart_pos, left_div, right_div)
 
     # ============ TCP 调度客户端 ============
@@ -2091,7 +1682,7 @@ class SimulationController(QObject):
             time.sleep(0.5)
             for belt_id in ['D6', 'D7', 'D8', 'D9']:
                 if self._tcp_scheduling_client:
-                    self._request_immediate_scheduling(belt_id)
+                    self._request_immediate_scheduling(belt_id, force=True)
         import threading
         threading.Thread(target=_delayed_request, daemon=True).start()
 
@@ -2114,6 +1705,8 @@ class SimulationController(QObject):
         self._tcp_scheduling_client = None
         self._tcp_schedules.clear()
         self._scheduled_sequence.clear()
+        self._last_auto_schedule_request.clear()
+        self._last_emergency_schedule.clear()
 
     def _on_tcp_schedule_received(self, belt_id, result):
         self._tcp_schedules[belt_id] = result
@@ -2130,6 +1723,7 @@ class SimulationController(QObject):
                 if ctx and ctx.state == RouteState.FEEDING:
                     ctx.clearing_strategy = 'reverse'
                     print(f"[调度] {belt_id} 无需补料，当前{ctx.target_bin}清空策略→反序(95%)", flush=True)
+                    belt_log(belt_id).info(f"[调度] {belt_id} 无需补料，当前{ctx.target_bin}清空策略→反序(95%)")
             # D8皮带：下一轮无需补料时，当前FEEDING路线改用换列规则（阈值88%）
             if belt_id == 'D8' and belt_id in self._executing_route:
                 route_id = self._executing_route[belt_id]
@@ -2139,6 +1733,7 @@ class SimulationController(QObject):
                     if remaining:
                         ctx.clearing_strategy = 'column_switch'
                         print(f"[调度] {belt_id} 无需补料，当前{ctx.target_bin}清空策略→换列(88%)", flush=True)
+                        belt_log(belt_id).info(f"[调度] {belt_id} 无需补料，当前{ctx.target_bin}清空策略→换列(88%)")
             self._stop_waiting_route_conveyors(belt_id)
             self._scheduled_sequence.pop(belt_id, None)
             return
@@ -2154,19 +1749,23 @@ class SimulationController(QObject):
             route_name = config.FEED_ROUTES.get(
                 self._executing_route[belt_id], {}).get('name', belt_id)
             print(f"[调度] {belt_id} 收到序列: {seq} (已缓存，等待{route_name}完成)", flush=True)
+            belt_log(belt_id).info(f"[调度] {belt_id} 收到序列: {seq} (已缓存，等待{route_name}完成)")
             return
 
         # 皮带空闲：启动序列首项，成功后才缓存剩余
         first_bin = seq[0]
         remaining = list(seq[1:]) if len(seq) > 1 else []
         print(f"[调度] {belt_id} 收到序列: {seq} -> 立即执行{first_bin}", flush=True)
+        belt_log(belt_id).info(f"[调度] {belt_id} 收到序列: {seq} -> 立即执行{first_bin}")
         if self._start_scheduled_route(belt_id, first_bin):
             if remaining:
                 self._scheduled_sequence[belt_id] = remaining
             print(f"[调度] {belt_id} 缓存剩余序列: {remaining}", flush=True)
+            belt_log(belt_id).info(f"[调度] {belt_id} 缓存剩余序列: {remaining}")
         else:
             self._scheduled_sequence.pop(belt_id, None)
             print(f"[调度] {belt_id} 启动失败，清除缓存等待下次触发", flush=True)
+            belt_log(belt_id).info(f"[调度] {belt_id} 启动失败，清除缓存等待下次触发")
 
     def _start_scheduled_route(self, belt_id: str, first_bin: str) -> bool:
         """启动调度结果中指定的路线，返回是否成功启动"""
@@ -2177,17 +1776,21 @@ class SimulationController(QObject):
             feed_point, route_id = self._select_feed_point(first_bin)
             if route_id is None:
                 print(f"[调度] {belt_id} 无可用路线 for {first_bin}", flush=True)
+                belt_log(belt_id).info(f"[调度] {belt_id} 无可用路线 for {first_bin}")
                 return False
 
         print(f"[调度] {belt_id} 选中 {route_id} feed={feed_point} 目标={first_bin}", flush=True)
+        belt_log(belt_id).info(f"[调度] {belt_id} 选中 {route_id} feed={feed_point} 目标={first_bin}")
         self.set_route_target_bin(route_id, first_bin)
 
         if not self.is_route_available(route_id):
             print(f"[调度] {belt_id} {route_id} 上料点无原料", flush=True)
+            belt_log(belt_id).info(f"[调度] {belt_id} {route_id} 上料点无原料")
             return False
 
         ctx = self.route_state_manager.get_route_context(route_id)
         print(f"[调度] {belt_id} {route_id} 当前状态={ctx.state.value if ctx else 'None'}, 分配={ctx.assigned_cart if ctx else 'None'}", flush=True)
+        belt_log(belt_id).info(f"[调度] {belt_id} {route_id} 当前状态={ctx.state.value if ctx else 'None'}, 分配={ctx.assigned_cart if ctx else 'None'}")
 
         if ctx and ctx.state == RouteState.STANDBY:
             success = self._resume_from_standby(route_id, belt_id, first_bin, feed_point)
@@ -2199,6 +1802,7 @@ class SimulationController(QObject):
             bin_name = first_bin
             route_name = config.FEED_ROUTES.get(route_id, {}).get('name', route_id)
             print(f"[上料] {route_name} → {bin_name} 开始（上料点：{feed_point}）", flush=True)
+            belt_log('system').info(f"[上料] {route_name} → {bin_name} 开始（上料点：{feed_point}）")
             return True
         return False
 
@@ -2264,13 +1868,16 @@ class SimulationController(QObject):
                     if not seq:
                         self._scheduled_sequence.pop(belt_id, None)
                     print(f"[调度] {belt_id} 使用缓存序列 -> {next_bin}，剩余{seq}", flush=True)
+                    belt_log(belt_id).info(f"[调度] {belt_id} 使用缓存序列 -> {next_bin}，剩余{seq}")
                     if not self._start_scheduled_route(belt_id, next_bin):
                         self._scheduled_sequence.pop(belt_id, None)
                         print(f"[调度] {belt_id} 启动{next_bin}失败，重新请求调度", flush=True)
+                        belt_log(belt_id).info(f"[调度] {belt_id} 启动{next_bin}失败，重新请求调度")
                         self._request_immediate_scheduling(belt_id)
                 else:
                     self._scheduled_sequence.pop(belt_id, None)
                     print(f"[调度] {belt_id} 序列耗尽，请求调度 (force)", flush=True)
+                    belt_log(belt_id).info(f"[调度] {belt_id} 序列耗尽，请求调度 (force)")
                     self._request_immediate_scheduling(belt_id, force=True)
                 break
 
@@ -2292,6 +1899,7 @@ class SimulationController(QObject):
                 if self.total_runtime - last_req >= 120.0:
                     self._last_emergency_schedule[belt_id] = self.total_runtime
                     print(f"[调度] {belt_id} 紧急触发: 存在料仓低于10%", flush=True)
+                    belt_log(belt_id).info(f"[调度] {belt_id} 紧急触发: 存在料仓低于10%")
                     self._request_immediate_scheduling(belt_id, force=True)
                 continue
 
@@ -2349,6 +1957,7 @@ class SimulationController(QObject):
         bin_name = first_bin
         route_name = route.get('name', route_id)
         print(f"[上料] {route_name} → {bin_name} 开始（上料点：{feed_point}，从待机恢复）", flush=True)
+        belt_log('system').info(f"[上料] {route_name} → {bin_name} 开始（上料点：{feed_point}，从待机恢复）")
         return True
 
     def _on_engine_schedule_request(self, belt_id: str):
@@ -2369,11 +1978,28 @@ class SimulationController(QObject):
             left_div, right_div = True, False
         else:
             cart_id = cart_map.get(belt_id, '')
-            cart_pos = self.cart_positions.get(cart_id, 1)
+            row = self.cart_positions.get(cart_id, 1)  # 物理行号 1-7
             left_div, right_div = self.cart_divert.get(cart_id, (False, False))
+            if belt_id == 'D8':
+                # D8: 行号+分料 → 映射位置 (P2→1-7, P3→8-14)
+                cart_pos = self._calc_d8_cart_pos(row, left_div, right_div)
+            else:
+                cart_pos = row
         self._tcp_scheduling_client.update_bins(belt_id, bins, cart_pos, left_div, right_div)
         self._tcp_scheduling_client.request_schedule(belt_id)
         print(f"[调度] {belt_id} 请求调度计算... (pos={cart_pos} L={left_div} R={right_div})", flush=True)
+        belt_log(belt_id).info(f"[调度] {belt_id} 请求调度计算... (pos={cart_pos} L={left_div} R={right_div})")
+
+    @staticmethod
+    def _calc_d8_cart_pos(row: int, left_divert: bool, right_divert: bool) -> int:
+        """D8: 物理行号+分料状态 → 调度引擎 warehouse 位置
+
+        P2 (左): row 7→1, row 1→7   → cart_pos = 8 - row
+        P3 (右): row 7→8, row 1→14  → cart_pos = 15 - row
+        """
+        if right_divert and not left_divert:
+            return 15 - row   # P3: 1→14, 7→8
+        return 8 - row       # P2: 1→7, 7→1
 
     def get_tcp_scheduling_status(self) -> dict:
         if self._tcp_scheduling_client is None:
@@ -3470,6 +3096,7 @@ class SimulationController(QObject):
             self.cart4_is_moving = False
             self._cart4_move_timer = 0.0
             print(f"[Cart4] 已到达目标位置 {self.cart4_position}", flush=True)
+            belt_log('D6').info(f"[Cart4] 已到达目标位置 {self.cart4_position}")
             return
         self._cart4_move_timer += delta_seconds
         if self._cart4_move_timer >= 18.0:
@@ -3480,6 +3107,7 @@ class SimulationController(QObject):
             else:
                 self.cart4_position -= 1
             print(f"[Cart4] 移动: {old_pos} → {self.cart4_position} (目标={self.cart4_target_position})", flush=True)
+            belt_log('D6').info(f"[Cart4] 移动: {old_pos} → {self.cart4_position} (目标={self.cart4_target_position})")
             # 同步传感器上报值
             self.cart4_sensor_position = self.cart4_position
             if self.cart4_position == self.cart4_target_position:
@@ -3494,19 +3122,21 @@ class SimulationController(QObject):
         distance = abs(self.cart4_position - self.cart4_target_position)
     def _check_cart_arrival(self, cart_id: str):
         """检查小车到达后，触发相关路线的FEEDING状态"""
-        print(f"[CartArrival] 检查 {cart_id} 到达...", flush=True)
         for route_id in list(self.active_routes):
             ctx = self.route_state_manager.get_route_context(route_id)
             if not ctx or ctx.assigned_cart != cart_id:
                 continue
             print(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}", flush=True)
+            belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}")
 
             if ctx.state != RouteState.MOVING_TO_TARGET:
                 print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
+                belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET")
                 continue
             cart_is_moving = self.cart4_is_moving if cart_id == 'Cart4' else ctx.cart_moving
             if not cart_is_moving:
                 print(f"[CartArrival] {cart_id} 跳过: cart_is_moving=False", flush=True)
+                belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: cart_is_moving=False")
                 continue
 
             if route_id in self._pending_stop_after_cart_arrival:
@@ -3516,6 +3146,7 @@ class SimulationController(QObject):
 
             # 小车到达目标位置，切换到FEEDING状态
             print(f"[到达] {route_id} cart={cart_id} -> FEEDING, 启动皮带...", flush=True)
+            belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} cart={cart_id} -> FEEDING, 启动皮带...")
             self.route_state_manager._transition(ctx, RouteState.FEEDING)
             ctx.cart_moving = False
             ctx.feeding_start_time = self.total_runtime
@@ -3530,10 +3161,12 @@ class SimulationController(QObject):
                     if conv_id in self.conveyors:
                         self.conveyors[conv_id].start(self.speed)
                         print(f"[到达] {route_id} 启动皮带 {conv_id}", flush=True)
+                        belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 启动皮带 {conv_id}")
                 for hopper_id in ctx.assigned_hoppers:
                     if hopper_id in self.hoppers:
                         self.hoppers[hopper_id].is_open = True
                         print(f"[到达] {route_id} 打开中转斗 {hopper_id}", flush=True)
+                        belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 打开中转斗 {hopper_id}")
 
     def _update_cart_positions(self, delta_seconds: float):
         """更新所有小车位置（模拟移动）
@@ -3562,7 +3195,10 @@ class SimulationController(QObject):
                     needs_moving = True
                     break
 
-            if current_pos != target_pos and needs_moving:
+            if needs_moving and current_pos == target_pos:
+                # 跨列同行：divert变了但行不变，立即触发到达
+                self._check_virtual_cart_arrival(cart_id)
+            elif current_pos != target_pos and needs_moving:
                 # 模拟小车每18秒（移动一位）更新一次位置
                 if not hasattr(self, '_cart_move_timers'):
                     self._cart_move_timers = {}
@@ -3596,6 +3232,7 @@ class SimulationController(QObject):
                 if not (ctx.state == RouteState.CLEARING and ctx.early_moved_from_clearing):
                     continue
                 print(f"[VirtualArrival] {cart_id} route={route_id} CLEARING+early_moved → 处理到达", flush=True)
+                belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[VirtualArrival] {cart_id} route={route_id} CLEARING+early_moved → 处理到达")
 
             current_pos = self.cart_sensor_positions.get(cart_id, 1)
             if current_pos != ctx.cart_target_position:
@@ -3636,6 +3273,7 @@ class SimulationController(QObject):
                     if conv_id in self.conveyors:
                         self.conveyors[conv_id].start(self.speed)
                 print(f"[到达] {route_id} 提前移动小车到达，启动所有皮带，打开中转斗释放余料", flush=True)
+                belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 提前移动小车到达，启动所有皮带，打开中转斗释放余料")
                 # 打开中转斗开关（正常补料开始，释放累积余料）
                 for hopper_id in ctx.assigned_hoppers:
                     if hopper_id in self.hoppers:
@@ -4055,6 +3693,7 @@ class SimulationController(QObject):
         self._consumption_active = active
         state = "启动" if active else "停止"
         print(f"[消耗] 料仓消耗已{state}", flush=True)
+        belt_log('system').info(f"[消耗] 料仓消耗已{state}")
 
     def is_consumption_active(self) -> bool:
         return self._consumption_active

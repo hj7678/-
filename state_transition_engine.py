@@ -12,18 +12,12 @@
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Callable
 
-
-class RouteState(Enum):
-    IDLE = "idle"
-    MOVING_TO_TARGET = "moving_to_target"
-    FEEDING = "feeding"
-    CLEARING = "clearing"
-    WAITING = "waiting"
-    STANDBY = "standby"
+# RouteState 从 route_state_manager 导入（懒加载避免循环引用）
+# 模块顶层不直接导入，在 _get_route_state 中延迟导入
 
 
 # 清空策略阈值
-STRATEGY_THRESHOLDS = {'sequential': 98, 'reverse': 95, 'column_switch': 88}
+STRATEGY_THRESHOLDS = {'sequential': 98, 'reverse': 95, 'column_switch': 92}
 
 
 class StateTransitionEngine:
@@ -72,25 +66,27 @@ class StateTransitionEngine:
     # 主判定
     # ------------------------------------------------------------------
 
-    def evaluate(self, route_id: str, current_state: RouteState,
+    def evaluate(self, route_id: str, current_state,  # current_state: RouteState
                  level_sensors: Dict[str, float],
                  cart_sensor: Dict[str, int],
                  cart_target: int,
                  cart_moving: bool,
-                 proximity_sensors: Dict[str, bool],
+                 cart: str = '',
+                 proximity_sensors: Dict[str, bool] = None,
                  schedule_has_next: bool = False,
                  schedule_next_round_empty: bool = False,
                  current_time: float = 0.0,
                  clearing_strategy: str = 'reverse',
                  sensor_clear_timers: Dict[str, float] = None,
                  sensor_clear_timeouts: Dict[str, float] = None,
-                 ) -> Tuple[RouteState, dict]:
+                 ) -> tuple:  # -> Tuple[RouteState, dict]
         """
         判定下一状态。
 
         Returns:
             (next_state, actions) — actions包含建议操作如 'close_hoppers', 'stop_endpoint'
         """
+        from controllers.route_state_manager import RouteState  # 懒加载避免循环引用
         actions = {}
         route = self._routes.get(route_id)
         if not route:
@@ -115,6 +111,9 @@ class StateTransitionEngine:
             if '__target__' not in level_sensors:
                 return current_state, actions
             threshold = STRATEGY_THRESHOLDS.get(clearing_strategy, 95)
+            # Special cases
+            if cart == 'Cart3': threshold = 94      # D9 fixed
+            if cart == 'Cart4': threshold = 95      # D6: column_switch behavior but 95%
             if level >= threshold:
                 actions['close_hoppers'] = (clearing_strategy != 'column_switch')
                 if clearing_strategy == 'sequential':
@@ -157,3 +156,34 @@ class StateTransitionEngine:
             return current_state, actions
 
         return current_state, actions
+
+    # ------------------------------------------------------------------
+    # 调度触发判定
+    # ------------------------------------------------------------------
+
+    def check_schedule_trigger(self, belt_id: str,
+                                bin_stocks: Dict[str, float],
+                                has_executing_route: bool,
+                                has_cached_sequence: bool,
+                                current_state=None,  # RouteState
+                                level_sensor: float = 0.0,
+                                is_last_in_sequence: bool = False,
+                                last_request_time: float = 0.0,
+                                current_time: float = 0.0,
+                                cooldown: float = 120.0) -> Tuple[bool, str]:
+        """判定是否需要触发调度请求"""
+        from controllers.route_state_manager import RouteState  # 懒加载避免循环引用
+        for bin_id, stock in bin_stocks.items():
+            if stock < 11.0:
+                return True, f"emergency:{bin_id}={stock:.1f}t"
+        if not has_executing_route and not has_cached_sequence:
+            if current_time - last_request_time >= cooldown:
+                idle_threshold = 399.0 if belt_id == 'D6' else 70.0  # D6: 95%, 其他: 70t
+                for bin_id, stock in bin_stocks.items():
+                    if stock < idle_threshold:
+                        return True, f"idle:{bin_id}={stock:.1f}t"
+        if (current_state == RouteState.FEEDING and
+                is_last_in_sequence and level_sensor >= 80.0):
+            if current_time - last_request_time >= cooldown:
+                return True, "pre_emptive:level≥80%"
+        return False, ""

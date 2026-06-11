@@ -131,12 +131,15 @@ class SchedulingServer:
                         client_socket.sendall((response_str + "\n").encode("utf-8"))
                     except Exception as e:
                         logger.error(f"[{self.belt_id}] 处理请求出错: {e}")
-                        error_resp = json.dumps({
-                            "error": str(e),
-                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
-                            "belt_id": self.belt_id,
-                        }, ensure_ascii=False)
-                        client_socket.sendall((error_resp + "\n").encode("utf-8"))
+                        try:
+                            error_resp = json.dumps({
+                                "error": str(e),
+                                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
+                                "belt_id": self.belt_id,
+                            }, ensure_ascii=False)
+                            client_socket.sendall((error_resp + "\n").encode("utf-8"))
+                        except Exception:
+                            pass  # 客户端已断开时不再发送错误响应，避免异常传播
 
         except socket.timeout:
             logger.warning(f"[{self.belt_id}] 客户端 {client_address} 读超时")
@@ -169,15 +172,12 @@ class SchedulingServer:
         left_divert = data.get("left_divert", False)
         right_divert = data.get("right_divert", False)
 
-        # 所有皮带：cart_position 转换为调度引擎 wh_id（底行→小号）
-        if cart_position is not None and self.belt_id != 'D6':
-            from scheduling.bin_config import d8_bin_id_to_wh, bin_id_to_wh, BELT_TO_COL_PREFIX
-            if self.belt_id == 'D8':
-                col = 'P3' if (right_divert and not left_divert) else 'P2'
-                cart_position = d8_bin_id_to_wh(f'{col}-{cart_position}')
-            else:
-                prefix = BELT_TO_COL_PREFIX.get(self.belt_id, 'P1')
-                cart_position = bin_id_to_wh(f'{prefix}-{cart_position}')
+        # D7/D9: cart_position (1-7) → 调度引擎 wh_id（底行→小号）
+        # D8: 客户端已根据分料状态映射为 1-14，无需二次转换
+        if cart_position is not None and self.belt_id not in ('D6', 'D8'):
+            from scheduling.bin_config import bin_id_to_wh, BELT_TO_COL_PREFIX
+            prefix = BELT_TO_COL_PREFIX.get(self.belt_id, 'P1')
+            cart_position = bin_id_to_wh(f'{prefix}-{cart_position}')
 
         stock_summary = ", ".join(f"{b.bin_id}={b.stock:.1f}t" for b in bins[:3])
         if len(bins) > 3:

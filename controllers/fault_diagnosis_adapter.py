@@ -67,12 +67,14 @@ class FaultDiagnosisAdapter:
                     if s.conveyor == conv_id:
                         prox_ids.append(sid)
 
+            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
             routes[route_id] = RouteSnapshot(
                 route_id=route_id,
                 state=state,
                 conveyor_ids=list(route_cfg['conveyors']),
                 hopper_ids=[h for h in route_cfg.get('hoppers', []) if h],
                 proximity_sensor_ids=prox_ids,
+                clearing_strategy=strategy,
             )
 
         proximity_sensors: Dict[str, ProximitySensorSnapshot] = {}

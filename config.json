@@ -1,0 +1,70 @@
+{
+  "_comment": "外部配置文件 — 覆盖 pos.py/config.py 的默认值。删除此文件则全部使用默认值。",
+
+  "io_mode": "simulation",
+  "_io_mode_comment": "simulation | modbus",
+
+  "logging": {
+    "level": "INFO",
+    "_level_comment": "DEBUG|INFO|WARNING|ERROR",
+    "console": true,
+    "file": true,
+    "dir": "logs",
+    "max_mb": 10,
+    "backup_count": 7
+  },
+
+  "modbus": {
+    "host": "192.168.1.100",
+    "port": 502
+  },
+
+  "simulation": {
+    "belt_speed": 2.5,
+    "material_weight": 0.1,
+    "feed_rate": 0.195,
+    "hopper_capacity_tons": 8.5,
+    "cart_move_interval": 18.0,
+    "clearing_tolerance": 2.0
+  },
+
+  "scheduling": {
+    "emergency_threshold_tons": 11.0,
+    "idle_threshold_tons": 70.0,
+    "d6_idle_threshold_tons": 336.0,
+    "pre_emptive_level_pct": 80.0,
+    "cooldown_seconds": 120.0,
+    "scheduling_host": "127.0.0.1",
+    "scheduling_ports": {
+      "D7": 8891,
+      "D8": 8892,
+      "D9": 8893,
+      "D6": 8894
+    }
+  },
+
+  "conveyors": {
+    "_comment": "按需覆盖特定皮带的物理参数",
+    "D7": {
+      "length": 59.9
+    }
+  },
+
+  "sensors": {
+    "_comment": "按需覆盖特定传感器的位置/灵敏度",
+    "S-D7": {
+      "distance_from_start": 0.05
+    }
+  },
+
+  "hoppers": {
+    "_comment": "按需覆盖特定中转斗的位置/尺寸"
+  },
+
+  "clearing_timeouts": {
+    "_comment": "格式: routeID:sensorID = 秒数",
+    "route1:S-E4": 34.4,
+    "route1:S-E8": 24.7,
+    "route1:S-E10": 15.3
+  }
+}

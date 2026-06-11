@@ -59,6 +59,7 @@ class RouteSnapshot:
     conveyor_ids: List[str]
     hopper_ids: List[str]
     proximity_sensor_ids: List[str]
+    clearing_strategy: str = 'reverse'
 
 
 @dataclass

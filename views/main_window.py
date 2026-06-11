@@ -16,7 +16,9 @@ from views import SimulationView, ControlPanel, StatusPanel
 from views.operation_log_panel import OperationLogPanel
 from views.feed_point_select_dialog import FeedPointSelectDialog
 from controllers import SimulationController
+import logging
 from utils.logger import get_logger
+from belt_logger import enable_ui_bridge, attach_ui, belt_log, sys_log
 
 
 class MainWindow(QMainWindow):
@@ -92,11 +94,23 @@ class MainWindow(QMainWindow):
         stop_btn.clicked.connect(self._on_top_stop_clicked)
         top_bar_layout.addWidget(stop_btn)
 
+        emerg_btn = QPushButton("急停")
+        emerg_btn.setFixedSize(60, 32)
+        emerg_btn.setStyleSheet("background-color:#C0392B;color:white;border:2px solid #E74C3C;border-radius:4px;font-weight:bold;font-size:11px;")
+        emerg_btn.clicked.connect(self._on_emergency_stop_clicked)
+        top_bar_layout.addWidget(emerg_btn)
+
         reset_btn = QPushButton("复位")
         reset_btn.setFixedSize(60, 32)
         reset_btn.setStyleSheet("background-color:#9B59B6;color:white;border:none;border-radius:4px;font-weight:bold;font-size:11px;")
         reset_btn.clicked.connect(self._on_reset_simulation)
         top_bar_layout.addWidget(reset_btn)
+
+        self_test_btn = QPushButton("自检")
+        self_test_btn.setFixedSize(60, 32)
+        self_test_btn.setStyleSheet("background-color:#2980B9;color:white;border:none;border-radius:4px;font-weight:bold;font-size:11px;")
+        self_test_btn.clicked.connect(self._on_self_test_clicked)
+        top_bar_layout.addWidget(self_test_btn)
 
         top_bar_layout.addSpacing(20)
 
@@ -132,6 +146,29 @@ class MainWindow(QMainWindow):
             if not hasattr(self, '_top_belt_btns'):
                 self._top_belt_btns = {}
             self._top_belt_btns[belt_id] = btn
+
+        top_bar_layout.addSpacing(20)
+
+        # ==== PLC 连接 / 模式指示 ====
+        plc_label = QLabel("IO模式")
+        plc_label.setStyleSheet("color: #8B949E; font-weight: bold; font-size: 12px;")
+        top_bar_layout.addWidget(plc_label)
+
+        self._plc_mode_btn = QPushButton("仿真")
+        self._plc_mode_btn.setCheckable(True)
+        self._plc_mode_btn.setChecked(False)
+        self._plc_mode_btn.setFixedSize(72, 32)
+        self._plc_mode_btn.setStyleSheet("""
+            QPushButton {background-color:#1B5E20;color:#2ECC71;border:2px solid #2ECC71;border-radius:4px;font-size:11px;font-weight:bold;}
+            QPushButton:checked {background-color:#1A5276;color:#3498DB;border-color:#3498DB;}
+        """)
+        self._plc_mode_btn.clicked.connect(self._on_plc_mode_toggled)
+        top_bar_layout.addWidget(self._plc_mode_btn)
+
+        self._plc_status_dot = QLabel("●")
+        self._plc_status_dot.setFixedSize(16, 32)
+        self._plc_status_dot.setStyleSheet("color:#2ECC71;font-size:16px;font-weight:bold;")
+        top_bar_layout.addWidget(self._plc_status_dot)
 
         top_bar_layout.addStretch()
         top_level.addWidget(top_bar)
@@ -203,6 +240,14 @@ class MainWindow(QMainWindow):
         self.operation_log = OperationLogPanel()
         self.operation_log.setMinimumHeight(200)
         center_layout.addWidget(self.operation_log)
+
+        # 皮带日志 → UI桥接
+        enable_ui_bridge()
+        for belt_id in ['system', 'D6', 'D7', 'D8', 'D9']:
+            if belt_id == 'system':
+                attach_ui('system', lambda _, msg: self.operation_log.add_log(msg, '#C0C8D0'))
+            else:
+                attach_ui(belt_id, lambda _, msg, b=belt_id: self.operation_log.add_belt_log(b, msg, '#C0C8D0'))
 
         main_layout.addWidget(center_widget, 1)
 
@@ -647,6 +692,7 @@ class MainWindow(QMainWindow):
             self.controller.stop_route(rid)
             self._update_status_bar(f"已停止 {rname}")
             self.operation_log.add_log(f"! 停止 {rname}", "#E74C3C")
+            self.logger.info(f"停止 {rname}")
         else:
             # 多条路线时弹出选择框
             items = [f"{rid} {config.FEED_ROUTES.get(rid,{}).get('name',rid)}" for rid in active]
@@ -656,11 +702,55 @@ class MainWindow(QMainWindow):
                 self.controller.stop_route(rid)
                 self._update_status_bar(f"已停止 {item}")
                 self.operation_log.add_log(f"! 停止 {item}", "#E74C3C")
+                self.logger.info(f"停止 {item}")
+
+    def _on_plc_mode_toggled(self, checked: bool):
+        """切换 IO 模式：仿真 ↔ PLC"""
+        if checked:
+            # 切换到 PLC 模式
+            from modbus_driver import ModbusDriver
+            driver = ModbusDriver()
+            if driver.connect():
+                self.controller.io.set_driver(driver)
+                self._plc_mode_btn.setText("PLC在线")
+                self._plc_status_dot.setStyleSheet("color:#3498DB;font-size:16px;font-weight:bold;")
+                self._update_status_bar("已连接到 PLC")
+                self.operation_log.add_log("系统: IO模式切换 → PLC在线", "#3498DB")
+            else:
+                self._plc_mode_btn.setChecked(False)
+                self._update_status_bar("PLC连接失败(检查pymodbus/网络)")
+                self.operation_log.add_log("系统: PLC连接失败", "#E74C3C")
+        else:
+            # 切换回仿真模式
+            from io_bus import SimDriver
+            self.controller.io.set_driver(SimDriver(self.controller))
+            self._plc_mode_btn.setText("仿真")
+            self._plc_status_dot.setStyleSheet("color:#2ECC71;font-size:16px;font-weight:bold;")
+            self._update_status_bar("已切换到仿真模式")
+            self.operation_log.add_log("系统: IO模式切换 → 仿真", "#2ECC71")
+
+    def _on_self_test_clicked(self):
+        """自检按钮"""
+        self._update_status_bar("正在执行系统自检...")
+        result = self.controller.do_self_test()
+        if result.passed:
+            self._update_status_bar("自检通过")
+            self.operation_log.add_log("系统自检: 通过", "#2ECC71")
+        else:
+            self._update_status_bar(f"自检失败: {len(result.errors)}项错误")
+            for e in result.errors:
+                self.operation_log.add_log(f"自检错误: {e}", "#E74C3C")
+
+    def _on_emergency_stop_clicked(self):
+        """急停按钮：立即切断所有输出"""
+        self.controller.lifecycle.emergency_stop(self.controller)
+        self._update_status_bar("急停！所有输出已切断")
+        self.operation_log.add_log("!!! 急停 !!!", "#E74C3C")
+        self.logger.info("急停触发")
 
     def _on_emergency_stop(self):
-        """紧急停止（已废弃，由停止按钮替代）"""
-        self.controller.reset()
-        self._update_status_bar("系统已复位")
+        """紧急停止（兼容旧接口）"""
+        self._on_emergency_stop_clicked()
 
     def _on_conveyor_fault_changed(self, action: str, faults: dict = None):
         """皮带故障配置改变"""
@@ -703,18 +793,41 @@ class MainWindow(QMainWindow):
             'waiting': '等待', 'standby': '待机', 'moving_to_target': '小车移动',
         }
         new_cn = state_cn.get(new_state, new_state)
-        # 分皮带日志：显示路线和目标仓
+        # 更新皮带状态摘要行
+        belt_map = {'route1':'D7','route2':'D7','route3':'D7',
+                    'route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}
+        belt_id = belt_map.get(route_id, '')
+        state_colors = {'feeding':'#2ECC71','clearing':'#F39C12','waiting':'#E67E22',
+                        'standby':'#8B949E','moving_to_target':'#3498DB','idle':'#555'}
+        if belt_id and hasattr(self, 'operation_log'):
+            status = f"{route_name} → {target}: {new_cn}" if target else f"{route_name}: {new_cn}"
+            self.operation_log.set_belt_status(belt_id, status, state_colors.get(new_state, '#4A90D9'))
+        # 分皮带日志
         if target:
             self._log_belt(route_id, f"{route_name} → {target}: {new_cn}", "#4A90D9")
         else:
             self._log_belt(route_id, f"{route_name}: {new_cn}", "#4A90D9")
-        # 系统总日志
+        # 系统总日志 + 文件日志
         if new_state == 'feeding':
-            self.operation_log.add_log(f"> {route_name} 开始上料 → {target}", "#2ECC71")
+            msg = f"> {route_name} 开始上料 → {target}"
+            self.operation_log.add_log(msg, "#2ECC71")
+            self.logger.info(msg)
         elif new_state == 'clearing':
-            self.operation_log.add_log(f"> {route_name} 清空余料中...", "#F39C12")
+            msg = f"> {route_name} 清空余料中..."
+            self.operation_log.add_log(msg, "#F39C12")
+            self.logger.info(msg)
         elif new_state == 'waiting':
-            self.operation_log.add_log(f"> {route_name} → {target} 上料完成", "#E67E22")
+            msg = f"> {route_name} → {target} 上料完成"
+            self.operation_log.add_log(msg, "#E67E22")
+            self.logger.info(msg)
+        elif new_state == 'moving_to_target':
+            msg = f"> {route_name} 小车驶向 {target}"
+            self.operation_log.add_log(msg, "#3498DB")
+            self.logger.info(msg)
+        elif new_state == 'standby':
+            msg = f"> {route_name} 节能待机"
+            self.operation_log.add_log(msg, "#8B949E")
+            self.logger.info(msg)
         elif new_state == 'standby':
             self.operation_log.add_log(f"> {route_name} 节能待机", "#8B949E")
         elif new_state == 'moving_to_target':

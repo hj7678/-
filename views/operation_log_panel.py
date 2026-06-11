@@ -5,6 +5,8 @@ from datetime import datetime
 from PyQt5.QtWidgets import QTextEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from PyQt5.QtCore import Qt
 import config
+from log_manager import get_logger
+_log = get_logger('ui')
 
 
 class LogSection(QWidget):
@@ -25,6 +27,17 @@ class LogSection(QWidget):
             }
         """)
         layout.addWidget(self._title_label)
+
+        # 实时状态摘要行
+        self._status_label = QLabel("--")
+        self._status_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px; font-weight: bold; color: #2ECC71;
+                padding: 1px 8px; background-color: #1a2a1a;
+                border-radius: 3px;
+            }
+        """)
+        layout.addWidget(self._status_label)
 
         self._text = QTextEdit()
         self._text.setReadOnly(True)
@@ -47,6 +60,13 @@ class LogSection(QWidget):
             }}
         """)
         layout.addWidget(self._text)
+
+    def set_status(self, text: str, color: str = "#2ECC71"):
+        self._status_label.setText(text)
+        self._status_label.setStyleSheet(
+            f"font-size: 12px; font-weight: bold; color: {color}; "
+            f"padding: 1px 8px; background-color: #1a2a1a; border-radius: 3px;"
+        )
 
     def add_log(self, message: str, color: str = "#C0C8D0"):
         now = datetime.now().strftime("%H:%M:%S")
@@ -123,6 +143,11 @@ class OperationLogPanel(QWidget):
         """皮带日志"""
         if belt_id in self._sections:
             self._sections[belt_id].add_log(message, color)
+
+    def set_belt_status(self, belt_id: str, text: str, color: str = "#2ECC71"):
+        """更新皮带状态摘要行"""
+        if belt_id in self._sections:
+            self._sections[belt_id].set_status(text, color)
 
     def clear(self):
         for s in self._sections.values():

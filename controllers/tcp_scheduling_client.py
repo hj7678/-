@@ -24,6 +24,9 @@ class TcpSchedulingClient(QObject):
     connection_changed = pyqtSignal(str, bool)    # belt_id, connected
     send_error = pyqtSignal(str, str)             # belt_id, error_msg
 
+    MAX_RETRIES = 5                   # 单次调度请求最大重试次数
+    RETRY_BASE_DELAY = 1.0            # 初始重试间隔（秒），指数退避
+
     def __init__(self, host: str = None):
         super().__init__()
         self.host = host or SCHEDULING_HOST
@@ -33,6 +36,8 @@ class TcpSchedulingClient(QObject):
         self._bins_data: Dict[str, dict] = {}
         self._pending_requests: set = set()
         self._request_lock = threading.Lock()
+        self._retry_count: Dict[str, int] = {}      # belt_id → 已重试次数
+        self._last_retry_time: Dict[str, float] = {}  # belt_id → 上次重试时间
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -49,6 +54,9 @@ class TcpSchedulingClient(QObject):
                 'bins': bins, 'cart_position': cart_position,
                 'left_divert': left_divert, 'right_divert': right_divert,
             }
+        # 有新数据时重置该皮带的退避状态
+        self._retry_count.pop(belt_id, None)
+        self._last_retry_time.pop(belt_id, None)
 
     def request_schedule(self, belt_id: str):
         """请求一次调度计算（由控制器在需要时调用）"""
@@ -88,13 +96,39 @@ class TcpSchedulingClient(QObject):
             for belt_id in pending:
                 if not self._running:
                     break
-                if self._connected.get(belt_id):
-                    if not self._send_and_receive(belt_id):
-                        # 发送失败，重新加入待处理队列，等重连后重试
-                        with self._request_lock:
-                            self._pending_requests.add(belt_id)
+                if not self._connected.get(belt_id):
+                    self._requeue_or_abort(belt_id, '连接未就绪')
+                    continue
+
+                # 指数退避：检查是否到达重试时机
+                now = time.time()
+                last_try = self._last_retry_time.get(belt_id, 0.0)
+                retries = self._retry_count.get(belt_id, 0)
+                delay = self.RETRY_BASE_DELAY * (2 ** retries)
+                if now - last_try < delay:
+                    with self._request_lock:
+                        self._pending_requests.add(belt_id)
+                    continue
+
+                self._last_retry_time[belt_id] = now
+                if not self._send_and_receive(belt_id):
+                    self._requeue_or_abort(belt_id, f'通信错误，已重试 {retries + 1} 次')
 
             time.sleep(0.5)
+
+    def _requeue_or_abort(self, belt_id: str, reason: str):
+        """重试未超限则重新入队，超限则丢弃并发送错误信号"""
+        retries = self._retry_count.get(belt_id, 0) + 1
+        self._retry_count[belt_id] = retries
+        if retries <= self.MAX_RETRIES:
+            with self._request_lock:
+                self._pending_requests.add(belt_id)
+            print(f"[SchedClient] {belt_id} 请求将重试 ({retries}/{self.MAX_RETRIES}): {reason}", file=sys.stderr)
+        else:
+            print(f"[SchedClient] {belt_id} 请求已放弃 (重试 {self.MAX_RETRIES} 次后仍失败): {reason}", file=sys.stderr)
+            self._retry_count.pop(belt_id, None)
+            self._last_retry_time.pop(belt_id, None)
+            self.send_error.emit(belt_id, f"调度请求失败: {reason}")
 
     def _try_connect(self, belt_id: str):
         port = SCHEDULING_PORTS.get(belt_id)
