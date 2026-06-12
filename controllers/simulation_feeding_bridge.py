@@ -34,6 +34,7 @@ class SimulationFeedingBridge(QObject):
         self._stock = UpperStockClient()
         self._enabled = False
         self._stock_thread: Optional[threading.Thread] = None
+        self._last_push = 0.0  # 上次推送时间戳
 
         self._fm.on_commands(self._on_commands)
 
@@ -82,6 +83,12 @@ class SimulationFeedingBridge(QObject):
             return
 
         ctrl = self._ctrl
+
+        # 限频: 每 500ms 推送一次 (仿真 50ms 每帧太频繁)
+        now = time.time()
+        if now - self._last_push < 0.5:
+            return
+        self._last_push = now
 
         # 推送料位到 Stock Management
         levels = {}
