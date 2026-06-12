@@ -128,6 +128,13 @@ class MainWindow(QMainWindow):
         """)
         top_bar_layout.addWidget(self.top_sched_btn)
 
+        self.top_bridge_btn = QPushButton("桥接模式")
+        self.top_bridge_btn.setCheckable(True)
+        self.top_bridge_btn.setFixedSize(72, 32)
+        self.top_bridge_btn.setToolTip("连接 FeedingMaster 上料主控，将仿真状态发送给外部控制大脑")
+        self.top_bridge_btn.setStyleSheet(self.top_sched_btn.styleSheet())
+        top_bar_layout.addWidget(self.top_bridge_btn)
+
         self.top_auto_btn = QPushButton("全部自动")
         self.top_auto_btn.setCheckable(True)
         self.top_auto_btn.setFixedSize(72, 32)
@@ -350,6 +357,7 @@ class MainWindow(QMainWindow):
         # 顶部横栏按钮
         if hasattr(self, 'top_sched_btn'):
             self.top_sched_btn.clicked.connect(self._on_scheduling_tcp_toggled)
+            self.top_bridge_btn.clicked.connect(self._on_bridge_toggled)
             self.top_auto_btn.clicked.connect(self._on_auto_mode_toggled)
         if hasattr(self, '_top_belt_btns'):
             for belt_id, btn in self._top_belt_btns.items():
@@ -595,7 +603,19 @@ class MainWindow(QMainWindow):
             if hasattr(self, '_top_belt_btns'):
                 for btn in self._top_belt_btns.values():
                     btn.setChecked(False)
+        # 关闭调度时同步关闭桥接
+        if not enabled and hasattr(self, 'top_bridge_btn'):
+            self.top_bridge_btn.setChecked(False)
+            self.controller.stop_feeding_bridge()
         self._update_status_bar(f"调度服务: {'开' if enabled else '关'}")
+
+    def _on_bridge_toggled(self, enabled: bool):
+        """桥接模式开关 — 连接/断开 FeedingMaster 上料主控"""
+        if enabled:
+            self.controller.start_feeding_bridge()
+        else:
+            self.controller.stop_feeding_bridge()
+        self._update_status_bar(f"桥接模式: {'开' if enabled else '关'}")
 
     def _on_auto_mode_toggled(self, enabled: bool):
         """全部皮带自动模式切换"""
