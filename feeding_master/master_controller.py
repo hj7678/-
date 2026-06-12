@@ -93,6 +93,24 @@ class FeedingMasterController:
             k: tuple(v) for k, v in data.get('cart_divert', {}).items()
         }
 
+        # 同步活跃路线: 仿真激活了哪些路线，FeedingMaster 就追踪哪些
+        sim_active = set(data.get('active_routes', []))
+        sim_states = data.get('route_states', {})
+
+        # 新激活的路线: 从仿真当前目标料仓同步
+        for route_id in sim_active - self._active_routes:
+            ctx = self.route_manager.get_route_context(route_id)
+            if ctx and ctx.target_bin:
+                self._active_routes.add(route_id)
+                print(f"[FeedingMaster] 路线 {route_id} → {ctx.target_bin} 已同步", flush=True)
+            else:
+                self._active_routes.add(route_id)
+                print(f"[FeedingMaster] 路线 {route_id} 已加入追踪", flush=True)
+
+        # 仿真已停用的路线
+        for route_id in self._active_routes - sim_active:
+            self._active_routes.discard(route_id)
+
     # ── 主循环 ──
 
     def start(self):
