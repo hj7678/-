@@ -654,6 +654,9 @@ class MainWindow(QMainWindow):
     def _on_bin_levels_random(self):
         """随机初始化料位"""
         self.controller.randomize_bin_levels_percent(25.0, 90.0)
+        # 如果桥接模式激活，同步触发 Stock Management 随机化
+        if self.controller._feeding_bridge is not None:
+            self.controller._feeding_bridge.randomize_stock_levels(25.0, 90.0)
         self._update_status_bar("料位已随机初始化 (25-90%)")
 
     def _on_cart_sensor_changed(self, cart_id: str, data: dict):

@@ -71,6 +71,11 @@ class StockClient:
             self.connect()
         self._request({"action": "set_level", "bin_id": bin_id, "level_tons": level_tons})
 
+    def randomize_all(self, lo_pct: float = 25.0, hi_pct: float = 90.0):
+        if not self._sock:
+            self.connect()
+        self._request({"action": "randomize", "lo_pct": lo_pct, "hi_pct": hi_pct})
+
     def get_all_levels(self) -> List[dict]:
         if not self._sock:
             self.connect()

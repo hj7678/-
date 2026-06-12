@@ -57,20 +57,11 @@ class SimulationFeedingBridge(QObject):
         """启动桥接 (连接 FeedingMaster)"""
         self._enabled = True
         self._connect()
-        self._sync_levels_to_stock()
         self._start_stock_polling()
 
-    def _sync_levels_to_stock(self):
-        """将仿真当前料位同步到 Stock Management（避免被全 0 覆盖）"""
-        for bin_id, sb in self._ctrl.small_bins.items():
-            if sb.current_level > 0:
-                self._stock.set_level(bin_id, sb.current_level)
-        # 同步高位仓
-        if hasattr(self._ctrl, 'view') and self._ctrl.view:
-            for sid, silo in self._ctrl.view.silo_compartments.items():
-                cur = silo.get('current_level', 0)
-                if cur > 0:
-                    self._stock.set_level(sid, cur)
+    def randomize_stock_levels(self, lo_pct: float = 25.0, hi_pct: float = 90.0):
+        """触发 Stock Management 随机初始化料位"""
+        self._stock.randomize_all(lo_pct, hi_pct)
 
     def stop(self):
         self._enabled = False
@@ -85,7 +76,6 @@ class SimulationFeedingBridge(QObject):
     def _start_stock_polling(self):
         """后台线程定期拉取料位数据"""
         def _poll():
-            time.sleep(2.0)  # 等待 _sync_levels_to_stock 完成
             while self._enabled:
                 try:
                     levels = self._stock.get_all_levels()

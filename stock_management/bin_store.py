@@ -176,6 +176,14 @@ class BinStore:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def randomize_levels(self, lo_pct: float = 25.0, hi_pct: float = 90.0):
+        """随机初始化所有料仓料位"""
+        import random
+        with self._lock:
+            for b in self._bins.values():
+                pct = random.uniform(lo_pct, hi_pct)
+                b.level_tons = round(pct * b.capacity / 100.0, 2)
+
     def stop(self):
         self._running = False
         if self._thread:

@@ -127,6 +127,10 @@ class StockServer:
             elif action == "stop_feeding":
                 self.store.stop_feeding(req["bin_id"])
                 return {"ok": True}
+            elif action == "randomize":
+                self.store.randomize_levels(
+                    req.get("lo_pct", 25.0), req.get("hi_pct", 90.0))
+                return {"ok": True}
             else:
                 return {"ok": False, "error": f"unknown action: {action}"}
         except KeyError as e:
