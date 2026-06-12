@@ -7,7 +7,7 @@ import json
 import socket
 import sys
 import threading
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 STOCK_HOST = '127.0.0.1'
 STOCK_PORT = 8895
@@ -71,10 +71,26 @@ class StockClient:
             self.connect()
         self._request({"action": "set_level", "bin_id": bin_id, "level_tons": level_tons})
 
+    def set_levels_batch(self, data: Dict[str, float]):
+        """批量推送料位（桥接用）"""
+        if not self._sock:
+            self.connect()
+        self._request({"action": "set_levels_batch", "data": data})
+
     def randomize_all(self, lo_pct: float = 25.0, hi_pct: float = 90.0):
         if not self._sock:
             self.connect()
         self._request({"action": "randomize", "lo_pct": lo_pct, "hi_pct": hi_pct})
+
+    def start_consumption(self):
+        if not self._sock:
+            self.connect()
+        self._request({"action": "start_consumption"})
+
+    def stop_consumption(self):
+        if not self._sock:
+            self.connect()
+        self._request({"action": "stop_consumption"})
 
     def get_all_levels(self) -> List[dict]:
         if not self._sock:

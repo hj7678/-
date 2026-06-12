@@ -1,33 +1,25 @@
 """
-料仓库存管理 — 独立进程，模拟40个料仓的实时料位
+料仓库存管理 — 纯数据中转站，独立进程
 
 28个配料站 (P1-1 ~ P4-7) + 12个高位仓 (S1-1 ~ S6-2)
 
-仿真模式：
-  - 每1秒按各仓消耗速率递减
-  - 收到 refill 事件后按 0.195 t/s 递增
-  - 料位不超出容量上限、不低于0
+职责：存储和提供料位数据。不模拟消耗/补充——这些由仿真端或真实料位传感器负责。
 """
 import threading
-import time
 from typing import Dict, List, Optional
 
-
-# ── 料仓配置 ──────────────────────────────────
 
 BATCHING_STATION = {
     'columns': 4, 'rows': 7,
     'col_names': ['P1', 'P2', 'P3', 'P4'],
-    'capacity': 110.0,  # 吨
+    'capacity': 110.0,
 }
 
 HIGH_SILO = {
     'columns': 6, 'rows': 2,
     'col_names': ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'],
-    'capacity': 420.0,  # 吨
+    'capacity': 420.0,
 }
-
-FEED_RATE = 0.195  # 上料速率 t/s
 
 
 def _build_all_bin_ids() -> List[str]:
@@ -47,15 +39,13 @@ ALL_BIN_IDS = _build_all_bin_ids()
 class BinState:
     """单个料仓状态"""
 
-    __slots__ = ('bin_id', 'level_tons', 'capacity', 'consumption_rate',
-                 '_last_update')
+    __slots__ = ('bin_id', 'level_tons', 'capacity', 'consumption_rate')
 
     def __init__(self, bin_id: str, capacity: float):
         self.bin_id = bin_id
         self.level_tons = 0.0
         self.capacity = capacity
-        self.consumption_rate = 0.01   # t/s 默认
-        self._last_update = time.time()
+        self.consumption_rate = 0.01
 
     @property
     def level_pct(self) -> float:
@@ -70,44 +60,25 @@ class BinState:
             'consumption_rate': self.consumption_rate,
         }
 
-    def consume(self, delta_seconds: float):
-        """按消耗速率递减"""
-        if self.consumption_rate <= 0:
-            return
-        consumed = self.consumption_rate * delta_seconds
-        self.level_tons = max(0.0, self.level_tons - consumed)
-
-    def refill(self, delta_seconds: float):
-        """上料补充递增"""
-        added = FEED_RATE * delta_seconds
-        self.level_tons = min(self.capacity, self.level_tons + added)
-
 
 class BinStore:
-    """料仓数据存储 + 消耗模拟"""
+    """料仓数据存储（纯数据，无模拟）"""
 
     def __init__(self):
         self._bins: Dict[str, BinState] = {}
         self._lock = threading.Lock()
 
-        # 配料站 28仓
         for col in BATCHING_STATION['col_names']:
             for row in range(1, BATCHING_STATION['rows'] + 1):
                 bid = f"{col}-{row}"
                 self._bins[bid] = BinState(bid, BATCHING_STATION['capacity'])
 
-        # 高位仓 12仓
         for col in HIGH_SILO['col_names']:
             for row in range(1, HIGH_SILO['rows'] + 1):
                 bid = f"{col}-{row}"
                 self._bins[bid] = BinState(bid, HIGH_SILO['capacity'])
 
-        # 当前正在上料的料仓 (feeding 事件)
-        self._feeding_bins: Dict[str, float] = {}  # bin_id → start_time
-        self._running = False
-        self._thread: Optional[threading.Thread] = None
-
-    # ── 查询接口 ──
+    # ── 查询 ──
 
     def get_levels(self, bin_ids: List[str]) -> List[dict]:
         with self._lock:
@@ -122,7 +93,7 @@ class BinStore:
             b = self._bins.get(bin_id)
             return b.to_dict() if b else None
 
-    # ── 修改接口 ──
+    # ── 修改 ──
 
     def set_level(self, bin_id: str, level_tons: float):
         with self._lock:
@@ -130,62 +101,17 @@ class BinStore:
             if b:
                 b.level_tons = max(0.0, min(b.capacity, level_tons))
 
-    def set_consumption_rate(self, bin_id: str, rate: float):
+    def set_levels_batch(self, data: Dict[str, float]):
+        """批量设置料位 {bin_id: level_tons}"""
         with self._lock:
-            b = self._bins.get(bin_id)
-            if b:
-                b.consumption_rate = max(0.0, rate)
-
-    def start_feeding(self, bin_id: str):
-        """标记料仓开始上料"""
-        with self._lock:
-            self._feeding_bins[bin_id] = time.time()
-
-    def stop_feeding(self, bin_id: str):
-        """标记料仓停止上料"""
-        with self._lock:
-            self._feeding_bins.pop(bin_id, None)
-
-    # ── 后台循环 ──
-
-    def _run(self):
-        print("[StockMgmt] 消耗模拟线程启动", flush=True)
-        last_tick = time.time()
-        while self._running:
-            now = time.time()
-            delta = now - last_tick
-            last_tick = now
-
-            with self._lock:
-                # 消耗
-                for b in self._bins.values():
-                    b.consume(delta)
-
-                # 上料补充
-                for bid in list(self._feeding_bins.keys()):
-                    b = self._bins.get(bid)
-                    if b:
-                        b.refill(delta)
-
-            time.sleep(1.0)
-
-    def start(self):
-        if self._running:
-            return
-        self._running = True
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+            for bid, val in data.items():
+                b = self._bins.get(bid)
+                if b:
+                    b.level_tons = max(0.0, min(b.capacity, float(val)))
 
     def randomize_levels(self, lo_pct: float = 25.0, hi_pct: float = 90.0):
-        """随机初始化所有料仓料位"""
         import random
         with self._lock:
             for b in self._bins.values():
                 pct = random.uniform(lo_pct, hi_pct)
                 b.level_tons = round(pct * b.capacity / 100.0, 2)
-
-    def stop(self):
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=3)
-            self._thread = None

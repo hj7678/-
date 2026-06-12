@@ -148,6 +148,8 @@ class SimulationController(QObject):
         self._tcp_scheduling_client = None
         # FeedingMaster 桥接 (仿真 → 上料主控)
         self._feeding_bridge = None
+        # Stock Management 拉回的料位 (用于 HMI 显示，不影响 small_bins 仿真逻辑)
+        self.display_levels: Dict[str, float] = {}
         # 诊断模式："local" / "tcp"
         self._diagnosis_mode = "local"
         # 最新调度结果 belt_id → dict
@@ -1722,7 +1724,7 @@ class SimulationController(QObject):
         if self._feeding_bridge is None:
             self._feeding_bridge = SimulationFeedingBridge(self)
             self._feeding_bridge.command_received.connect(self._on_feeding_commands)
-            self._feeding_bridge.stock_updated.connect(self._on_stock_levels_updated)
+            self._feeding_bridge.stock_updated.connect(self._on_display_levels_updated)
         self._feeding_bridge.start()
         print("[桥接] FeedingMaster 桥接已启动", flush=True)
 
@@ -1736,12 +1738,10 @@ class SimulationController(QObject):
         if self._feeding_bridge is not None:
             self._feeding_bridge.apply_commands(commands)
 
-    def _on_stock_levels_updated(self, levels: list):
-        """Stock Management 料位更新 → 同步到仿真显示"""
+    def _on_display_levels_updated(self, levels: list):
+        """Stock Management 料位 → display_levels (仅 HMI 显示，不影响仿真逻辑)"""
         for b in levels:
-            bin_id = b.get('bin_id', '')
-            if bin_id in self.small_bins:
-                self.small_bins[bin_id].current_level = b.get('level_tons', 0)
+            self.display_levels[b['bin_id']] = b.get('level_tons', 0)
 
     def _on_tcp_schedule_received(self, belt_id, result):
         self._tcp_schedules[belt_id] = result

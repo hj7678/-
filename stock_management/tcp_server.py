@@ -1,20 +1,16 @@
 """
 Stock Management TCP Server — :8895
 
-协议: TCP JSON Lines (每行一个 JSON，以 \n 分隔)
+纯数据中转：接收仿真端推送的料位，提供给 FeedingMaster 查询。
+
+协议: TCP JSON Lines
 
 请求:
-  {"action": "get_levels", "bin_ids": ["P1-1", "P1-2"]}
   {"action": "get_all"}
-  {"action": "get_bin", "bin_id": "P1-1"}
+  {"action": "get_levels", "bin_ids": ["P1-1"]}
   {"action": "set_level", "bin_id": "P1-1", "level_tons": 45.0}
-  {"action": "set_consumption", "bin_id": "P1-1", "rate": 0.02}
-  {"action": "start_feeding", "bin_id": "P1-1"}
-  {"action": "stop_feeding", "bin_id": "P1-1"}
-
-响应:
-  {"ok": true, "data": ...}
-  {"ok": false, "error": "..."}
+  {"action": "set_levels_batch", "data": {"P1-1": 45.0, "P1-2": 38.5}}
+  {"action": "randomize", "lo_pct": 25.0, "hi_pct": 90.0}
 """
 import json
 import socket
@@ -29,7 +25,6 @@ PORT = 8895
 
 
 class StockServer:
-    """料仓库存管理 TCP 服务"""
 
     def __init__(self, host: str = HOST, port: int = PORT):
         self.host = host
@@ -44,7 +39,6 @@ class StockServer:
         self._server.bind((self.host, self.port))
         self._server.listen(5)
         self._running = True
-        self.store.start()
         print(f"[StockMgmt] 服务已启动 {self.host}:{self.port}", flush=True)
 
         while self._running:
@@ -52,18 +46,16 @@ class StockServer:
                 self._server.settimeout(1.0)
                 try:
                     client, addr = self._server.accept()
-                    print(f"[StockMgmt] 连接: {addr}", flush=True)
                     t = threading.Thread(target=self._handle, args=(client, addr), daemon=True)
                     t.start()
                 except socket.timeout:
                     pass
             except Exception as e:
                 if self._running:
-                    print(f"[StockMgmt] accept 错误: {e}", flush=True)
+                    print(f"[StockMgmt] accept 错误: {e}", file=sys.stderr)
 
     def stop(self):
         self._running = False
-        self.store.stop()
         if self._server:
             try:
                 self._server.close()
@@ -84,12 +76,10 @@ class StockServer:
                     line, buf = buf.split(b"\n", 1)
                     resp = self._process(line.decode("utf-8").strip())
                     client.sendall((json.dumps(resp, ensure_ascii=False) + "\n").encode("utf-8"))
-        except socket.timeout:
-            pass
-        except ConnectionResetError:
+        except (socket.timeout, ConnectionResetError):
             pass
         except Exception as e:
-            print(f"[StockMgmt] 客户端 {addr} 错误: {e}", file=sys.stderr)
+            print(f"[StockMgmt] 客户端错误: {e}", file=sys.stderr)
         finally:
             try:
                 client.close()
@@ -98,34 +88,25 @@ class StockServer:
 
     def _process(self, line: str) -> dict:
         if not line:
-            return {"ok": False, "error": "empty request"}
+            return {"ok": False, "error": "empty"}
         try:
             req = json.loads(line)
         except json.JSONDecodeError as e:
-            return {"ok": False, "error": f"invalid json: {e}"}
+            return {"ok": False, "error": str(e)}
 
         action = req.get("action", "")
         try:
-            if action == "get_levels":
-                data = self.store.get_levels(req.get("bin_ids", []))
-                return {"ok": True, "data": data}
-            elif action == "get_all":
-                data = self.store.get_all()
-                return {"ok": True, "data": data}
+            if action == "get_all":
+                return {"ok": True, "data": self.store.get_all()}
+            elif action == "get_levels":
+                return {"ok": True, "data": self.store.get_levels(req.get("bin_ids", []))}
             elif action == "get_bin":
-                data = self.store.get_bin(req.get("bin_id", ""))
-                return {"ok": True, "data": data}
+                return {"ok": True, "data": self.store.get_bin(req.get("bin_id", ""))}
             elif action == "set_level":
                 self.store.set_level(req["bin_id"], req["level_tons"])
                 return {"ok": True}
-            elif action == "set_consumption":
-                self.store.set_consumption_rate(req["bin_id"], req.get("rate", 0.01))
-                return {"ok": True}
-            elif action == "start_feeding":
-                self.store.start_feeding(req["bin_id"])
-                return {"ok": True}
-            elif action == "stop_feeding":
-                self.store.stop_feeding(req["bin_id"])
+            elif action == "set_levels_batch":
+                self.store.set_levels_batch(req.get("data", {}))
                 return {"ok": True}
             elif action == "randomize":
                 self.store.randomize_levels(
