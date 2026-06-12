@@ -148,15 +148,21 @@ class FeedingMasterController:
         """一个控制周期"""
         # 1. 拉取料位
         levels = self.stock.get_all_levels()
+        level_map = {b['bin_id']: b for b in levels} if levels else {}
+
+        # 心跳日志 (每2秒)
+        tick_count = getattr(self, '_tick_count', 0) + 1
+        self._tick_count = tick_count
+        do_heartbeat = (tick_count % 40 == 0)  # 50ms*40=2s
 
         # 2. 遍历活跃路线，执行状态机
         commands = []
+        route_summaries = []
         for route_id in list(self._active_routes):
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
                 continue
 
-            # 构建 engine 输入
             cart_id = ctx.assigned_cart or ''
             cart_pos = self._cart_positions.get(cart_id, 1)
             cart_target = ctx.cart_target_position
@@ -164,10 +170,9 @@ class FeedingMasterController:
 
             # 读取料位
             level = 0.0
-            for b in levels:
-                if b['bin_id'] == target_bin:
-                    level = b['level_pct']
-                    break
+            b = level_map.get(target_bin, {})
+            if b:
+                level = b.get('level_pct', 0)
 
             # 状态引擎判定
             next_state, actions = self.state_engine.evaluate(
@@ -181,18 +186,26 @@ class FeedingMasterController:
                 current_time=self._total_runtime,
             )
 
+            # 收集摘要
+            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
+            threshold = {'sequential': 98, 'reverse': 95, 'column_switch': 92}.get(strategy, 95)
+            if cart_id == 'Cart3':
+                threshold = 94
+            route_summaries.append(
+                f"  {route_id} {ctx.state.value}/{strategy} {target_bin}={level:.0f}% "
+                f"(阈值{threshold}%) cart={cart_id}@{cart_pos}"
+            )
+
             # 状态变更
             if next_state != ctx.state:
                 old = ctx.state
                 self.route_manager.set_route_state(route_id, next_state)
-                print(f"[FeedingMaster] {route_id}: {old.value} → {next_state.value}", flush=True)
-
-                # FEEDING → 通知 Stock Management 开始上料
-                if next_state == RouteState.FEEDING and target_bin:
-                    self.stock.start_feeding(target_bin)
-                # 离开 FEEDING → 停止上料
-                if old == RouteState.FEEDING and target_bin:
-                    self.stock.stop_feeding(target_bin)
+                reason = ""
+                if old.value == 'feeding' and next_state.value == 'clearing':
+                    reason = f" — 料位 {level:.0f}% ≥ {threshold}%"
+                elif old.value == 'moving_to_target':
+                    reason = f" — 小车到达位置 {cart_pos}"
+                print(f"[FeedingMaster] {route_id}: {old.value} → {next_state.value}{reason}", flush=True)
 
             # 执行器命令
             route_conveyors = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
@@ -237,7 +250,17 @@ class FeedingMasterController:
                         "action": "move", "target": target,
                     })
 
-        # 3. 推送控制指令
+        # 3. 心跳日志
+        if do_heartbeat and route_summaries:
+            n_cmds = len(commands)
+            print(f"[FeedingMaster] ── 心跳 (tick={tick_count}) ──", flush=True)
+            for s in route_summaries:
+                print(s, flush=True)
+            if n_cmds > 0:
+                actions = set(c['action'] for c in commands)
+                print(f"  → 指令: {n_cmds}条 ({', '.join(sorted(actions))})", flush=True)
+
+        # 4. 推送控制指令
         if commands:
             self.server.send_commands(commands)
 
