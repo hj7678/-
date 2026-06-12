@@ -1741,7 +1741,11 @@ class SimulationController(QObject):
         for b in levels:
             bin_id = b.get('bin_id', '')
             if bin_id in self.small_bins:
-                self.small_bins[bin_id].current_level = b.get('level_tons', 0)
+                new_val = b.get('level_tons', 0)
+                sb = self.small_bins[bin_id]
+                # 只在 Stock 值 >0 或仿真值为 0 时更新，避免用全零覆盖已有料位
+                if new_val > 0 or sb.current_level == 0:
+                    sb.current_level = new_val
 
     def _on_tcp_schedule_received(self, belt_id, result):
         self._tcp_schedules[belt_id] = result

@@ -66,6 +66,11 @@ class StockClient:
             self.disconnect()
             return None
 
+    def set_level(self, bin_id: str, level_tons: float):
+        if not self._sock:
+            self.connect()
+        self._request({"action": "set_level", "bin_id": bin_id, "level_tons": level_tons})
+
     def get_all_levels(self) -> List[dict]:
         if not self._sock:
             self.connect()
