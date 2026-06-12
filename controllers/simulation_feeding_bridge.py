@@ -62,8 +62,10 @@ class SimulationFeedingBridge(QObject):
     def stop(self):
         self._enabled = False
         self._fm.disconnect()
+        self._stock.disconnect()
 
     def _connect(self):
+        self._stock.connect()
         ok = self._fm.connect()
         self.connection_changed.emit(ok)
 
