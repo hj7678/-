@@ -39,27 +39,26 @@ class ScheduleManager:
     """FeedingMaster 调度管理器"""
 
     def __init__(self, stock_client, route_manager):
-        self.stock = stock_client         # StockClient (feeding_master 的)
-        self.route_mgr = route_manager    # RouteStateManager
+        self.stock = stock_client
+        self.route_mgr = route_manager
 
-        # 序列缓存 belt_id → [bin_id, ...]
         self._sequences: Dict[str, list] = {}
         self._sequences_lock = threading.Lock()
 
-        # 执行追踪 belt_id → route_id
         self._executing: Dict[str, str] = {}
-        # belt_id → 当前料仓
         self._executing_bin: Dict[str, str] = {}
 
-        # 请求冷却追踪
         self._last_request: Dict[str, float] = {}
         self._last_emergency: Dict[str, float] = {}
 
-        # 调度服务连接
+        # 持久连接
         self._socks: Dict[str, Optional[socket.socket]] = {}
+        self._sock_lock = threading.Lock()
 
-        # 回调
-        self._on_sequence: Optional[callable] = None  # (belt_id, sequence)
+        # 防抖: 每个belt每次tick最多触发一次
+        self._tick_triggered: set = set()
+
+        self._on_sequence: Optional[callable] = None
 
     def on_sequence_ready(self, callback):
         """序列可用时的回调 callback(belt_id, [bin_ids])"""
@@ -69,11 +68,10 @@ class ScheduleManager:
 
     def tick(self, total_runtime: float):
         """检查是否需要触发调度"""
+        self._tick_triggered.clear()
         for belt_id in SCHEDULING_PORTS:
-            # 紧急: 有料仓 < 11t
             if self._check_emergency(belt_id, total_runtime):
                 continue
-            # 空闲: 无执行路线且无缓存序列
             if self._check_idle(belt_id, total_runtime):
                 continue
 
@@ -138,19 +136,27 @@ class ScheduleManager:
         ]
 
     def _request_schedule(self, belt_id: str):
-        """发送调度请求到调度服务"""
+        """发送调度请求到调度服务 (持久连接)"""
+        # 每tick最多触发一次
+        if belt_id in self._tick_triggered:
+            return
+        self._tick_triggered.add(belt_id)
+
         bins = self._get_belt_bins(belt_id)
         if not bins:
             return
 
+        # 检查是否有料仓真正低于阈值 (避免全0虚警)
+        any_below = any(b['stock'] < IDLE_THRESHOLD_TONS for b in bins)
+        if not any_below:
+            return
+
         cart_id = BELT_TO_CART.get(belt_id, '')
-        # 小车位置和分料状态从 stock/sensor 缓存中获取（由 master_controller 注入）
         cart_pos = self._cart_positions.get(cart_id, 1) if hasattr(self, '_cart_positions') else 1
         left_div, right_div = False, False
         if hasattr(self, '_cart_divert'):
             left_div, right_div = self._cart_divert.get(cart_id, (False, False))
 
-        # D8: 映射 cart_pos
         if belt_id == 'D8' and hasattr(self, '_map_d8_pos'):
             cart_pos = self._map_d8_pos(cart_pos, left_div, right_div)
 
@@ -164,19 +170,32 @@ class ScheduleManager:
             "right_divert": right_div,
         }
 
-        # 异步发送
+        # 异步发送 (持久连接)
         t = threading.Thread(target=self._send_and_recv, args=(belt_id, payload), daemon=True)
         t.start()
 
+    def _connect(self, belt_id: str) -> Optional[socket.socket]:
+        with self._sock_lock:
+            sock = self._socks.get(belt_id)
+            if sock:
+                return sock
+            try:
+                port = SCHEDULING_PORTS.get(belt_id)
+                if not port:
+                    return None
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                sock.connect((SCHEDULING_HOST, port))
+                self._socks[belt_id] = sock
+                return sock
+            except Exception:
+                return None
+
     def _send_and_recv(self, belt_id: str, payload: dict):
-        port = SCHEDULING_PORTS.get(belt_id)
-        if not port:
+        sock = self._connect(belt_id)
+        if not sock:
             return
-        sock = None
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            sock.connect((SCHEDULING_HOST, port))
             sock.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
 
             buf = b""
@@ -184,20 +203,25 @@ class ScheduleManager:
             while b"\n" not in buf:
                 chunk = sock.recv(4096)
                 if not chunk:
-                    break
+                    self._disconnect(belt_id)
+                    return
                 buf += chunk
 
             if buf:
                 resp = json.loads(buf.decode("utf-8").strip())
                 self._on_schedule_response(belt_id, resp)
         except Exception as e:
+            self._disconnect(belt_id)
             print(f"[FM-Sched] {belt_id} 调度请求失败: {e}", file=sys.stderr)
-        finally:
-            if sock:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
+
+    def _disconnect(self, belt_id: str):
+        with self._sock_lock:
+            sock = self._socks.pop(belt_id, None)
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     def _on_schedule_response(self, belt_id: str, resp: dict):
         seq = resp.get('sequence', [])
