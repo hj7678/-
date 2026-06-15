@@ -35,6 +35,7 @@ from controllers.route_state_manager import (
 from state_transition_engine import StateTransitionEngine
 from feeding_master.tcp_server import FeedingMasterServer
 from feeding_master.stock_client import StockClient
+from feeding_master.schedule_manager import ScheduleManager, CART_TO_BELT, BELT_TO_CART
 
 import config
 
@@ -66,6 +67,10 @@ class FeedingMasterController:
         self._tick_ms = 50
         self._total_runtime = 0.0
 
+        # 调度管理器
+        self.scheduler = ScheduleManager(self.stock, self.route_manager)
+        self.scheduler.on_sequence_ready(self._on_schedule_sequence)
+
         # 状态引擎路由配置
         self._configure_state_engine()
 
@@ -92,6 +97,7 @@ class FeedingMasterController:
         self._cart_divert = {
             k: tuple(v) for k, v in data.get('cart_divert', {}).items()
         }
+        self.scheduler.update_cart_state(self._cart_positions, self._cart_divert)
 
         # 同步活跃路线: 仿真激活了哪些路线，FeedingMaster 就追踪哪些
         sim_active = set(data.get('active_routes', []))
@@ -207,6 +213,18 @@ class FeedingMasterController:
                     reason = f" — 小车到达位置 {cart_pos}"
                 print(f"[FeedingMaster] {route_id}: {old.value} → {next_state.value}{reason}", flush=True)
 
+                # 路线完成 → 执行序列下一仓
+                if next_state.value in ('waiting', 'standby'):
+                    belt_id = CART_TO_BELT.get(cart_id, '')
+                    self.scheduler.mark_completed(belt_id)
+                    nxt = self.scheduler.get_next_bin(belt_id)
+                    if nxt:
+                        self.scheduler.pop_next_bin(belt_id)
+                        route_id2 = self._pick_route_for_bin(belt_id, nxt)
+                        if route_id2:
+                            if self.activate_route(route_id2, nxt):
+                                print(f"[FeedingMaster] {belt_id} 自动续 → {nxt}", flush=True)
+
             # 执行器命令
             route_conveyors = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
             final_conv = route_conveyors[-1] if route_conveyors else ''
@@ -260,7 +278,10 @@ class FeedingMasterController:
                 actions = set(c['action'] for c in commands)
                 print(f"  → 指令: {n_cmds}条 ({', '.join(sorted(actions))})", flush=True)
 
-        # 4. 推送控制指令
+        # 4. 调度引擎联动
+        self.scheduler.tick(self._total_runtime)
+
+        # 5. 推送控制指令
         if commands:
             self.server.send_commands(commands)
 
@@ -271,8 +292,45 @@ class FeedingMasterController:
         ok = self.route_manager.start_route(route_id, target_bin)
         if ok:
             self._active_routes.add(route_id)
+            belt_id = CART_TO_BELT.get(
+                self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
+            self.scheduler.mark_executing(belt_id, route_id, target_bin)
             print(f"[FeedingMaster] 路线 {route_id} → {target_bin} 已激活", flush=True)
         return ok
+
+    def _on_schedule_sequence(self, belt_id: str, sequence: list):
+        """收到调度序列 → 若皮带空闲则自动启动"""
+        if self.scheduler.is_executing(belt_id):
+            return  # 正在执行中, 序列已缓存等下次使用
+
+        # 选第一条执行
+        first_bin = sequence[0] if sequence else None
+        if not first_bin:
+            return
+
+        route_id = self._pick_route_for_bin(belt_id, first_bin)
+        if not route_id:
+            return
+
+        self.scheduler.pop_next_bin(belt_id)
+        if self.activate_route(route_id, first_bin):
+            print(f"[FeedingMaster] {belt_id} → {first_bin} ({route_id})", flush=True)
+
+    def _pick_route_for_bin(self, belt_id: str, bin_id: str) -> Optional[str]:
+        """根据料仓ID选择路线"""
+        # D7 → route1/2/3 (P1列)
+        if belt_id == 'D7':
+            return 'route3'
+        # D8 → route6/8 (P2/P3列)
+        if belt_id == 'D8':
+            return 'route6'
+        # D9 → route4/7 (P4列)
+        if belt_id == 'D9':
+            return 'route7'
+        # D6 → route5 (高位仓)
+        if belt_id == 'D6':
+            return 'route5'
+        return None
 
     def deactivate_route(self, route_id: str):
         """停用路线"""
