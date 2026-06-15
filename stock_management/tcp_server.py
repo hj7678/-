@@ -41,7 +41,9 @@ class StockServer:
         self._running = True
         print(f"[StockMgmt] 服务已启动 {self.host}:{self.port}", flush=True)
 
+        loop_count = 0
         while self._running:
+            loop_count += 1
             try:
                 self._server.settimeout(1.0)
                 try:
@@ -50,6 +52,10 @@ class StockServer:
                     t.start()
                 except socket.timeout:
                     pass
+            # 每30秒心跳
+            if loop_count % 30 == 0:
+                total = sum(b.level_tons for b in self.store._bins.values())
+                print(f"[StockMgmt] 心跳: {len(self.store._bins)}仓 总料位={total:.0f}t", flush=True)
             except Exception as e:
                 if self._running:
                     print(f"[StockMgmt] accept 错误: {e}", file=sys.stderr)
