@@ -180,6 +180,14 @@ class FeedingMasterController:
             if b:
                 level = b.get('level_pct', 0)
 
+            # 进入 FEEDING 时确定清空策略
+            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
+            if ctx.state == RouteState.FEEDING and strategy == 'reverse':
+                strategy = self._resolve_clearing_strategy(route_id)
+                ctx.clearing_strategy = strategy
+                if strategy != 'reverse':
+                    print(f"[FeedingMaster] {route_id} 清空策略={strategy}", flush=True)
+
             # 状态引擎判定
             next_state, actions = self.state_engine.evaluate(
                 route_id, ctx.state,
@@ -188,12 +196,11 @@ class FeedingMasterController:
                 cart_target=cart_target,
                 cart_moving=ctx.cart_moving,
                 cart=cart_id,
-                clearing_strategy=getattr(ctx, 'clearing_strategy', 'reverse'),
+                clearing_strategy=strategy,
                 current_time=self._total_runtime,
             )
 
-            # 收集摘要
-            strategy = getattr(ctx, 'clearing_strategy', 'reverse')
+            # 收集摘要（使用已确定的 strategy 而非 getattr）
             threshold = {'sequential': 98, 'reverse': 95, 'column_switch': 92}.get(strategy, 95)
             if cart_id == 'Cart3':
                 threshold = 94
@@ -317,20 +324,59 @@ class FeedingMasterController:
             print(f"[FeedingMaster] {belt_id} → {first_bin} ({route_id})", flush=True)
 
     def _pick_route_for_bin(self, belt_id: str, bin_id: str) -> Optional[str]:
-        """根据料仓ID选择路线"""
-        # D7 → route1/2/3 (P1列)
-        if belt_id == 'D7':
-            return 'route3'
-        # D8 → route6/8 (P2/P3列)
-        if belt_id == 'D8':
-            return 'route6'
-        # D9 → route4/7 (P4列)
-        if belt_id == 'D9':
-            return 'route7'
-        # D6 → route5 (高位仓)
+        """根据料仓ID选择路线（复用仿真侧的 BIN_TO_AVAILABLE_ROUTES）"""
         if belt_id == 'D6':
             return 'route5'
-        return None
+
+        available = config.BIN_TO_AVAILABLE_ROUTES.get(bin_id, [])
+        if not available:
+            return None
+
+        # 优先选第一条可用路线
+        prefix = bin_id.split('-')[0]
+        priority_map = config.FEED_POINT_PRIORITY.get(prefix, {})
+
+        candidates = []
+        for feed_point, route_id in available:
+            priority = priority_map.get(feed_point, 99)
+            candidates.append((priority, feed_point, route_id))
+
+        if not candidates:
+            return None
+        candidates.sort()
+        return candidates[0][2]
+
+    def _resolve_clearing_strategy(self, route_id: str) -> str:
+        """根据下一料仓与当前料仓的关系确定清空策略"""
+        ctx = self.route_manager.get_route_context(route_id)
+        if not ctx or not ctx.target_bin:
+            return 'reverse'
+
+        # D6: 一律换列
+        if ctx.assigned_cart == 'Cart4':
+            return 'column_switch'
+
+        belt_id = CART_TO_BELT.get(ctx.assigned_cart, '')
+        if not belt_id:
+            return 'reverse'
+
+        nxt = self.scheduler.get_next_bin(belt_id)
+        if not nxt:
+            return 'reverse'
+
+        cur_col = ctx.target_bin.split('-')[0]
+        next_col = nxt.split('-')[0]
+
+        if cur_col != next_col:
+            return 'column_switch'
+
+        cur_row = int(ctx.target_bin.split('-')[1])
+        next_row = int(nxt.split('-')[1])
+
+        if next_row < cur_row and cur_row >= 4:
+            if ctx.assigned_hoppers:
+                return 'sequential'
+        return 'reverse'
 
     def deactivate_route(self, route_id: str):
         """停用路线"""
