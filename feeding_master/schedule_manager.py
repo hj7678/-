@@ -160,8 +160,8 @@ class ScheduleManager:
             "boost_mode": False,
             "bins": bins,
             "cart_position": cart_pos,
-            "left_divert": left_divert,
-            "right_divert": right_divert,
+            "left_divert": left_div,
+            "right_divert": right_div,
         }
 
         # 异步发送

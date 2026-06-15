@@ -103,15 +103,26 @@ class FeedingMasterController:
         sim_active = set(data.get('active_routes', []))
         sim_states = data.get('route_states', {})
 
-        # 新激活的路线: 从仿真当前目标料仓同步
+        # 新激活的路线: 从桥接数据同步状态和目标料仓
+        route_targets = data.get('route_targets', {})
         for route_id in sim_active - self._active_routes:
             ctx = self.route_manager.get_route_context(route_id)
-            if ctx and ctx.target_bin:
-                self._active_routes.add(route_id)
-                print(f"[FeedingMaster] 路线 {route_id} → {ctx.target_bin} 已同步", flush=True)
-            else:
-                self._active_routes.add(route_id)
-                print(f"[FeedingMaster] 路线 {route_id} 已加入追踪", flush=True)
+            target = route_targets.get(route_id, '')
+            state_str = sim_states.get(route_id, 'idle') if isinstance(sim_states, dict) else 'idle'
+
+            if target and ctx:
+                ctx.target_bin = target
+                if state_str != 'idle':
+                    # 同步仿真当前状态
+                    try:
+                        new_state = RouteState(state_str)
+                        self.route_manager._transition(ctx, new_state)
+                    except ValueError:
+                        pass
+
+            self._active_routes.add(route_id)
+            print(f"[FeedingMaster] 路线 {route_id} [{state_str}]" +
+                  (f" → {target}" if target else "") + " 已同步", flush=True)
 
         # 仿真已停用的路线
         for route_id in self._active_routes - sim_active:
