@@ -103,6 +103,13 @@ class FeedingMasterController:
         sim_active = set(data.get('active_routes', []))
         sim_states = data.get('route_states', {})
 
+        # 每帧同步 per-route 状态 (cart_moving 等)
+        route_cart_moving = data.get('route_cart_moving', {})
+        for route_id in sim_active & self._active_routes:
+            ctx = self.route_manager.get_route_context(route_id)
+            if ctx:
+                ctx.cart_moving = route_cart_moving.get(route_id, ctx.cart_moving)
+
         # 新激活的路线: 从桥接数据同步状态和目标料仓
         route_targets = data.get('route_targets', {})
         for route_id in sim_active - self._active_routes:
@@ -112,8 +119,13 @@ class FeedingMasterController:
 
             if target and ctx:
                 ctx.target_bin = target
+                # 从 target_bin 推算小车目标位置
+                if '-' in target:
+                    try:
+                        ctx.cart_target_position = int(target.split('-')[1])
+                    except ValueError:
+                        pass
                 if state_str != 'idle':
-                    # 同步仿真当前状态
                     try:
                         new_state = RouteState(state_str)
                         self.route_manager._transition(ctx, new_state)

@@ -112,6 +112,10 @@ class SimulationFeedingBridge(QObject):
             "active_routes": list(ctrl.active_routes),
             "route_states": ctrl.route_state_manager.get_all_route_states(),
             "route_targets": dict(ctrl.route_to_bin),
+            "route_cart_moving": {
+                rid: (ctx.cart_moving if (ctx := ctrl.route_state_manager.get_route_context(rid)) else False)
+                for rid in ctrl.active_routes
+            },
         }
         self._fm.send_sensor_states(sensor_data)
 
