@@ -233,10 +233,10 @@ class FeedingMasterController:
                 strategy = self._resolve_clearing_strategy(route_id)
                 ctx.clearing_strategy = strategy
 
-            # 清空计时器 (换列不需要传感器追踪)
+            # 清空计时器 (所有策略都追踪传感器)
             sensor_clear_timers = {}
             sensor_clear_timeouts = {}
-            if ctx.state == RouteState.CLEARING and strategy != 'column_switch':
+            if ctx.state == RouteState.CLEARING:
                 sensor_clear_timers, sensor_clear_timeouts = self._build_clearing_data(ctx, route_id)
 
             # 顺序策略: 提前移小车
