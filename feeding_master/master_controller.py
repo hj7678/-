@@ -295,6 +295,13 @@ class FeedingMasterController:
                     parts.append(f"小车 {cart_id}→{cart_target}")
                 elif next_state.value == 'waiting':
                     parts.append("清空完成")
+                    # 反序: 只停终点皮带, 非终点皮带继续运行
+                    convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
+                    if convs:
+                        final = convs[-1]
+                        commands.append({'device': 'belt', 'id': final, 'action': 'stop'})
+                        new_cmds[f"belt:{final}"] = 'stop'
+                        parts.append(f"停终点:{final}")
 
                 ctx.clearing_start_time = self._total_runtime if next_state.value == 'clearing' else getattr(ctx, 'clearing_start_time', 0)
                 print(' | '.join(parts), flush=True)
@@ -338,6 +345,13 @@ class FeedingMasterController:
                     cmd = {'device': 'hopper', 'id': hid, 'action': action.value}
                     commands.append(cmd)
                     new_cmds[f"hopper:{hid}"] = action.value
+
+            elif ctx.state == RouteState.WAITING and route_conveyors:
+                # WAITING: 非终点皮带保持运行, 仅终点皮带已在上方状态转换中停止
+                for cid in route_conveyors[:-1]:
+                    new_cmds[f"belt:{cid}"] = 'start'
+                for hid in ctx.assigned_hoppers:
+                    new_cmds[f"hopper:{hid}"] = 'close'
 
             if cart_id:
                 if cart_id == 'Cart4':
