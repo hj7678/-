@@ -52,13 +52,22 @@ class StockServer:
                     t.start()
                 except socket.timeout:
                     pass
-            # 每30秒心跳
-            if loop_count % 30 == 0:
-                total = sum(b.level_tons for b in self.store._bins.values())
-                print(f"[StockMgmt] 心跳: {len(self.store._bins)}仓 总料位={total:.0f}t", flush=True)
             except Exception as e:
                 if self._running:
                     print(f"[StockMgmt] accept 错误: {e}", file=sys.stderr)
+            # 每30秒详细心跳
+            if loop_count % 30 == 0:
+                s = self.store.get_status_summary()
+                print(f"[StockMgmt] ══ 30s心跳 ══", flush=True)
+                print(f"  总料位: {s['total_tons']:.0f}t (40仓)", flush=True)
+                lo = ', '.join(f'{b}={p:.0f}%({r:.2f}t/s)' for b, p, r in s['lowest'])
+                hi = ', '.join(f'{b}={p:.0f}%({r:.2f}t/s)' for b, p, r in s['highest'])
+                print(f"  最低5仓: {lo}", flush=True)
+                print(f"  最高5仓: {hi}", flush=True)
+                if s['feeding']:
+                    print(f"  补料中: {', '.join(s['feeding'])}", flush=True)
+                if s['discharging']:
+                    print(f"  出料中: {', '.join(s['discharging'])}", flush=True)
 
     def stop(self):
         self._running = False
@@ -111,6 +120,13 @@ class StockServer:
             elif action == "set_level":
                 self.store.set_level(req["bin_id"], req["level_tons"])
                 return {"ok": True}
+            elif action == "set_consumption":
+                self.store.set_consumption_rate(req["bin_id"], req.get("rate", 0.01))
+                return {"ok": True}
+            elif action == "set_consumption_batch":
+                for bid, rate in req.get("rates", {}).items():
+                    self.store.set_consumption_rate(bid, float(rate))
+                return {"ok": True}
             elif action == "set_levels_batch":
                 self.store.set_levels_batch(req.get("data", {}))
                 return {"ok": True}
@@ -118,6 +134,20 @@ class StockServer:
                 self.store.randomize_levels(
                     req.get("lo_pct", 25.0), req.get("hi_pct", 90.0))
                 return {"ok": True}
+            elif action == "mark_feeding":
+                self.store.mark_feeding(req["bin_id"])
+                return {"ok": True}
+            elif action == "unmark_feeding":
+                self.store.unmark_feeding(req["bin_id"])
+                return {"ok": True}
+            elif action == "mark_discharging":
+                self.store.mark_discharging(req["bin_id"])
+                return {"ok": True}
+            elif action == "unmark_discharging":
+                self.store.unmark_discharging(req["bin_id"])
+                return {"ok": True}
+            elif action == "get_status":
+                return {"ok": True, "data": self.store.get_status_summary()}
             else:
                 return {"ok": False, "error": f"unknown action: {action}"}
         except KeyError as e:

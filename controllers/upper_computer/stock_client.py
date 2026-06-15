@@ -77,6 +77,18 @@ class StockClient:
             self.connect()
         self._request({"action": "set_levels_batch", "data": data})
 
+    def set_consumption_rate(self, bin_id: str, rate: float):
+        """设置消耗速率"""
+        if not self._sock:
+            self.connect()
+        self._request({"action": "set_consumption", "bin_id": bin_id, "rate": rate})
+
+    def set_consumption_rates_batch(self, rates: Dict[str, float]):
+        """批量设置消耗速率"""
+        if not self._sock:
+            self.connect()
+        self._request({"action": "set_consumption_batch", "rates": rates})
+
     def randomize_all(self, lo_pct: float = 25.0, hi_pct: float = 90.0):
         if not self._sock:
             self.connect()

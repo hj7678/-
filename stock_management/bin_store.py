@@ -67,6 +67,8 @@ class BinStore:
     def __init__(self):
         self._bins: Dict[str, BinState] = {}
         self._lock = threading.Lock()
+        self._feeding: set = set()        # 正在补料的料仓 (仅展示用)
+        self._discharging: set = set()    # 正在出料的高位仓 (仅展示用)
 
         for col in BATCHING_STATION['col_names']:
             for row in range(1, BATCHING_STATION['rows'] + 1):
@@ -115,3 +117,35 @@ class BinStore:
             for b in self._bins.values():
                 pct = random.uniform(lo_pct, hi_pct)
                 b.level_tons = round(pct * b.capacity / 100.0, 2)
+
+    # ── 展示用状态追踪 ──
+
+    def mark_feeding(self, bin_id: str):
+        with self._lock:
+            self._feeding.add(bin_id)
+
+    def unmark_feeding(self, bin_id: str):
+        with self._lock:
+            self._feeding.discard(bin_id)
+
+    def mark_discharging(self, bin_id: str):
+        with self._lock:
+            self._discharging.add(bin_id)
+
+    def unmark_discharging(self, bin_id: str):
+        with self._lock:
+            self._discharging.discard(bin_id)
+
+    def get_status_summary(self) -> dict:
+        """获取展示用摘要"""
+        with self._lock:
+            bins_sorted = sorted(self._bins.values(), key=lambda b: b.level_pct)
+            return {
+                'total_tons': round(sum(b.level_tons for b in self._bins.values()), 1),
+                'feeding': sorted(self._feeding),
+                'discharging': sorted(self._discharging),
+                'lowest': [(b.bin_id, round(b.level_pct, 1), b.consumption_rate)
+                           for b in bins_sorted[:5]],
+                'highest': [(b.bin_id, round(b.level_pct, 1), b.consumption_rate)
+                            for b in bins_sorted[-5:]],
+            }
