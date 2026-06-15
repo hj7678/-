@@ -51,10 +51,6 @@ class ScheduleManager:
         self._last_request: Dict[str, float] = {}
         self._last_emergency: Dict[str, float] = {}
 
-        # 持久连接
-        self._socks: Dict[str, Optional[socket.socket]] = {}
-        self._sock_lock = threading.Lock()
-
         # 防抖: 每个belt每次tick最多触发一次
         self._tick_triggered: set = set()
 
@@ -174,28 +170,16 @@ class ScheduleManager:
         t = threading.Thread(target=self._send_and_recv, args=(belt_id, payload), daemon=True)
         t.start()
 
-    def _connect(self, belt_id: str) -> Optional[socket.socket]:
-        with self._sock_lock:
-            sock = self._socks.get(belt_id)
-            if sock:
-                return sock
-            try:
-                port = SCHEDULING_PORTS.get(belt_id)
-                if not port:
-                    return None
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5)
-                sock.connect((SCHEDULING_HOST, port))
-                self._socks[belt_id] = sock
-                return sock
-            except Exception:
-                return None
-
     def _send_and_recv(self, belt_id: str, payload: dict):
-        sock = self._connect(belt_id)
-        if not sock:
+        """短连接发送 (调度请求不频繁, 避免持久连接竞态)"""
+        port = SCHEDULING_PORTS.get(belt_id)
+        if not port:
             return
+        sock = None
         try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect((SCHEDULING_HOST, port))
             sock.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
 
             buf = b""
@@ -203,25 +187,20 @@ class ScheduleManager:
             while b"\n" not in buf:
                 chunk = sock.recv(4096)
                 if not chunk:
-                    self._disconnect(belt_id)
-                    return
+                    break
                 buf += chunk
 
             if buf:
                 resp = json.loads(buf.decode("utf-8").strip())
                 self._on_schedule_response(belt_id, resp)
         except Exception as e:
-            self._disconnect(belt_id)
             print(f"[FM-Sched] {belt_id} 调度请求失败: {e}", file=sys.stderr)
-
-    def _disconnect(self, belt_id: str):
-        with self._sock_lock:
-            sock = self._socks.pop(belt_id, None)
-        if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     def _on_schedule_response(self, belt_id: str, resp: dict):
         seq = resp.get('sequence', [])
