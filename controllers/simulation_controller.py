@@ -1723,6 +1723,7 @@ class SimulationController(QObject):
         from controllers.simulation_feeding_bridge import SimulationFeedingBridge
         if self._feeding_bridge is None:
             self._feeding_bridge = SimulationFeedingBridge(self)
+            # 并行监控模式: 只接收指令用于日志对比, 不实际执行
             self._feeding_bridge.command_received.connect(self._on_feeding_commands)
             self._feeding_bridge.stock_updated.connect(self._on_display_levels_updated)
         self._feeding_bridge.start()
@@ -1734,9 +1735,23 @@ class SimulationController(QObject):
         print("[桥接] FeedingMaster 桥接已停止", flush=True)
 
     def _on_feeding_commands(self, commands: list):
-        """收到 FeedingMaster 控制指令，应用到仿真对象"""
-        if self._feeding_bridge is not None:
-            self._feeding_bridge.apply_commands(commands)
+        """收到 FeedingMaster 控制指令 (并行监控: 仅打印, 不执行)"""
+        if not commands:
+            return
+        carts = [c for c in commands if c.get('device') == 'cart']
+        belts = [c for c in commands if c.get('device') == 'belt']
+        hoppers = [c for c in commands if c.get('device') == 'hopper']
+        parts = []
+        if belts:
+            actions = set(c['action'] for c in belts)
+            parts.append(f"皮带{len(belts)}条({','.join(sorted(actions))})")
+        if hoppers:
+            actions = set(c['action'] for c in hoppers)
+            parts.append(f"斗{len(hoppers)}个({','.join(sorted(actions))})")
+        if carts:
+            parts.append(f"小车{carts[0]['id']}→{carts[0].get('target','?')}")
+        if parts:
+            print(f"[桥接-FM] 收到指令: {', '.join(parts)} [未执行]", flush=True)
 
     def _on_display_levels_updated(self, levels: list):
         """Stock Management 料位 → display_levels (仅 HMI 显示，不影响仿真逻辑)"""
