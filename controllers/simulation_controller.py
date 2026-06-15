@@ -1738,6 +1738,13 @@ class SimulationController(QObject):
         """收到 FeedingMaster 控制指令 (并行监控: 仅打印, 不执行)"""
         if not commands:
             return
+        # 限频: 最多每2秒打印一次
+        now = self.total_runtime
+        last = getattr(self, '_last_fm_cmd_print', 0)
+        if now - last < 2.0:
+            return
+        self._last_fm_cmd_print = now
+
         carts = [c for c in commands if c.get('device') == 'cart']
         belts = [c for c in commands if c.get('device') == 'belt']
         hoppers = [c for c in commands if c.get('device') == 'hopper']
