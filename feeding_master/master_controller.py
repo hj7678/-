@@ -249,13 +249,22 @@ class FeedingMasterController:
                     if nxt:
                         self.scheduler.pop_next_bin(belt_id)
                         try:
-                            ctx.cart_target_position = int(nxt.split('-')[1])
+                            next_pos = int(nxt.split('-')[1])
+                            ctx.cart_target_position = next_pos
                             ctx.target_bin = nxt
                             ctx.cart_moving = True
                             ctx.early_moved_from_clearing = True
                             print(f"[FM] {route_id} 顺序清空3s → 提前移小车 {cart_id}→{next_pos} ({nxt})", flush=True)
                         except (ValueError, IndexError):
                             pass
+
+            # 顺序策略: 小车提前到达 → 直接进入FEEDING
+            if (ctx.state == RouteState.CLEARING and getattr(ctx, 'early_moved_from_clearing', False)
+                    and not ctx.cart_moving and cart_pos == cart_target):
+                self.route_manager.set_route_state(route_id, RouteState.FEEDING)
+                ctx.early_moved_from_clearing = False
+                print(f"[FM] {route_id}: clearing → feeding | 小车 {cart_id} 到达 {cart_pos} (提前移动完成)", flush=True)
+                # 继续使用当前 state (已是FEEDING)
 
             # 状态引擎判定
             next_state, actions = self.state_engine.evaluate(
