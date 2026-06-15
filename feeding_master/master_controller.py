@@ -103,7 +103,7 @@ class FeedingMasterController:
         sim_active = set(data.get('active_routes', []))
         sim_states = data.get('route_states', {})
 
-        # 每帧同步已有路线的状态 + target_bin
+        # 每帧同步已有路线的传感器输入 (cart_moving等辅助状态)
         route_cart_moving = data.get('route_cart_moving', {})
         route_targets = data.get('route_targets', {})
         for route_id in sim_active & self._active_routes:
@@ -111,14 +111,6 @@ class FeedingMasterController:
             if not ctx:
                 continue
             ctx.cart_moving = route_cart_moving.get(route_id, ctx.cart_moving)
-            # 同步仿真状态 (FeedingMaster不自己判定, 直接镜像仿真)
-            state_str = sim_states.get(route_id, '') if isinstance(sim_states, dict) else ''
-            if state_str and state_str != ctx.state.value:
-                try:
-                    new_state = RouteState(state_str)
-                    self.route_manager._transition(ctx, new_state)
-                except ValueError:
-                    pass
             target = route_targets.get(route_id, '')
             if target and target != ctx.target_bin:
                 ctx.target_bin = target
