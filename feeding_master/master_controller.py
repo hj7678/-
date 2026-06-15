@@ -207,14 +207,12 @@ class FeedingMasterController:
         levels = self.stock.get_all_levels()
         level_map = {b['bin_id']: b for b in levels} if levels else {}
 
-        # 心跳日志 (每2秒)
-        tick_count = getattr(self, '_tick_count', 0) + 1
-        self._tick_count = tick_count
-        do_heartbeat = (tick_count % 40 == 0)  # 50ms*40=2s
+        # 追踪指令变化 (仅变化时输出)
+        prev_cmds = getattr(self, '_last_commands', {})
 
         # 2. 遍历活跃路线，执行状态机
         commands = []
-        route_summaries = []
+        new_cmds = {}
         for route_id in list(self._active_routes):
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
@@ -225,27 +223,23 @@ class FeedingMasterController:
             cart_target = ctx.cart_target_position
             target_bin = ctx.target_bin or ''
 
-            # 读取料位
             level = 0.0
             b = level_map.get(target_bin, {})
             if b:
                 level = b.get('level_pct', 0)
 
-            # 进入 FEEDING 时确定清空策略
             strategy = getattr(ctx, 'clearing_strategy', 'reverse')
             if ctx.state == RouteState.FEEDING and strategy == 'reverse':
                 strategy = self._resolve_clearing_strategy(route_id)
                 ctx.clearing_strategy = strategy
-                if strategy != 'reverse':
-                    print(f"[FeedingMaster] {route_id} 清空策略={strategy}", flush=True)
 
-            # 清空阶段: 更新传感器计时器
+            # 清空计时器
             sensor_clear_timers = {}
             sensor_clear_timeouts = {}
             if ctx.state == RouteState.CLEARING and strategy != 'column_switch':
                 sensor_clear_timers, sensor_clear_timeouts = self._build_clearing_data(ctx, route_id)
 
-            # 顺序策略: 清空3s后提前移动小车
+            # 顺序策略: 提前移小车
             if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
                     and cart_id in ('Cart1', 'Cart2') and not getattr(ctx, 'early_moved_from_clearing', False)):
                 clearing_elapsed = self._total_runtime - getattr(ctx, 'clearing_start_time', 0)
@@ -255,12 +249,11 @@ class FeedingMasterController:
                     if nxt:
                         self.scheduler.pop_next_bin(belt_id)
                         try:
-                            next_pos = int(nxt.split('-')[1])
-                            ctx.cart_target_position = next_pos
+                            ctx.cart_target_position = int(nxt.split('-')[1])
                             ctx.target_bin = nxt
                             ctx.cart_moving = True
                             ctx.early_moved_from_clearing = True
-                            print(f"[FeedingMaster] {route_id} 顺序清空3s → 提前移小车至 {nxt}", flush=True)
+                            print(f"[FM] {route_id} 顺序清空3s → 提前移小车 {cart_id}→{next_pos} ({nxt})", flush=True)
                         except (ValueError, IndexError):
                             pass
 
@@ -278,28 +271,35 @@ class FeedingMasterController:
                 sensor_clear_timeouts=sensor_clear_timeouts or None,
             )
 
-            # 收集摘要（使用已确定的 strategy 而非 getattr）
-            threshold = {'sequential': 98, 'reverse': 95, 'column_switch': 92}.get(strategy, 95)
-            if cart_id == 'Cart3':
-                threshold = 94
-            route_summaries.append(
-                f"  {route_id} {ctx.state.value}/{strategy} {target_bin}={level:.0f}% "
-                f"(阈值{threshold}%) cart={cart_id}@{cart_pos}"
-            )
-
-            # 状态变更
+            # 状态变更 → 详细日志
             if next_state != ctx.state:
                 old = ctx.state
                 self.route_manager.set_route_state(route_id, next_state)
-                reason = ""
-                if old.value == 'feeding' and next_state.value == 'clearing':
-                    reason = f" — 料位 {level:.0f}% ≥ {threshold}%"
-                    ctx.clearing_start_time = self._total_runtime
-                elif old.value == 'moving_to_target':
-                    reason = f" — 小车到达位置 {cart_pos}"
-                print(f"[FeedingMaster] {route_id}: {old.value} → {next_state.value}{reason}", flush=True)
+                parts = [f"[FM] {route_id}: {old.value} → {next_state.value}"]
 
-                # 路线完成 → 执行序列下一仓
+                if next_state.value == 'feeding':
+                    parts.append(f"→ {target_bin} (料位{level:.0f}%)")
+                    # 列出将启动的皮带
+                    convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
+                    parts.append(f"皮带: {','.join(convs)}")
+                    if ctx.assigned_hoppers:
+                        parts.append(f"斗开: {','.join(ctx.assigned_hoppers)}")
+                    if strategy != 'reverse':
+                        parts.append(f"策略: {strategy}")
+                elif next_state.value == 'clearing':
+                    threshold = {'sequential': 98, 'reverse': 95, 'column_switch': 92}.get(strategy, 95)
+                    if cart_id == 'Cart3':
+                        threshold = 94
+                    parts.append(f"料位{level:.0f}%≥{threshold}% 策略={strategy}")
+                elif next_state.value == 'moving_to_target':
+                    parts.append(f"小车 {cart_id}→{cart_target}")
+                elif next_state.value == 'waiting':
+                    parts.append("清空完成")
+
+                ctx.clearing_start_time = self._total_runtime if next_state.value == 'clearing' else getattr(ctx, 'clearing_start_time', 0)
+                print(' | '.join(parts), flush=True)
+
+                # 路线完成 → 自动续
                 if next_state.value in ('waiting', 'standby'):
                     belt_id = CART_TO_BELT.get(cart_id, '')
                     self.scheduler.mark_completed(belt_id)
@@ -309,12 +309,11 @@ class FeedingMasterController:
                         route_id2 = self._pick_route_for_bin(belt_id, nxt)
                         if route_id2:
                             if self.activate_route(route_id2, nxt):
-                                print(f"[FeedingMaster] {belt_id} 自动续 → {nxt}", flush=True)
+                                print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
             # 执行器命令
             route_conveyors = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
             final_conv = route_conveyors[-1] if route_conveyors else ''
-            hoppers = ctx.assigned_hoppers
             cart_at_target = not should_move_cart(cart_pos, cart_target)
 
             if ctx.state in (RouteState.FEEDING, RouteState.CLEARING):
@@ -325,49 +324,66 @@ class FeedingMasterController:
                     cart_at_target=cart_at_target,
                 )
                 for cid, action in belt_cmds.items():
-                    commands.append({
-                        "device": "belt", "id": cid,
-                        "action": action.value,
-                    })
+                    cmd = {'device': 'belt', 'id': cid, 'action': action.value}
+                    commands.append(cmd)
+                    new_cmds[f"belt:{cid}"] = action.value
 
                 hopper_cmds = compute_hopper_commands(
-                    hoppers,
+                    ctx.assigned_hoppers,
                     is_feeding=(ctx.state == RouteState.FEEDING),
                     cart_at_target=cart_at_target,
                     hopper_states={},
                 )
                 for hid, action in hopper_cmds.items():
-                    commands.append({
-                        "device": "hopper", "id": hid,
-                        "action": action.value,
-                    })
+                    cmd = {'device': 'hopper', 'id': hid, 'action': action.value}
+                    commands.append(cmd)
+                    new_cmds[f"hopper:{hid}"] = action.value
 
-            # 小车目标位置
             if cart_id:
                 if cart_id == 'Cart4':
                     target = compute_cart4_target_position(target_bin)
                 else:
                     target = compute_cart_target_position(target_bin, cart_id)
                 if target is not None and should_move_cart(cart_pos, target):
-                    commands.append({
-                        "device": "cart", "id": cart_id,
-                        "action": "move", "target": target,
-                    })
+                    cmd = {'device': 'cart', 'id': cart_id, 'action': 'move', 'target': target}
+                    commands.append(cmd)
+                    new_cmds[f"cart:{cart_id}"] = f"→{target}"
 
-        # 3. 心跳日志
-        if do_heartbeat and route_summaries:
-            n_cmds = len(commands)
-            print(f"[FeedingMaster] ── 心跳 (tick={tick_count}) ──", flush=True)
-            for s in route_summaries:
-                print(s, flush=True)
-            if n_cmds > 0:
-                actions = set(c['action'] for c in commands)
-                print(f"  → 指令: {n_cmds}条 ({', '.join(sorted(actions))})", flush=True)
+        # 指令变化时输出
+        if new_cmds != prev_cmds:
+            self._last_commands = new_cmds
+            changed = {k: v for k, v in new_cmds.items() if prev_cmds.get(k) != v}
+            added = {k: v for k, v in new_cmds.items() if k not in prev_cmds}
+            removed = {k for k in prev_cmds if k not in new_cmds}
+            parts = []
+            if added:
+                belts = [k.split(':')[1] for k in added if k.startswith('belt:')]
+                hoppers = [k.split(':')[1] for k in added if k.startswith('hopper:')]
+                carts = [(k.split(':')[1], v) for k, v in added.items() if k.startswith('cart:')]
+                if belts:
+                    parts.append(f"启动皮带: {','.join(belts)}")
+                if hoppers:
+                    parts.append(f"打开斗: {','.join(hoppers)}")
+                if carts:
+                    parts.append(f"小车: {', '.join(f'{c}{t}' for c,t in carts)}")
+            if changed:
+                belts = [k.split(':')[1] for k in changed if k.startswith('belt:')]
+                if belts:
+                    parts.append(f"皮带变速: {','.join(belts)}")
+            if removed:
+                belts = [k.split(':')[1] for k in removed if k.startswith('belt:')]
+                hoppers = [k.split(':')[1] for k in removed if k.startswith('hopper:')]
+                if belts:
+                    parts.append(f"停止皮带: {','.join(belts)}")
+                if hoppers:
+                    parts.append(f"关闭斗: {','.join(hoppers)}")
+            if parts:
+                print(f"[FM] 指令变化: {'; '.join(parts)}", flush=True)
 
-        # 4. 调度引擎联动
+        # 3. 调度引擎联动
         self.scheduler.tick(self._total_runtime)
 
-        # 5. 推送控制指令
+        # 4. 推送控制指令
         if commands:
             self.server.send_commands(commands)
 
