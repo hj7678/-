@@ -233,7 +233,19 @@ class FeedingMasterController:
                 strategy = self._resolve_clearing_strategy(route_id)
                 ctx.clearing_strategy = strategy
 
-            # 清空计时器
+            # 换列策略: 每帧强制保持斗打开+终点皮带运行 (不屯料)
+            if ctx.state == RouteState.CLEARING and strategy == 'column_switch':
+                for hid in ctx.assigned_hoppers:
+                    cmd = {'device': 'hopper', 'id': hid, 'action': 'open'}
+                    commands.append(cmd)
+                    new_cmds[f"hopper:{hid}"] = 'open'
+                if route_conveyors:
+                    final = route_conveyors[-1]
+                    cmd = {'device': 'belt', 'id': final, 'action': 'start'}
+                    commands.append(cmd)
+                    new_cmds[f"belt:{final}"] = 'start'
+
+            # 清空计时器 (换列不需要传感器追踪)
             sensor_clear_timers = {}
             sensor_clear_timeouts = {}
             if ctx.state == RouteState.CLEARING and strategy != 'column_switch':
