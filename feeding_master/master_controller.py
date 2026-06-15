@@ -43,6 +43,24 @@ import config
 class FeedingMasterController:
     """上料主控 — 控制大脑"""
 
+    # 清空超时常量 (与仿真保持一致)
+    _ENDPOINT_BASE = {'D7': 22.1, 'D8': 17.4, 'D9': 12.1}
+    _LINE_SPACING = 5.4
+    _HOPPER_BELT_TIMEOUTS = {
+        ('route1', 'S-E1'): 8.4, ('route1', 'S-E4'): 34.4,
+        ('route2', 'S-E2'): 9.6, ('route2', 'S-E4'): 34.4,
+        ('route3', 'S-E5'): 12.3,
+        ('route1', 'S-E8'): 24.7, ('route2', 'S-E8'): 24.7, ('route3', 'S-E8'): 24.7,
+        ('route1', 'S-E10'): 15.3, ('route2', 'S-E10'): 15.3, ('route3', 'S-E10'): 15.3,
+        ('route4', 'S-E6'): 10.6, ('route4', 'S-E7'): 23.3, ('route4', 'S-E9'): 20.2,
+        ('route5', 'S-E6'): 10.6, ('route5', 'S-E7'): 23.3, ('route5', 'S-E9'): 20.2,
+        ('route5', 'S-D5'): 12.3,
+        ('route6', 'S-D13'): 8.0, ('route6', 'S-D2'): 27.0, ('route6', 'S-D4'): 9.6,
+        ('route7', 'S-D1'): 27.0, ('route7', 'S-D3'): 15.9,
+        ('route8', 'S-D4'): 9.6, ('route8', 'S-D2-2'): 7.3,
+    }
+    _ENDPOINT_SENSORS = {'D7': 'S-D7', 'D8': 'S-D8', 'D9': 'S-D9', 'D6': 'S-D6'}
+
     def __init__(self, tcp_server: FeedingMasterServer):
         self.server = tcp_server
         self.stock = StockClient()
@@ -221,6 +239,31 @@ class FeedingMasterController:
                 if strategy != 'reverse':
                     print(f"[FeedingMaster] {route_id} 清空策略={strategy}", flush=True)
 
+            # 清空阶段: 更新传感器计时器
+            sensor_clear_timers = {}
+            sensor_clear_timeouts = {}
+            if ctx.state == RouteState.CLEARING and strategy != 'column_switch':
+                sensor_clear_timers, sensor_clear_timeouts = self._build_clearing_data(ctx, route_id)
+
+            # 顺序策略: 清空3s后提前移动小车
+            if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
+                    and cart_id in ('Cart1', 'Cart2') and not getattr(ctx, 'early_moved_from_clearing', False)):
+                clearing_elapsed = self._total_runtime - getattr(ctx, 'clearing_start_time', 0)
+                if clearing_elapsed >= 3.0:
+                    belt_id = CART_TO_BELT.get(cart_id, '')
+                    nxt = self.scheduler.get_next_bin(belt_id)
+                    if nxt:
+                        self.scheduler.pop_next_bin(belt_id)
+                        try:
+                            next_pos = int(nxt.split('-')[1])
+                            ctx.cart_target_position = next_pos
+                            ctx.target_bin = nxt
+                            ctx.cart_moving = True
+                            ctx.early_moved_from_clearing = True
+                            print(f"[FeedingMaster] {route_id} 顺序清空3s → 提前移小车至 {nxt}", flush=True)
+                        except (ValueError, IndexError):
+                            pass
+
             # 状态引擎判定
             next_state, actions = self.state_engine.evaluate(
                 route_id, ctx.state,
@@ -231,6 +274,8 @@ class FeedingMasterController:
                 cart=cart_id,
                 clearing_strategy=strategy,
                 current_time=self._total_runtime,
+                sensor_clear_timers=sensor_clear_timers or None,
+                sensor_clear_timeouts=sensor_clear_timeouts or None,
             )
 
             # 收集摘要（使用已确定的 strategy 而非 getattr）
@@ -249,6 +294,7 @@ class FeedingMasterController:
                 reason = ""
                 if old.value == 'feeding' and next_state.value == 'clearing':
                     reason = f" — 料位 {level:.0f}% ≥ {threshold}%"
+                    ctx.clearing_start_time = self._total_runtime
                 elif old.value == 'moving_to_target':
                     reason = f" — 小车到达位置 {cart_pos}"
                 print(f"[FeedingMaster] {route_id}: {old.value} → {next_state.value}{reason}", flush=True)
@@ -410,6 +456,47 @@ class FeedingMasterController:
             if ctx.assigned_hoppers:
                 return 'sequential'
         return 'reverse'
+
+    # ── 清空检测 ──
+
+    def _calc_endpoint_timeout(self, belt_id: str, target_bin: str) -> float:
+        if belt_id not in self._ENDPOINT_BASE:
+            return 30.0
+        try:
+            row = int(target_bin.split('-')[1])
+        except (ValueError, IndexError):
+            row = 7
+        base = self._ENDPOINT_BASE[belt_id]
+        distance = base + self._LINE_SPACING * (8 - row)
+        return distance / 2.5 + 2.0
+
+    def _build_clearing_data(self, ctx, route_id: str) -> tuple:
+        """构建清空检测所需的 sensor_clear_timers 和 sensor_clear_timeouts"""
+        timers = getattr(ctx, 'sensor_clear_timers', {}) or {}
+        timeouts = {}
+        proximity = self._sensor_states.get('proximity', {})
+        route_sensors = self.route_manager.ROUTE_PROXIMITY_SENSORS.get(route_id, [])
+
+        route_cfg = config.FEED_ROUTES.get(route_id, {})
+        conveyors = route_cfg.get('conveyors', [])
+        final_conveyor = conveyors[-1] if conveyors else ''
+        endpoint_sensor = self._ENDPOINT_SENSORS.get(final_conveyor, '')
+
+        for sid in route_sensors:
+            is_active = proximity.get(sid, False)
+            if sid == endpoint_sensor:
+                timeouts[sid] = self._calc_endpoint_timeout(final_conveyor, ctx.target_bin or '')
+            else:
+                timeouts[sid] = self._HOPPER_BELT_TIMEOUTS.get((route_id, sid), 30.0)
+
+            if is_active:
+                timers.pop(sid, None)
+            else:
+                if sid not in timers:
+                    timers[sid] = self._total_runtime
+
+        ctx.sensor_clear_timers = timers
+        return timers, timeouts
 
     def deactivate_route(self, route_id: str):
         """停用路线"""
