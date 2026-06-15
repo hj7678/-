@@ -90,10 +90,14 @@ class SimulationFeedingBridge(QObject):
             return
         self._last_push = now
 
-        # 推送料位到 Stock Management
+        # 推送料位到 Stock Management (配料站 + 高位仓)
         levels = {}
         for bid, sb in ctrl.small_bins.items():
             levels[bid] = sb.current_level
+        # 高位仓 (S1-1 ~ S6-2)
+        if hasattr(ctrl, 'view') and ctrl.view:
+            for sid, silo in ctrl.view.silo_compartments.items():
+                levels[sid] = silo.get('current_level', 0)
         if levels:
             self._stock.set_levels_batch(levels)
         # 消耗速率每60秒同步一次 (变化不频繁)
