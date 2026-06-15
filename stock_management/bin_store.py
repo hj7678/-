@@ -111,6 +111,13 @@ class BinStore:
                 if b:
                     b.level_tons = max(0.0, min(b.capacity, float(val)))
 
+    def set_consumption_rate(self, bin_id: str, rate: float):
+        """设置单个料仓消耗速率"""
+        with self._lock:
+            b = self._bins.get(bin_id)
+            if b:
+                b.consumption_rate = max(0.0, float(rate))
+
     def randomize_levels(self, lo_pct: float = 25.0, hi_pct: float = 90.0):
         import random
         with self._lock:

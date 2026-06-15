@@ -90,14 +90,16 @@ class SimulationFeedingBridge(QObject):
             return
         self._last_push = now
 
-        # 推送料位到 Stock Management (含消耗速率)
+        # 推送料位到 Stock Management
         levels = {}
-        rates = {}
         for bid, sb in ctrl.small_bins.items():
             levels[bid] = sb.current_level
-            rates[bid] = sb.consumption_rate
         if levels:
             self._stock.set_levels_batch(levels)
+        # 消耗速率每60秒同步一次 (变化不频繁)
+        if now - getattr(self, '_last_rate_push', 0) > 60:
+            self._last_rate_push = now
+            rates = {bid: sb.consumption_rate for bid, sb in ctrl.small_bins.items()}
             self._stock.set_consumption_rates_batch(rates)
 
         # 推送传感器状态到 FeedingMaster
