@@ -467,25 +467,28 @@ class FeedingMasterController:
                 self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
             self.scheduler.mark_executing(belt_id, route_id, target_bin)
             print(f"[FeedingMaster] 路线 {route_id} → {target_bin} 已激活", flush=True)
+        else:
+            print(f"[FeedingMaster] 路线 {route_id} 激活失败 (资源占用?)", flush=True)
         return ok
 
     def _on_schedule_sequence(self, belt_id: str, sequence: list):
         """收到调度序列 → 若皮带空闲则自动启动"""
         if self.scheduler.is_executing(belt_id):
-            return  # 正在执行中, 序列已缓存等下次使用
+            print(f"[FM] {belt_id} 已在执行中, 序列缓存", flush=True)
+            return
 
-        # 选第一条执行
         first_bin = sequence[0] if sequence else None
         if not first_bin:
             return
 
         route_id = self._pick_route_for_bin(belt_id, first_bin)
+        print(f"[FM] {belt_id} pick {first_bin} → {route_id}", flush=True)
         if not route_id:
             return
 
         self.scheduler.pop_next_bin(belt_id)
-        if self.activate_route(route_id, first_bin):
-            print(f"[FeedingMaster] {belt_id} → {first_bin} ({route_id})", flush=True)
+        ok = self.activate_route(route_id, first_bin)
+        print(f"[FM] {belt_id} activate {route_id} → {first_bin}: {'OK' if ok else 'FAIL'}", flush=True)
 
     def _pick_route_for_bin(self, belt_id: str, bin_id: str) -> Optional[str]:
         """根据料仓ID选择路线（复用仿真侧的 BIN_TO_AVAILABLE_ROUTES）"""

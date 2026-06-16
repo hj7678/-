@@ -195,6 +195,9 @@ class PhysicsEngine(QObject):
 
     def _on_bridge_commands(self, commands: list):
         """FM 指令 → 直接执行"""
+        if commands:
+            kinds = set(c.get('device','') for c in commands)
+            print(f"[HMI] 收到FM指令: {len(commands)}条 ({', '.join(kinds)})", flush=True)
         self.bridge.apply_commands(commands)
 
     # ── 物料生成 ──
