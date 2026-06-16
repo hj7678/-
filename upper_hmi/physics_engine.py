@@ -366,7 +366,23 @@ class PhysicsEngine(QObject):
 
     @property
     def _use_feeding_master(self):
-        return True  # 始终FM接管
+        return True
+
+    # StatusPanel 需要的桩方法
+    def get_faulty_sensors(self): return set()
+    def get_diagnosis_result(self): return []
+    def get_laser_sensor_state(self, lid): return True
+    def get_all_level_sensors(self): return {}
+    def get_status(self):
+        return {
+            'total_runtime': self.total_runtime,
+            'total_feed_weight': self.total_materials_sent * config.MATERIAL_WEIGHT,
+            'active_routes': list(self.active_routes),
+        }
+    def is_dirty(self): return True
+    def get_level_sensor(self, bid):
+        sb = self.small_bins.get(bid)
+        return sb.current_level if sb else 0
 
     def set_view(self, view):
         self.view = view
