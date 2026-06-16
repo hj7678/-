@@ -157,8 +157,8 @@ class SimulationFeedingBridge(QObject):
                 if new_s:
                     if new_s != ctx.state:
                         self._ctrl.route_state_manager._transition(ctx, new_s)
-                    # FM接管: 确保路线在active_routes中
-                    if self._ctrl._use_feeding_master and new_s != RouteState.IDLE:
+                    # 确保路线在active_routes中
+                    if new_s and new_s != RouteState.IDLE:
                         self._ctrl.active_routes.add(rid)
             except (ValueError, AttributeError):
                 pass
