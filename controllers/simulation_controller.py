@@ -3208,8 +3208,17 @@ class SimulationController(QObject):
 
             if ctx.state != RouteState.MOVING_TO_TARGET:
                 if self._use_feeding_master:
-                    # FM接管: 状态已由FM同步, 但cart物理到达仍需处理
+                    # FM接管: cart物理到达 → 直接转FEEDING
+                    self.route_state_manager._transition(ctx, RouteState.FEEDING)
                     ctx.cart_moving = False
+                    ctx.feeding_start_time = self.total_runtime
+                    if cart_id == 'Cart4':
+                        self.cart4_sensor_position = self.cart4_position
+                        self.cart4_is_moving = False
+                    else:
+                        self.cart_sensor_positions[cart_id] = self.cart_positions.get(cart_id, 1)
+                    print(f"[FM-Cart] {cart_id} 物理到达 → FEEDING", flush=True)
+                    continue
                 else:
                     print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
                     belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET")
