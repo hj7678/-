@@ -376,19 +376,10 @@ def _build_bin_available_routes():
             ('silo_out', 'route8'),
         ]
 
-    # 高位储料仓隔间 S1-1~S6-2 -> 路线⑤（仅补料）
-    for i in range(1, 7):
-        for row in range(1, 3):
-            bin_id = f'S{i}-{row}'
-            result[bin_id] = [
-                ('feed2_2', 'route5'),
-            ]
+    # 高位储料仓 S1-S12 -> 路线⑤（仅补料）
     for i in range(1, 13):
         bin_id = f'S{i}'
-        if bin_id not in result:
-            result[bin_id] = [
-                ('feed2_2', 'route5'),
-            ]
+        result[bin_id] = [('feed2_2', 'route5')]
 
     return result
 

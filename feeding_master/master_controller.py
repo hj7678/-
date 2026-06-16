@@ -229,15 +229,8 @@ class FeedingMasterController:
                 cart_pos = self._cart_positions.get(cart_id, 1)
             target_bin = ctx.target_bin or ''
 
-            # D6: 高位仓S1→S1-1格式映射
-            stock_target = target_bin
-            if target_bin.startswith('S') and target_bin[1:].isdigit() and '-' not in target_bin:
-                n = int(target_bin[1:])
-                col = (n - 1) // 2 + 1
-                row = (n - 1) % 2 + 1
-                stock_target = f"S{col}-{row}"
             level = 0.0
-            b = level_map.get(stock_target, {})
+            b = level_map.get(target_bin, {})
             if b:
                 level = b.get('level_pct', 0)
 

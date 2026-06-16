@@ -1,9 +1,7 @@
 """
 料仓库存管理 — 纯数据中转站，独立进程
 
-28个配料站 (P1-1 ~ P4-7) + 12个高位仓 (S1-1 ~ S6-2)
-
-职责：存储和提供料位数据。不模拟消耗/补充——这些由仿真端或真实料位传感器负责。
+28个配料站 (P1-1 ~ P4-7) + 12个高位仓 (S1 ~ S12)
 """
 import threading
 from typing import Dict, List, Optional
@@ -15,11 +13,8 @@ BATCHING_STATION = {
     'capacity': 110.0,
 }
 
-HIGH_SILO = {
-    'columns': 6, 'rows': 2,
-    'col_names': ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'],
-    'capacity': 420.0,
-}
+HIGH_SILO_BINS = [f'S{i}' for i in range(1, 13)]
+HIGH_SILO_CAPACITY = 420.0
 
 
 def _build_all_bin_ids() -> List[str]:
@@ -27,9 +22,7 @@ def _build_all_bin_ids() -> List[str]:
     for col in BATCHING_STATION['col_names']:
         for row in range(1, BATCHING_STATION['rows'] + 1):
             ids.append(f"{col}-{row}")
-    for col in HIGH_SILO['col_names']:
-        for row in range(1, HIGH_SILO['rows'] + 1):
-            ids.append(f"{col}-{row}")
+    ids.extend(HIGH_SILO_BINS)
     return ids
 
 
@@ -75,10 +68,8 @@ class BinStore:
                 bid = f"{col}-{row}"
                 self._bins[bid] = BinState(bid, BATCHING_STATION['capacity'])
 
-        for col in HIGH_SILO['col_names']:
-            for row in range(1, HIGH_SILO['rows'] + 1):
-                bid = f"{col}-{row}"
-                self._bins[bid] = BinState(bid, HIGH_SILO['capacity'])
+        for bid in HIGH_SILO_BINS:
+            self._bins[bid] = BinState(bid, HIGH_SILO_CAPACITY)
 
     # ── 查询 ──
 
