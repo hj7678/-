@@ -374,11 +374,16 @@ class FeedingMasterController:
                     commands.append(cmd)
                     new_cmds[f"belt:{cid}"] = action.value
 
+                # 追踪斗状态：从上一帧的 new_cmds 推断当前斗是开还是关
+                _hs = {}
+                for hid in ctx.assigned_hoppers:
+                    prev = prev_cmds.get(f"hopper:{hid}", 'close')
+                    _hs[hid] = (prev == 'open')
                 hopper_cmds = compute_hopper_commands(
                     ctx.assigned_hoppers,
                     is_feeding=(ctx.state == RouteState.FEEDING),
                     cart_at_target=cart_at_target,
-                    hopper_states={},
+                    hopper_states=_hs,
                 )
                 # 换列策略: CLEARING期间斗保持打开, 不生成关闭指令
                 if strategy == 'column_switch':
