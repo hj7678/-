@@ -207,7 +207,7 @@ class ScheduleManager:
             sock.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
 
             buf = b""
-            sock.settimeout(30)
+            sock.settimeout(120)  # D8 14仓计算较慢, 给2分钟
             while b"\n" not in buf:
                 chunk = sock.recv(4096)
                 if not chunk:
