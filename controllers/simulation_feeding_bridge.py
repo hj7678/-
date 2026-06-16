@@ -217,5 +217,5 @@ class SimulationFeedingBridge(QObject):
                         if route_id:
                             ctx = ctrl.route_state_manager.get_route_context(route_id)
                             if ctx:
-                                ctx.cart_moving = False if ctrl._use_feeding_master else True
+                                ctx.cart_moving = True  # 设了target, 小车需要移动
                                 ctx.cart_target_position = target
