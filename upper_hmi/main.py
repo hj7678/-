@@ -80,7 +80,6 @@ class HmiMainWindow(QMainWindow):
 
     def _start_bridge(self):
         self.engine.bridge.start()
-        self.engine._use_feeding_master = True
         self.status_bar.showMessage("FM接管模式 — 桥接已连接")
         self._bridge_ready = True
         print("[HMI] FM接管模式已激活", flush=True)
