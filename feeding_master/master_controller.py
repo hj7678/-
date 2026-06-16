@@ -121,22 +121,13 @@ class FeedingMasterController:
         sim_active = set(data.get('active_routes', []))
         sim_states = data.get('route_states', {})
 
-        # 每帧同步已有路线的传感器输入 (cart_moving等辅助状态)
+        # 每帧同步已有路线的输入 (cart_moving) — target_bin由FM决策, 不从仿真覆盖
         route_cart_moving = data.get('route_cart_moving', {})
-        route_targets = data.get('route_targets', {})
         for route_id in sim_active & self._active_routes:
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
                 continue
             ctx.cart_moving = route_cart_moving.get(route_id, ctx.cart_moving)
-            target = route_targets.get(route_id, '')
-            if target and target != ctx.target_bin:
-                ctx.target_bin = target
-                if '-' in target:
-                    try:
-                        ctx.cart_target_position = int(target.split('-')[1])
-                    except ValueError:
-                        pass
 
         # 新激活的路线: 从桥接数据同步状态和目标料仓
         route_targets = data.get('route_targets', {})
