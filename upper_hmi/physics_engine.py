@@ -398,6 +398,12 @@ class PhysicsEngine(QObject):
     def get_sensor_state(self, sid):
         s = self.sensors.get(sid)
         return s.is_active if s else False
+    def get_conveyor_state(self, cid):
+        c = self.conveyors.get(cid)
+        return {'is_running': c.is_running, 'speed': c.current_speed} if c else {'is_running': False, 'speed': 0}
+    def get_hopper_level(self, hid):
+        h = self.hoppers.get(hid)
+        return h.get_display_weight() if h else 0
     def get_status(self):
         return {
             'total_runtime': self.total_runtime,
