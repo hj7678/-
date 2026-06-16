@@ -136,7 +136,6 @@ class SimulationFeedingBridge(QObject):
 
     def _on_commands(self, msg):
         """接收命令 (含路线状态) from FeedingMaster"""
-        print(f"[桥接] _on_commands 被调用, type={type(msg).__name__}", flush=True)
         if isinstance(msg, list):
             # 兼容旧格式
             commands = msg
@@ -194,13 +193,10 @@ class SimulationFeedingBridge(QObject):
             elif device == "hopper":
                 hopper = ctrl.hoppers.get(dev_id)
                 if hopper:
-                    old = hopper.is_open
                     if action == "open":
                         hopper.is_open = True
                     elif action == "close":
                         hopper.is_open = False
-                    if old != hopper.is_open:
-                        print(f"[桥接] 斗 {dev_id}: {old}→{hopper.is_open}", flush=True)
 
             elif device == "cart":
                 if action == "move":

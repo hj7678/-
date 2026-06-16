@@ -1740,9 +1740,6 @@ class SimulationController(QObject):
         """收到 FeedingMaster 控制指令"""
         if not commands:
             return
-        hoppers = [c for c in commands if c.get('device') == 'hopper']
-        if hoppers:
-            print(f"[仿真-FM] 收到斗指令: {[(c['id'],c['action']) for c in hoppers]}", flush=True)
 
         if self._use_feeding_master:
             # 接管模式: 执行FM指令替代仿真决策
