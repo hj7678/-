@@ -3269,15 +3269,7 @@ class SimulationController(QObject):
             target_pos = self.cart_target_positions.get(cart_id, 1)
             current_pos = self.cart_positions.get(cart_id, 1)
 
-            # FM接管: cart在目标位 → 直接转FEEDING
-            if self._use_feeding_master and current_pos == target_pos:
-                for route_id in list(self.active_routes):
-                    ctx = self.route_state_manager.get_route_context(route_id)
-                    if ctx and ctx.assigned_cart == cart_id and ctx.state == RouteState.MOVING_TO_TARGET:
-                        self.route_state_manager._transition(ctx, RouteState.FEEDING)
-                        ctx.cart_moving = False
-                        self.cart_sensor_positions[cart_id] = current_pos
-                continue
+            # FM接管: cart在目标位, 等FM-Sync推动FEEDING, 仿真不主动转
 
             # 检查是否有小车需要移动
             needs_moving = False
@@ -3288,16 +3280,7 @@ class SimulationController(QObject):
                     break
 
             if needs_moving and current_pos == target_pos:
-                # cart已在目标: 不需要移动, 直接触发到达
-                if self._use_feeding_master:
-                    for route_id in list(self.active_routes):
-                        ctx = self.route_state_manager.get_route_context(route_id)
-                        if ctx and ctx.assigned_cart == cart_id and ctx.cart_moving:
-                            self.route_state_manager._transition(ctx, RouteState.FEEDING)
-                            ctx.cart_moving = False
-                            self.cart_sensor_positions[cart_id] = current_pos
-                            print(f"[FM-Cart] {cart_id} 已在目标→FEEDING", flush=True)
-                else:
+                if not self._use_feeding_master:
                     self._check_virtual_cart_arrival(cart_id)
             elif current_pos != target_pos and needs_moving:
                 # 模拟小车每18秒（移动一位）更新一次位置
