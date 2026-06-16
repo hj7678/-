@@ -46,12 +46,14 @@ class FeedingMasterServer:
 
     # ── 发送控制指令 ──
 
-    def send_commands(self, commands: list):
+    def send_commands(self, commands: list, route_states: dict = None):
         """推送控制指令给 Upper Computer"""
         payload = {
             "type": "command",
             "commands": commands,
         }
+        if route_states:
+            payload["route_states"] = route_states
         self._send(payload)
 
     def send_state_snapshot(self, snapshot: dict):

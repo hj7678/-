@@ -409,9 +409,13 @@ class FeedingMasterController:
         # 3. 调度引擎联动
         self.scheduler.tick(self._total_runtime)
 
-        # 4. 推送控制指令
+        # 4. 推送控制指令 (含路线状态用于仿真同步)
         if commands:
-            self.server.send_commands(commands)
+            route_states = {
+                rid: (ctx.state.value if (ctx := self.route_manager.get_route_context(rid)) else '')
+                for rid in self._active_routes
+            }
+            self.server.send_commands(commands, route_states)
 
     # ── 外部接口 ──
 

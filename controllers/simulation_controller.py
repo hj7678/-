@@ -1090,9 +1090,6 @@ class SimulationController(QObject):
                 self._generate_sensor_data(sensor_delta)
                 self._last_sensor_write_time = self.total_runtime
 
-        # 清空策略差异化动作（换列保持中转斗开启等）
-        self._apply_clearing_strategy_actions()
-
         # 标记脏，通知UI需要更新
         self.mark_dirty()
 

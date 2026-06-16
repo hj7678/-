@@ -126,7 +126,26 @@ class SimulationFeedingBridge(QObject):
         }
         self._fm.send_sensor_states(sensor_data)
 
-    def _on_commands(self, commands: List[dict]):
+    def _on_commands(self, msg):
+        """接收命令 (含路线状态) from FeedingMaster"""
+        if isinstance(msg, list):
+            # 兼容旧格式
+            commands = msg
+            route_states = {}
+        else:
+            commands = msg.get('commands', [])
+            route_states = msg.get('route_states', {})
+        # 同步FM路线状态到仿真UI (_transition触发route_state_changed信号)
+        if route_states:
+            for rid, state_str in route_states.items():
+                ctx = self._ctrl.route_state_manager.get_route_context(rid)
+                if ctx and state_str and state_str != ctx.state.value:
+                    try:
+                        from controllers.route_state_manager import RouteState
+                        new_s = RouteState(state_str)
+                        self._ctrl.route_state_manager._transition(ctx, new_s)
+                    except (ValueError, AttributeError):
+                        pass
         self.command_received.emit(commands)
 
     def apply_commands(self, commands: List[dict]):

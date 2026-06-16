@@ -107,4 +107,4 @@ class FeedingMasterClient:
             return
 
         if msg.get("type") == "command" and self._on_commands:
-            self._on_commands(msg.get("commands", []))
+            self._on_commands(msg)
