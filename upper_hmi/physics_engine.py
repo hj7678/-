@@ -380,6 +380,21 @@ class PhysicsEngine(QObject):
     def get_diagnosis_result(self): return []
     def get_laser_sensor_state(self, lid): return True
     def get_all_level_sensors(self): return {}
+    def is_conveyor_on_route(self, conv_id):
+        for rid in self.active_routes:
+            r = config.FEED_ROUTES.get(rid, {})
+            if conv_id in r.get('conveyors', []):
+                return True
+        return False
+    def get_hopper_switch_state(self, hid):
+        h = self.hoppers.get(hid)
+        return h.get_effective_switch_state() if h else False
+    def is_hopper_active(self, hid):
+        h = self.hoppers.get(hid)
+        return h.is_active if h else False
+    def get_sensor_state(self, sid):
+        s = self.sensors.get(sid)
+        return s.is_active if s else False
     def get_status(self):
         return {
             'total_runtime': self.total_runtime,
