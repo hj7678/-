@@ -3269,7 +3269,13 @@ class SimulationController(QObject):
             target_pos = self.cart_target_positions.get(cart_id, 1)
             current_pos = self.cart_positions.get(cart_id, 1)
 
-            # FM接管: cart在目标位, 等FM-Sync推动FEEDING, 仿真不主动转
+            # FM接管: cart在目标位 → 设cart_moving=False让FM-Sync检测
+            if self._use_feeding_master and current_pos == target_pos:
+                for route_id in list(self.active_routes):
+                    ctx = self.route_state_manager.get_route_context(route_id)
+                    if ctx and ctx.assigned_cart == cart_id and ctx.state == RouteState.MOVING_TO_TARGET:
+                        ctx.cart_moving = False
+                continue
 
             # 检查是否有小车需要移动
             needs_moving = False
