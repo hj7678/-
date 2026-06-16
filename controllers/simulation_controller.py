@@ -1080,6 +1080,8 @@ class SimulationController(QObject):
             self._check_auto_feed_idle()
             # 检查待停止路线是否完成余料清空
             self._check_pending_stop_routes()
+            # 清空策略特殊动作
+            self._apply_clearing_strategy_actions()
 
         # 生成传感器数据并写入JSON文件（每秒一次）
         if self.enable_sensor_data_generation:

@@ -84,9 +84,10 @@ class SimulationFeedingBridge(QObject):
 
         ctrl = self._ctrl
 
-        # 限频: 每 500ms 推送一次 (仿真 50ms 每帧太频繁)
+        # 限频: FM接管时100ms, 监控时500ms
         now = time.time()
-        if now - self._last_push < 0.5:
+        interval = 0.1 if self._ctrl._use_feeding_master else 0.5
+        if now - self._last_push < interval:
             return
         self._last_push = now
 
@@ -140,6 +141,13 @@ class SimulationFeedingBridge(QObject):
                 if conv:
                     if action == "start":
                         conv.start(ctrl.speed)
+                        # 确保仿真上料计时器运行 (FM接管时不走start_route)
+                        if not ctrl.is_running:
+                            ctrl.is_running = True
+                            ctrl._runtime_timer.restart()
+                            ctrl._last_runtime_ms = 0
+                        if not ctrl.feed_timer.isActive():
+                            ctrl.feed_timer.start(ctrl.feed_interval)
                     elif action == "stop":
                         conv.stop()
 
@@ -154,5 +162,12 @@ class SimulationFeedingBridge(QObject):
             elif device == "cart":
                 if action == "move":
                     target = cmd.get("target")
-                    if target is not None and dev_id in ctrl.cart_positions:
-                        ctrl.cart_positions[dev_id] = target
+                    if target is not None:
+                        # 设目标位置, 让仿真自己的物理引擎移动小车 (不teleport)
+                        ctrl.cart_target_positions[dev_id] = target
+                        route_id = cmd.get("route_id")
+                        if route_id:
+                            ctx = ctrl.route_state_manager.get_route_context(route_id)
+                            if ctx:
+                                ctx.cart_moving = True
+                                ctx.cart_target_position = target
