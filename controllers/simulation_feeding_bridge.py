@@ -193,10 +193,13 @@ class SimulationFeedingBridge(QObject):
             elif device == "hopper":
                 hopper = ctrl.hoppers.get(dev_id)
                 if hopper:
+                    old = hopper.is_open
                     if action == "open":
                         hopper.is_open = True
                     elif action == "close":
                         hopper.is_open = False
+                    if old != hopper.is_open:
+                        print(f"[桥接] 斗 {dev_id}: {old}→{hopper.is_open}", flush=True)
 
             elif device == "cart":
                 if action == "move":
