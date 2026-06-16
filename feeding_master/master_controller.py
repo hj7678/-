@@ -123,7 +123,7 @@ class FeedingMasterController:
         sim_active = set(data.get('active_routes', []))
         sim_states = data.get('route_states', {})
 
-        # 每帧同步已有路线的输入 (cart_moving) — target_bin由FM决策, 不从仿真覆盖
+        # 只同步传感器输入, 不重新处理路线激活/停用 (避免每100ms重复触发)
         route_cart_moving = data.get('route_cart_moving', {})
         for route_id in sim_active & self._active_routes:
             ctx = self.route_manager.get_route_context(route_id)
@@ -131,7 +131,7 @@ class FeedingMasterController:
                 continue
             ctx.cart_moving = route_cart_moving.get(route_id, ctx.cart_moving)
 
-        # 新激活的路线: 从桥接数据同步状态和目标料仓
+        # 首次激活: 仅处理新出现的路线
         route_targets = data.get('route_targets', {})
         for route_id in sim_active - self._active_routes:
             ctx = self.route_manager.get_route_context(route_id)
@@ -161,9 +161,7 @@ class FeedingMasterController:
             print(f"[FeedingMaster] 路线 {route_id} [{state_str}]" +
                   (f" → {target}" if target else "") + " 已同步", flush=True)
 
-        # 仿真已停用的路线
-        for route_id in self._active_routes - sim_active:
-            self._active_routes.discard(route_id)
+        # FM自主管理路线生命周期, 不从仿真同步移除
 
     # ── 主循环 ──
 
@@ -259,6 +257,12 @@ class FeedingMasterController:
             if ctx.state == RouteState.FEEDING and strategy == 'reverse':
                 strategy = self._resolve_clearing_strategy(route_id)
                 ctx.clearing_strategy = strategy
+
+            # 最小feeding时间: 刚进入FEEDING或刚自动续料, 3s内不触发清空
+            if ctx.state == RouteState.FEEDING:
+                feeding_elapsed = self._total_runtime - getattr(ctx, 'feeding_start_time', 0)
+                if feeding_elapsed < 3.0 and strategy == 'reverse':
+                    strategy = 'reverse'  # 保持, 但跳过清空判定
 
             # 清空计时器 (所有策略都追踪传感器)
             sensor_clear_timers = {}
