@@ -363,7 +363,7 @@ class FeedingMasterController:
                 else:
                     target = compute_cart_target_position(target_bin, cart_id)
                 if target is not None and should_move_cart(cart_pos, target):
-                    cmd = {'device': 'cart', 'id': cart_id, 'action': 'move', 'target': target}
+                    cmd = {'device': 'cart', 'id': cart_id, 'action': 'move', 'target': target, 'route_id': route_id}
                     commands.append(cmd)
                     new_cmds[f"cart:{cart_id}"] = f"→{target}"
 
