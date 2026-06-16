@@ -133,24 +133,29 @@ class SimulationFeedingBridge(QObject):
     def _on_commands(self, msg):
         """接收命令 (含路线状态) from FeedingMaster"""
         if isinstance(msg, list):
-            # 兼容旧格式
             commands = msg
             route_states = {}
         else:
             commands = msg.get('commands', [])
             route_states = msg.get('route_states', {})
-        # 同步FM路线状态到仿真
+        from controllers.route_state_manager import RouteState
+        _state_order = {RouteState.IDLE: 0, RouteState.MOVING_TO_TARGET: 1,
+                       RouteState.FEEDING: 2, RouteState.CLEARING: 3,
+                       RouteState.WAITING: 4, RouteState.STANDBY: 5}
         for rid, info in route_states.items():
             ctx = self._ctrl.route_state_manager.get_route_context(rid)
             if not ctx:
                 continue
             state_str = info.get('state', '') if isinstance(info, dict) else info
             try:
-                from controllers.route_state_manager import RouteState
                 new_s = RouteState(state_str) if state_str else None
                 if new_s:
+                    # FM接管: 只向前不向后 (仿真的物理到达检测优先于FM状态)
+                    fm_order = _state_order.get(new_s, 0)
+                    sim_order = _state_order.get(ctx.state, 0)
                     if new_s != ctx.state:
-                        self._ctrl.route_state_manager._transition(ctx, new_s)
+                        if not self._ctrl._use_feeding_master or fm_order > sim_order:
+                            self._ctrl.route_state_manager._transition(ctx, new_s)
                     if new_s != RouteState.IDLE:
                         self._ctrl.active_routes.add(rid)
             except (ValueError, AttributeError):
