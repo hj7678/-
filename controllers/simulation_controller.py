@@ -1742,7 +1742,6 @@ class SimulationController(QObject):
         """收到 FeedingMaster 控制指令"""
         if not commands:
             return
-        print(f"[仿真] _on_feeding_commands: {len(commands)}条, use_fm={self._use_feeding_master}", flush=True)
 
         if self._use_feeding_master:
             # 接管模式: 执行FM指令替代仿真决策

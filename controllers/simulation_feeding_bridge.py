@@ -168,14 +168,10 @@ class SimulationFeedingBridge(QObject):
                 if ct:
                     ctx.cart_target_position = ct
                 ctx.cart_moving = info.get('cart_moving', False)
-        if commands:
-            print(f"[桥接] emit command_received: {len(commands)}条", flush=True)
         self.command_received.emit(commands)
 
     def apply_commands(self, commands: List[dict]):
         ctrl = self._ctrl
-        if commands:
-            print(f"[桥接] apply_commands: {len(commands)}条, use_fm={ctrl._use_feeding_master}", flush=True)
         for cmd in commands:
             device = cmd.get("device", "")
             dev_id = cmd.get("id", "")
@@ -186,7 +182,6 @@ class SimulationFeedingBridge(QObject):
                 if conv:
                     if action == "start":
                         conv.start(ctrl.speed)
-                        # 确保仿真上料计时器运行 (FM接管时不走start_route)
                         if not ctrl.is_running:
                             ctrl.is_running = True
                             ctrl._runtime_timer.restart()
@@ -208,7 +203,6 @@ class SimulationFeedingBridge(QObject):
                 if action == "move":
                     target = cmd.get("target")
                     if target is not None:
-                            # FM接管和仿真模式统一: 设目标位置, 物理引擎移动
                         if dev_id == 'Cart4':
                             if ctrl.cart4_position != target:
                                 ctrl.cart4_target_position = target
@@ -221,5 +215,6 @@ class SimulationFeedingBridge(QObject):
                         if route_id:
                             ctx = ctrl.route_state_manager.get_route_context(route_id)
                             if ctx:
-                                ctx.cart_moving = True  # 设了target, 小车需要移动
+                                ctx.cart_moving = True
                                 ctx.cart_target_position = target
+        ctrl.mark_dirty()  # 通知UI刷新
