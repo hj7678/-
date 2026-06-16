@@ -106,5 +106,9 @@ class FeedingMasterClient:
         except json.JSONDecodeError:
             return
 
-        if msg.get("type") == "command" and self._on_commands:
+        t = msg.get("type", "")
+        if t == "command":
+            print(f"[FM-Client] 收到command消息, has_cb={self._on_commands is not None}", flush=True)
+        if t == "command" and self._on_commands:
+            print(f"[FM-Client] 调用_on_commands", flush=True)
             self._on_commands(msg)
