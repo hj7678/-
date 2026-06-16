@@ -1047,9 +1047,7 @@ class SimulationController(QObject):
         self._update_hoppers(delta_seconds)
         self._update_materials(delta_seconds)
         self._update_sensors()
-        # FM接管: 小车由FM指令驱动, 不跑仿真自身逻辑
-        if not self._use_feeding_master:
-            self._update_cart_positions(delta_seconds)
+        self._update_cart_positions(delta_seconds)
         if self.active_routes:
             self._run_fault_diagnosis()
         self._check_alarms()
@@ -2200,9 +2198,7 @@ class SimulationController(QObject):
                 material.update_position(new_pos)
                 self.material_moved.emit(material)
 
-        # 更新小车4位置 (FM接管时跳过)
-        if not self._use_feeding_master:
-            self.update_cart4_position(delta_seconds)
+        self.update_cart4_position(delta_seconds)
 
     def _get_conveyor_speed_multiplier(self, conv_id: str) -> float:
         """获取皮带的故障速度倍率"""
