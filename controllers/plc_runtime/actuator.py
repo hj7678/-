@@ -155,12 +155,23 @@ def compute_cart_target_position(
 def compute_cart4_target_position(target_bin: str) -> Optional[int]:
     """D5/D6 小车4 的目标位置计算
 
-    格式：S1-S12 → 对应位置 1-12
+    支持两种格式: S1-S12(线性) 或 S1-1~S6-2(行列)
     """
     if not target_bin or not target_bin.startswith('S'):
         return None
+    rest = target_bin[1:]
+    if '-' in rest:
+        # S4-2 → col=4, row=2 → n=(4-1)*2+2=8 → pos=(8-1)%6+1=2
+        parts = rest.split('-')
+        try:
+            col = int(parts[0])
+            row = int(parts[1])
+            num = (col - 1) * 2 + row
+            return (num - 1) % 6 + 1
+        except (ValueError, IndexError):
+            return None
     try:
-        num = int(target_bin[1:])
+        num = int(rest)
         return (num - 1) % 6 + 1
     except ValueError:
         return None
