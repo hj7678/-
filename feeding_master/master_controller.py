@@ -131,7 +131,20 @@ class FeedingMasterController:
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
                 continue
+            was_moving = ctx.cart_moving
             ctx.cart_moving = route_cart_moving.get(route_id, ctx.cart_moving)
+            # cart物理到达: 仿真已转FEEDING, FM同步跟进
+            if was_moving and not ctx.cart_moving and ctx.state == RouteState.MOVING_TO_TARGET:
+                cart_at_target = False
+                if ctx.assigned_cart == 'Cart4':
+                    cart4_pos = self._cart4_position if hasattr(self, '_cart4_position') else 1
+                    cart_at_target = (cart4_pos == ctx.cart_target_position)
+                elif ctx.assigned_cart:
+                    cart_at_target = (self._cart_positions.get(ctx.assigned_cart, 1) == ctx.cart_target_position)
+                if cart_at_target:
+                    self.route_manager.set_route_state(route_id, RouteState.FEEDING)
+                    ctx.feeding_start_time = self._total_runtime
+                    print(f"[FM-Sync] {route_id} cart物理到达 → FEEDING", flush=True)
 
         # 首次激活: 仅处理新出现的路线
         route_targets = data.get('route_targets', {})
