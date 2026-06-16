@@ -159,7 +159,9 @@ class SimulationFeedingBridge(QObject):
                         self._ctrl.route_state_manager._transition(ctx, new_s)
                     # FM接管: 确保路线在active_routes中
                     if self._ctrl._use_feeding_master and new_s != RouteState.IDLE:
-                        self._ctrl.active_routes.add(rid)
+                        if rid not in self._ctrl.active_routes:
+                            self._ctrl.active_routes.add(rid)
+                            print(f"[桥接] 添加 {rid} 到 active_routes (state={state_str})", flush=True)
             except (ValueError, AttributeError):
                 pass
             # FM接管: 同步target_bin + cart_target
