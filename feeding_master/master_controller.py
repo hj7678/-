@@ -154,6 +154,10 @@ class FeedingMasterController:
                         pass
 
             self._active_routes.add(route_id)
+            # 标记为执行中, 防止调度器重复激活
+            belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
+            if belt_id and target:
+                self.scheduler.mark_executing(belt_id, route_id, target)
             print(f"[FeedingMaster] 路线 {route_id} [{state_str}]" +
                   (f" → {target}" if target else "") + " 已同步", flush=True)
 

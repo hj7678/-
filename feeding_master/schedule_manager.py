@@ -232,7 +232,8 @@ class ScheduleManager:
         with self._sequences_lock:
             self._sequences[belt_id] = list(seq)
 
-        if self._on_sequence:
+        # 仅当皮带空闲时自动启动第一条, 否则等WAITING→auto-continue
+        if not self.is_executing(belt_id) and self._on_sequence:
             self._on_sequence(belt_id, list(seq))
 
     # ── 序列消费 ──
