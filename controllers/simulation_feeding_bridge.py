@@ -144,37 +144,12 @@ class SimulationFeedingBridge(QObject):
 
     def apply_commands(self, commands: List[dict]):
         ctrl = self._ctrl
-        # 在主线程同步路线状态 (避免recv线程与主线程竞态)
-        rs = getattr(self, '_pending_route_states', {})
-        if rs:
-            self._pending_route_states = {}
-            from controllers.route_state_manager import RouteState
-            for rid, info in rs.items():
-                ctx = ctrl.route_state_manager.get_route_context(rid)
-                if not ctx:
-                    continue
-                state_str = info.get('state', '') if isinstance(info, dict) else info
-                try:
-                    new_s = RouteState(state_str) if state_str else None
-                    blocked = (ctrl._use_feeding_master and new_s
-                               and new_s == RouteState.MOVING_TO_TARGET
-                               and ctx.state.value in ('feeding', 'clearing', 'waiting', 'standby'))
-                    if new_s and new_s != ctx.state and not blocked:
-                        ctrl.route_state_manager._transition(ctx, new_s)
-                    if new_s and new_s != RouteState.IDLE:
-                        ctrl.active_routes.add(rid)
-                except (ValueError, AttributeError):
-                    blocked = False
-                # 被拦截时不同步target/cart (保留仿真物理层状态)
-                if ctrl._use_feeding_master and isinstance(info, dict) and not blocked:
-                    tb = info.get('target_bin', '')
-                    if tb:
-                        ctx.target_bin = tb
-                        ctrl.route_to_bin[rid] = tb
-                    ct = info.get('cart_target', 0)
-                    if ct:
-                        ctx.cart_target_position = ct
-                    ctx.cart_moving = info.get('cart_moving', False)
+        # FM接管: 路线加入active_routes (从cart命令推断)
+        for cmd in commands:
+            if cmd.get('device') == 'cart':
+                rid = cmd.get('route_id', '')
+                if rid and rid not in ctrl.active_routes:
+                    ctrl.active_routes.add(rid)
         for cmd in commands:
             device = cmd.get("device", "")
             dev_id = cmd.get("id", "")

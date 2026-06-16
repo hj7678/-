@@ -3202,11 +3202,6 @@ class SimulationController(QObject):
             print(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}", flush=True)
             belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}")
 
-            if self._use_feeding_master:
-                ctx.cart_moving = False
-                if cart_id == 'Cart4':
-                    self.cart4_is_moving = False
-                continue
             if ctx.state != RouteState.MOVING_TO_TARGET:
                 print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
                 belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET")
@@ -3265,14 +3260,6 @@ class SimulationController(QObject):
             target_pos = self.cart_target_positions.get(cart_id, 1)
             current_pos = self.cart_positions.get(cart_id, 1)
 
-            # FM接管: cart在目标位 → 设cart_moving=False让FM-Sync检测
-            if self._use_feeding_master and current_pos == target_pos:
-                for route_id in list(self.active_routes):
-                    ctx = self.route_state_manager.get_route_context(route_id)
-                    if ctx and ctx.assigned_cart == cart_id and ctx.state == RouteState.MOVING_TO_TARGET:
-                        ctx.cart_moving = False
-                continue
-
             # 检查是否有小车需要移动
             needs_moving = False
             for route_id in list(self.active_routes):
@@ -3315,9 +3302,6 @@ class SimulationController(QObject):
                 continue
             # 允许 MOVING_TO_TARGET 或 CLEARING+early_moved 两种状态
             if ctx.state != RouteState.MOVING_TO_TARGET:
-                if self._use_feeding_master:
-                    ctx.cart_moving = False
-                    continue
                 if not (ctx.state == RouteState.CLEARING and ctx.early_moved_from_clearing):
                     continue
                 print(f"[VirtualArrival] {cart_id} route={route_id} CLEARING+early_moved → 处理到达", flush=True)
