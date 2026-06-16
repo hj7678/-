@@ -183,7 +183,7 @@ class TcpSchedulingClient(QObject):
             sock.sendall((json_str + "\n").encode("utf-8"))
 
             buf = b""
-            sock.settimeout(30.0)
+            sock.settimeout(120.0)  # D8 14仓GA计算较慢
             while b"\n" not in buf:
                 chunk = sock.recv(4096)
                 if not chunk:
