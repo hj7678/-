@@ -156,18 +156,17 @@ class SimulationFeedingBridge(QObject):
                 state_str = info.get('state', '') if isinstance(info, dict) else info
                 try:
                     new_s = RouteState(state_str) if state_str else None
-                    if new_s and new_s != ctx.state:
-                        if (ctrl._use_feeding_master
-                                and new_s == RouteState.MOVING_TO_TARGET
-                                and ctx.state.value in ('feeding', 'clearing', 'waiting', 'standby')):
-                            pass
-                        else:
-                            ctrl.route_state_manager._transition(ctx, new_s)
+                    blocked = (ctrl._use_feeding_master and new_s
+                               and new_s == RouteState.MOVING_TO_TARGET
+                               and ctx.state.value in ('feeding', 'clearing', 'waiting', 'standby'))
+                    if new_s and new_s != ctx.state and not blocked:
+                        ctrl.route_state_manager._transition(ctx, new_s)
                     if new_s and new_s != RouteState.IDLE:
                         ctrl.active_routes.add(rid)
                 except (ValueError, AttributeError):
-                    pass
-                if ctrl._use_feeding_master and isinstance(info, dict):
+                    blocked = False
+                # 被拦截时不同步target/cart (保留仿真物理层状态)
+                if ctrl._use_feeding_master and isinstance(info, dict) and not blocked:
                     tb = info.get('target_bin', '')
                     if tb:
                         ctx.target_bin = tb
@@ -175,10 +174,7 @@ class SimulationFeedingBridge(QObject):
                     ct = info.get('cart_target', 0)
                     if ct:
                         ctx.cart_target_position = ct
-                    # 状态被拦截时不覆盖cart_moving (sim物理到达优先)
-                    if not (new_s and new_s == RouteState.MOVING_TO_TARGET
-                            and ctx.state.value in ('feeding', 'clearing', 'waiting', 'standby')):
-                        ctx.cart_moving = info.get('cart_moving', False)
+                    ctx.cart_moving = info.get('cart_moving', False)
         for cmd in commands:
             device = cmd.get("device", "")
             dev_id = cmd.get("id", "")
