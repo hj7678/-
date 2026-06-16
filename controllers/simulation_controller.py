@@ -3204,15 +3204,12 @@ class SimulationController(QObject):
 
             if ctx.state != RouteState.MOVING_TO_TARGET:
                 if self._use_feeding_master:
-                    print(f"[Cart4-FIX] ctx={ctx} assigned_cart={ctx.assigned_cart} cart_id={cart_id} state={ctx.state.value}", flush=True)
-                    if ctx.assigned_cart == cart_id:
-                        self.route_state_manager._transition(ctx, RouteState.FEEDING)
-                        ctx.cart_moving = False
-                        ctx.feeding_start_time = self.total_runtime
-                        if cart_id == 'Cart4':
-                            self.cart4_sensor_position = self.cart4_position
-                            self.cart4_is_moving = False
-                        print(f"[FM-Cart] {cart_id} 物理到达 → FEEDING", flush=True)
+                    self.route_state_manager._transition(ctx, RouteState.FEEDING)
+                    ctx.cart_moving = False
+                    ctx.feeding_start_time = self.total_runtime
+                    if cart_id == 'Cart4':
+                        self.cart4_sensor_position = self.cart4_position
+                        self.cart4_is_moving = False
                     continue
                 else:
                     print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
