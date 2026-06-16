@@ -875,7 +875,7 @@ class MainWindow(QMainWindow):
         # 当进入等待状态时触发下一轮调度
         if new_state == 'waiting':
             self._update_schedule_display()
-            if self.controller._auto_feeding_active:
+            if self.controller._auto_feeding_active and not self.controller._use_feeding_master:
                 for belt_id, r in list(self.controller._executing_route.items()):
                     if r == route_id:
                         self._log_belt(route_id, "路线完成，触发下一轮", "#4A90D9")

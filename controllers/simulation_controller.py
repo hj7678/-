@@ -1923,6 +1923,8 @@ class SimulationController(QObject):
         return 'S1'
 
     def _on_auto_feed_route_completed(self, route_id: str):
+        if self._use_feeding_master:
+            return  # FM接管模式: 由FeedingMaster负责自动续料
         for belt_id, r in list(self._executing_route.items()):
             if r == route_id:
                 del self._executing_route[belt_id]
@@ -2029,6 +2031,8 @@ class SimulationController(QObject):
 
     def _on_engine_schedule_request(self, belt_id: str):
         """状态引擎调度回调（解耦：引擎不直调调度服务）"""
+        if self._use_feeding_master:
+            return  # FM接管模式: 由FeedingMaster的scheduler.tick负责
         self._request_immediate_scheduling(belt_id)
 
     def _request_immediate_scheduling(self, belt_id: str, force: bool = False):
