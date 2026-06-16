@@ -168,10 +168,14 @@ class SimulationFeedingBridge(QObject):
                 if ct:
                     ctx.cart_target_position = ct
                 ctx.cart_moving = info.get('cart_moving', False)
+        if commands:
+            print(f"[桥接] emit command_received: {len(commands)}条", flush=True)
         self.command_received.emit(commands)
 
     def apply_commands(self, commands: List[dict]):
         ctrl = self._ctrl
+        if commands:
+            print(f"[桥接] apply_commands: {len(commands)}条, use_fm={ctrl._use_feeding_master}", flush=True)
         for cmd in commands:
             device = cmd.get("device", "")
             dev_id = cmd.get("id", "")
