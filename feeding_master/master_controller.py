@@ -177,6 +177,7 @@ class FeedingMasterController:
 
     def _run(self):
         last_tick = time.time()
+        initial_schedule_done = False
         while self._running:
             now = time.time()
             delta = now - last_tick
@@ -187,6 +188,15 @@ class FeedingMasterController:
                 self._tick(delta)
             except Exception as e:
                 print(f"[FeedingMaster] tick 异常: {e}", file=sys.stderr)
+
+            # 启动后2秒: 强制请求一次初始调度 (不等idle检测)
+            if not initial_schedule_done and self._total_runtime > 2.0:
+                initial_schedule_done = True
+                levels = self.stock.get_all_levels()
+                if levels and any(b['level_tons'] > 0 for b in levels):
+                    print("[FM-Sched] 初始调度请求 (全部皮带)", flush=True)
+                    for belt_id in ['D7', 'D8', 'D9', 'D6']:
+                        self.scheduler.request_schedule_now(belt_id)
 
             elapsed = time.time() - now
             sleep_time = max(0, self._tick_ms / 1000.0 - elapsed)
