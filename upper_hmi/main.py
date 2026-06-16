@@ -94,6 +94,8 @@ class HmiMainWindow(QMainWindow):
             self.btn_start.setText("启动仿真")
 
     def _tick(self):
+        # 桥接始终推送 (即使未启动仿真, FM也要收到scheduling_active)
+        self.engine.bridge.tick()
         if self.engine.is_running:
             self.engine.update(50)
             self.status_panel.update_all_status(self.engine)
