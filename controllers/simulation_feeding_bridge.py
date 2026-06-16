@@ -145,7 +145,7 @@ class SimulationFeedingBridge(QObject):
         else:
             commands = msg.get('commands', [])
             route_states = msg.get('route_states', {})
-        # 同步FM路线状态到仿真 (_transition触发route_state_changed信号)
+        # 同步FM路线状态到仿真
         for rid, info in route_states.items():
             ctx = self._ctrl.route_state_manager.get_route_context(rid)
             if not ctx:
@@ -154,8 +154,12 @@ class SimulationFeedingBridge(QObject):
             try:
                 from controllers.route_state_manager import RouteState
                 new_s = RouteState(state_str) if state_str else None
-                if new_s and new_s != ctx.state:
-                    self._ctrl.route_state_manager._transition(ctx, new_s)
+                if new_s:
+                    if new_s != ctx.state:
+                        self._ctrl.route_state_manager._transition(ctx, new_s)
+                    # FM接管: 确保路线在active_routes中
+                    if self._ctrl._use_feeding_master and new_s != RouteState.IDLE:
+                        self._ctrl.active_routes.add(rid)
             except (ValueError, AttributeError):
                 pass
             # FM接管: 同步target_bin + cart_target
