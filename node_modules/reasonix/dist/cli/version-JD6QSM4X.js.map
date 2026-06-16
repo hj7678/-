@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/cli/commands/version.ts"],"sourcesContent":["import { VERSION } from \"../../index.js\";\n\nexport function versionCommand(): void {\n  console.log(`reasonix ${VERSION}`);\n}\n"],"mappings":";;;;;;;;;;;;;;;;;;;;;;;;;;AAEO,SAAS,iBAAuB;AACrC,UAAQ,IAAI,YAAY,OAAO,EAAE;AACnC;","names":[]}

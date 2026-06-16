@@ -118,6 +118,7 @@ class SimulationFeedingBridge(QObject):
             "belt_speeds": {cid: conv.current_speed for cid, conv in ctrl.conveyors.items()},
             "active_routes": list(ctrl.active_routes),
             "route_states": ctrl.route_state_manager.get_all_route_states(),
+            "scheduling_active": ctrl._auto_feeding_active,
             "route_targets": dict(ctrl.route_to_bin),
             "route_cart_moving": {
                 rid: (ctx.cart_moving if (ctx := ctrl.route_state_manager.get_route_context(rid)) else False)

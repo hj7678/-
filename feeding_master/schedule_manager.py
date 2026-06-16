@@ -62,8 +62,13 @@ class ScheduleManager:
 
     # ── 每周期 tick ──
 
+    def set_active(self, active: bool):
+        self._active = active
+
     def tick(self, total_runtime: float):
         """检查是否需要触发调度"""
+        if not getattr(self, '_active', False):
+            return
         self._tick_triggered.clear()
         for belt_id in SCHEDULING_PORTS:
             if self._check_emergency(belt_id, total_runtime):

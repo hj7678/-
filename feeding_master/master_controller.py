@@ -116,6 +116,8 @@ class FeedingMasterController:
             k: tuple(v) for k, v in data.get('cart_divert', {}).items()
         }
         self.scheduler.update_cart_state(self._cart_positions, self._cart_divert)
+        # 同步调度开关: UI点击"调度服务"后FM才开始请求调度
+        self.scheduler.set_active(data.get('scheduling_active', False))
 
         # 同步活跃路线: 仿真激活了哪些路线，FeedingMaster 就追踪哪些
         sim_active = set(data.get('active_routes', []))
@@ -177,7 +179,6 @@ class FeedingMasterController:
 
     def _run(self):
         last_tick = time.time()
-        initial_schedule_done = False
         while self._running:
             now = time.time()
             delta = now - last_tick
@@ -188,15 +189,6 @@ class FeedingMasterController:
                 self._tick(delta)
             except Exception as e:
                 print(f"[FeedingMaster] tick 异常: {e}", file=sys.stderr)
-
-            # 启动后2秒: 强制请求一次初始调度 (不等idle检测)
-            if not initial_schedule_done and self._total_runtime > 2.0:
-                initial_schedule_done = True
-                levels = self.stock.get_all_levels()
-                if levels and any(b['level_tons'] > 0 for b in levels):
-                    print("[FM-Sched] 初始调度请求 (全部皮带)", flush=True)
-                    for belt_id in ['D7', 'D8', 'D9', 'D6']:
-                        self.scheduler.request_schedule_now(belt_id)
 
             elapsed = time.time() - now
             sleep_time = max(0, self._tick_ms / 1000.0 - elapsed)
