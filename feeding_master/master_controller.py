@@ -197,6 +197,18 @@ class FeedingMasterController:
         # 1. 拉取料位
         levels = self.stock.get_all_levels()
         level_map = {b['bin_id']: b for b in levels} if levels else {}
+        # 每10秒输出料位摘要
+        tick_count = getattr(self, '_tick_count', 0) + 1
+        self._tick_count = tick_count
+        if tick_count % 200 == 0 and level_map:  # 200*50ms=10s
+            total = sum(b['level_tons'] for b in levels)
+            belted = {}
+            for belt_id in ['D7','D8','D9','D6']:
+                from scheduling.bin_config import BELT_BINS
+                bids = BELT_BINS.get(belt_id, [])
+                belted[belt_id] = [f"{bid}={level_map.get(bid,{}).get('level_pct',0):.0f}%" for bid in bids[:3]]
+            print(f"[FM-Stock] 料位: 总{total:.0f}t | " +
+                  " | ".join(f"{b}:{','.join(v)}" for b,v in belted.items()), flush=True)
 
         # 追踪指令变化 (仅变化时输出)
         prev_cmds = getattr(self, '_last_commands', {})
