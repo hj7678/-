@@ -3202,19 +3202,15 @@ class SimulationController(QObject):
             print(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}", flush=True)
             belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}")
 
+            if self._use_feeding_master:
+                ctx.cart_moving = False
+                if cart_id == 'Cart4':
+                    self.cart4_is_moving = False
+                continue
             if ctx.state != RouteState.MOVING_TO_TARGET:
-                if self._use_feeding_master:
-                    self.route_state_manager._transition(ctx, RouteState.FEEDING)
-                    ctx.cart_moving = False
-                    ctx.feeding_start_time = self.total_runtime
-                    if cart_id == 'Cart4':
-                        self.cart4_sensor_position = self.cart4_position
-                        self.cart4_is_moving = False
-                    continue
-                else:
-                    print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
-                    belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET")
-                    continue
+                print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
+                belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET")
+                continue
             cart_is_moving = self.cart4_is_moving if cart_id == 'Cart4' else ctx.cart_moving
             if not cart_is_moving:
                 print(f"[CartArrival] {cart_id} 跳过: cart_is_moving=False", flush=True)
@@ -3320,12 +3316,7 @@ class SimulationController(QObject):
             # 允许 MOVING_TO_TARGET 或 CLEARING+early_moved 两种状态
             if ctx.state != RouteState.MOVING_TO_TARGET:
                 if self._use_feeding_master:
-                    # FM接管: cart物理到达 → 直接转FEEDING
-                    self.route_state_manager._transition(ctx, RouteState.FEEDING)
                     ctx.cart_moving = False
-                    ctx.feeding_start_time = self.total_runtime
-                    self.cart_sensor_positions[cart_id] = self.cart_positions.get(cart_id, 1)
-                    print(f"[FM-VirtualCart] {cart_id} 虚拟到达 → FEEDING", flush=True)
                     continue
                 if not (ctx.state == RouteState.CLEARING and ctx.early_moved_from_clearing):
                     continue
