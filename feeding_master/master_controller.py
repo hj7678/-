@@ -408,6 +408,8 @@ class FeedingMasterController:
                     target = compute_cart4_target_position(target_bin)
                 else:
                     target = compute_cart_target_position(target_bin, cart_id)
+                if target is not None:
+                    ctx.cart_target_position = target  # 同步: FM知道真实目标
                 if target is not None and should_move_cart(cart_pos, target):
                     cmd = {'device': 'cart', 'id': cart_id, 'action': 'move', 'target': target, 'route_id': route_id}
                     commands.append(cmd)
