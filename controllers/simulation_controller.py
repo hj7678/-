@@ -3277,6 +3277,17 @@ class SimulationController(QObject):
             target_pos = self.cart_target_positions.get(cart_id, 1)
             current_pos = self.cart_positions.get(cart_id, 1)
 
+            # FM接管: cart在目标位 → 直接转FEEDING (不等状态同步)
+            if self._use_feeding_master and current_pos == target_pos:
+                for route_id in list(self.active_routes):
+                    ctx = self.route_state_manager.get_route_context(route_id)
+                    if ctx and ctx.assigned_cart == cart_id and ctx.state == RouteState.MOVING_TO_TARGET:
+                        self.route_state_manager._transition(ctx, RouteState.FEEDING)
+                        ctx.cart_moving = False
+                        self.cart_sensor_positions[cart_id] = current_pos
+                        print(f"[FM-Cart] {cart_id} 已在目标→FEEDING", flush=True)
+                continue
+
             # 检查是否有小车需要移动
             needs_moving = False
             for route_id in list(self.active_routes):
@@ -3286,8 +3297,17 @@ class SimulationController(QObject):
                     break
 
             if needs_moving and current_pos == target_pos:
-                # 跨列同行：divert变了但行不变，立即触发到达
-                self._check_virtual_cart_arrival(cart_id)
+                # cart已在目标: 不需要移动, 直接触发到达
+                if self._use_feeding_master:
+                    for route_id in list(self.active_routes):
+                        ctx = self.route_state_manager.get_route_context(route_id)
+                        if ctx and ctx.assigned_cart == cart_id and ctx.cart_moving:
+                            self.route_state_manager._transition(ctx, RouteState.FEEDING)
+                            ctx.cart_moving = False
+                            self.cart_sensor_positions[cart_id] = current_pos
+                            print(f"[FM-Cart] {cart_id} 已在目标→FEEDING", flush=True)
+                else:
+                    self._check_virtual_cart_arrival(cart_id)
             elif current_pos != target_pos and needs_moving:
                 # 模拟小车每18秒（移动一位）更新一次位置
                 if not hasattr(self, '_cart_move_timers'):
