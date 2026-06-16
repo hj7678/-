@@ -70,6 +70,7 @@ class PhysicsEngine(QObject):
         self.active_routes: Set[str] = set()
         self.route_to_bin: Dict[str, str] = {}
         self.route_manager = get_route_state_manager()
+        self.route_state_manager = self.route_manager  # 别名 (bridge 用)
 
         # 小车
         self.cart_positions: Dict[str, int] = {
@@ -363,6 +364,8 @@ class PhysicsEngine(QObject):
             pct = random.uniform(lo, hi)
             sb.current_level = round(pct * sb.capacity / 100.0, 2)
         self.bridge.randomize_stock_levels(lo, hi)
+
+    _auto_feeding_active = True  # FM接管 = 始终自动上料
 
     @property
     def _use_feeding_master(self):
