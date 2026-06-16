@@ -422,11 +422,17 @@ class FeedingMasterController:
 
         # 4. 推送控制指令 (含路线状态用于仿真同步)
         if commands:
-            route_states = {
-                rid: (ctx.state.value if (ctx := self.route_manager.get_route_context(rid)) else '')
-                for rid in self._active_routes
-            }
-            self.server.send_commands(commands, route_states)
+            route_info = {}
+            for rid in self._active_routes:
+                ctx = self.route_manager.get_route_context(rid)
+                if ctx:
+                    route_info[rid] = {
+                        'state': ctx.state.value,
+                        'target_bin': ctx.target_bin or '',
+                        'cart_target': ctx.cart_target_position,
+                        'cart_moving': ctx.cart_moving,
+                    }
+            self.server.send_commands(commands, route_info)
 
     # ── 外部接口 ──
 

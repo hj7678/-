@@ -136,17 +136,29 @@ class SimulationFeedingBridge(QObject):
         else:
             commands = msg.get('commands', [])
             route_states = msg.get('route_states', {})
-        # 同步FM路线状态到仿真UI (_transition触发route_state_changed信号)
-        if route_states:
-            for rid, state_str in route_states.items():
-                ctx = self._ctrl.route_state_manager.get_route_context(rid)
-                if ctx and state_str and state_str != ctx.state.value:
-                    try:
-                        from controllers.route_state_manager import RouteState
-                        new_s = RouteState(state_str)
-                        self._ctrl.route_state_manager._transition(ctx, new_s)
-                    except (ValueError, AttributeError):
-                        pass
+        # 同步FM路线状态到仿真 (_transition触发route_state_changed信号)
+        for rid, info in route_states.items():
+            ctx = self._ctrl.route_state_manager.get_route_context(rid)
+            if not ctx:
+                continue
+            state_str = info.get('state', '') if isinstance(info, dict) else info
+            try:
+                from controllers.route_state_manager import RouteState
+                new_s = RouteState(state_str) if state_str else None
+                if new_s and new_s != ctx.state:
+                    self._ctrl.route_state_manager._transition(ctx, new_s)
+            except (ValueError, AttributeError):
+                pass
+            # FM接管: 同步target_bin + cart_target
+            if self._ctrl._use_feeding_master and isinstance(info, dict):
+                tb = info.get('target_bin', '')
+                if tb:
+                    ctx.target_bin = tb
+                    self._ctrl.route_to_bin[rid] = tb
+                ct = info.get('cart_target', 0)
+                if ct:
+                    ctx.cart_target_position = ct
+                ctx.cart_moving = info.get('cart_moving', False)
         self.command_received.emit(commands)
 
     def apply_commands(self, commands: List[dict]):
