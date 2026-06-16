@@ -354,12 +354,14 @@ class FeedingMasterController:
             final_conv = route_conveyors[-1] if route_conveyors else ''
             cart_at_target = not should_move_cart(cart_pos, cart_target)
 
-            if ctx.state in (RouteState.FEEDING, RouteState.CLEARING):
+            if ctx.state in (RouteState.FEEDING, RouteState.CLEARING, RouteState.MOVING_TO_TARGET):
+                # MOVING_TO_TARGET: 强制cart_at_target=False, 非终点运行终点停
+                _cat = cart_at_target if ctx.state != RouteState.MOVING_TO_TARGET else False
                 belt_cmds = compute_route_belt_commands(
                     route_conveyors, final_conv,
                     is_feeding=(ctx.state == RouteState.FEEDING),
                     is_clearing=(ctx.state == RouteState.CLEARING),
-                    cart_at_target=cart_at_target,
+                    cart_at_target=_cat,
                 )
                 for cid, action in belt_cmds.items():
                     cmd = {'device': 'belt', 'id': cid, 'action': action.value}
