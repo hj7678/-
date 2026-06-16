@@ -371,6 +371,9 @@ class PhysicsEngine(QObject):
     def _use_feeding_master(self):
         return True
 
+    # status_panel 需要的属性
+    laser_sensor_states: Dict[str, bool] = {}
+
     # SimulationView 需要的属性
     @property
     def cart4_is_moving(self):
@@ -400,7 +403,7 @@ class PhysicsEngine(QObject):
         return s.is_active if s else False
     def get_conveyor_state(self, cid):
         c = self.conveyors.get(cid)
-        return {'is_running': c.is_running, 'speed': c.current_speed} if c else {'is_running': False, 'speed': 0}
+        return {'is_running': c.is_running, 'speed': c.current_speed, 'on_route': self.is_conveyor_on_route(cid)} if c else {'is_running': False, 'speed': 0, 'on_route': False}
     def get_hopper_level(self, hid):
         h = self.hoppers.get(hid)
         return h.get_display_weight() if h else 0
