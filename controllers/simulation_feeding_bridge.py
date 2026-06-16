@@ -136,6 +136,7 @@ class SimulationFeedingBridge(QObject):
 
     def _on_commands(self, msg):
         """接收命令 (含路线状态) from FeedingMaster"""
+        print(f"[桥接] _on_commands 被调用, type={type(msg).__name__}", flush=True)
         if isinstance(msg, list):
             # 兼容旧格式
             commands = msg
