@@ -368,6 +368,13 @@ class PhysicsEngine(QObject):
     def _use_feeding_master(self):
         return True
 
+    # SimulationView 需要的属性
+    @property
+    def cart4_is_moving(self):
+        return False
+    route_silo_bin: Dict[str, str] = {}
+    route_material_cache: Dict[str, str] = {}
+
     # StatusPanel 需要的桩方法
     def get_faulty_sensors(self): return set()
     def get_diagnosis_result(self): return []
