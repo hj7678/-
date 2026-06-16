@@ -1047,13 +1047,16 @@ class SimulationController(QObject):
         self._update_hoppers(delta_seconds)
         self._update_materials(delta_seconds)
         self._update_sensors()
-        self._update_cart_positions(delta_seconds)
+        # FM接管: 小车由FM指令驱动, 不跑仿真自身逻辑
+        if not self._use_feeding_master:
+            self._update_cart_positions(delta_seconds)
         if self.active_routes:
             self._run_fault_diagnosis()
         self._check_alarms()
 
         # 料仓消耗（模拟搅拌站生产消耗）
-        self._update_bin_consumption(delta_seconds)
+        if not self._use_feeding_master:
+            self._update_bin_consumption(delta_seconds)
 
         # 定期清理失效物料（每5秒，防止materials列表无限增长导致卡顿）
         if not hasattr(self, '_last_material_cleanup'):
