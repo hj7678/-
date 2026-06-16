@@ -3165,9 +3165,12 @@ class SimulationController(QObject):
         if distance <= 0:
             self.cart4_is_moving = False
             self._cart4_move_timer = 0.0
-            print(f"[Cart4] 已到达目标位置 {self.cart4_position}", flush=True)
-            belt_log('D6').info(f"[Cart4] 已到达目标位置 {self.cart4_position}")
+            if not getattr(self, '_cart4_arrived_logged', False):
+                self._cart4_arrived_logged = True
+                print(f"[Cart4] 已到达目标位置 {self.cart4_position}", flush=True)
+                belt_log('D6').info(f"[Cart4] 已到达目标位置 {self.cart4_position}")
             return
+        self._cart4_arrived_logged = False
         self._cart4_move_timer += delta_seconds
         if self._cart4_move_timer >= 18.0:
             self._cart4_move_timer = 0.0

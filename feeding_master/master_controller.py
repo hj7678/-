@@ -112,6 +112,8 @@ class FeedingMasterController:
         """接收 Upper Computer 转发的传感器状态"""
         self._sensor_states = data
         self._cart_positions = data.get('cart_positions', {})
+        self._cart4_position = data.get('cart4_position', 1)
+        self._cart4_is_moving = data.get('cart4_is_moving', False)
         self._cart_divert = {
             k: tuple(v) for k, v in data.get('cart_divert', {}).items()
         }
@@ -237,7 +239,11 @@ class FeedingMasterController:
                 continue
 
             cart_id = ctx.assigned_cart or ''
-            cart_pos = self._cart_positions.get(cart_id, 1)
+            if cart_id == 'Cart4':
+                cart_pos = self._cart4_position
+                ctx.cart_moving = self._cart4_is_moving
+            else:
+                cart_pos = self._cart_positions.get(cart_id, 1)
             cart_target = ctx.cart_target_position
             target_bin = ctx.target_bin or ''
 

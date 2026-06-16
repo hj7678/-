@@ -123,6 +123,8 @@ class SimulationFeedingBridge(QObject):
             "cart_divert": {cid: list(div) for cid, div in ctrl.cart_divert.items()},
             "belt_states": {cid: conv.is_running for cid, conv in ctrl.conveyors.items()},
             "belt_speeds": {cid: conv.current_speed for cid, conv in ctrl.conveyors.items()},
+            "cart4_position": ctrl.cart4_position,
+            "cart4_is_moving": ctrl.cart4_is_moving,
             "active_routes": list(ctrl.active_routes),
             "route_states": ctrl.route_state_manager.get_all_route_states(),
             "scheduling_active": ctrl._auto_feeding_active,
@@ -204,8 +206,11 @@ class SimulationFeedingBridge(QObject):
                     if target is not None:
                             # FM接管和仿真模式统一: 设目标位置, 物理引擎移动
                         if dev_id == 'Cart4':
-                            ctrl.cart4_target_position = target
-                            ctrl.cart4_is_moving = True
+                            if ctrl.cart4_position != target:
+                                ctrl.cart4_target_position = target
+                                ctrl.cart4_is_moving = True
+                            else:
+                                ctrl.cart4_is_moving = False
                         else:
                             ctrl.cart_target_positions[dev_id] = target
                         route_id = cmd.get("route_id")
