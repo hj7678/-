@@ -155,8 +155,15 @@ class SimulationFeedingBridge(QObject):
                 from controllers.route_state_manager import RouteState
                 new_s = RouteState(state_str) if state_str else None
                 if new_s:
+                    # FM接管: 只向前推进, 不覆盖仿真物理层已更新的状态
+                    _order = {RouteState.IDLE: 0, RouteState.MOVING_TO_TARGET: 1,
+                              RouteState.FEEDING: 2, RouteState.CLEARING: 3,
+                              RouteState.WAITING: 4, RouteState.STANDBY: 5}
                     if new_s != ctx.state:
-                        self._ctrl.route_state_manager._transition(ctx, new_s)
+                        if not self._ctrl._use_feeding_master:
+                            self._ctrl.route_state_manager._transition(ctx, new_s)
+                        elif _order.get(new_s, 0) > _order.get(ctx.state, 0):
+                            self._ctrl.route_state_manager._transition(ctx, new_s)
                     # 确保路线在active_routes中
                     if new_s and new_s != RouteState.IDLE:
                         self._ctrl.active_routes.add(rid)
