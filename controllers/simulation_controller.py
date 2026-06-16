@@ -3319,6 +3319,14 @@ class SimulationController(QObject):
                 continue
             # 允许 MOVING_TO_TARGET 或 CLEARING+early_moved 两种状态
             if ctx.state != RouteState.MOVING_TO_TARGET:
+                if self._use_feeding_master:
+                    # FM接管: cart物理到达 → 直接转FEEDING
+                    self.route_state_manager._transition(ctx, RouteState.FEEDING)
+                    ctx.cart_moving = False
+                    ctx.feeding_start_time = self.total_runtime
+                    self.cart_sensor_positions[cart_id] = self.cart_positions.get(cart_id, 1)
+                    print(f"[FM-VirtualCart] {cart_id} 虚拟到达 → FEEDING", flush=True)
+                    continue
                 if not (ctx.state == RouteState.CLEARING and ctx.early_moved_from_clearing):
                     continue
                 print(f"[VirtualArrival] {cart_id} route={route_id} CLEARING+early_moved → 处理到达", flush=True)
