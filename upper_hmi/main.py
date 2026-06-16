@@ -20,10 +20,9 @@ def main():
     window.controller.randomize_bin_levels_percent(25, 90)
     # 自动连接桥接
     window.controller.start_feeding_bridge()
-    # 自动启用FM接管
+    # 自动启用FM接管 (调度由FM负责)
     window.controller.set_use_feeding_master(True)
-    # 自动启动调度
-    window.controller.start_tcp_scheduling()
+    window.controller._auto_feeding_active = True  # 激活FM的调度检测
     # 自动仿真运行
     window.controller.is_running = True
     window.controller._runtime_timer.start()
