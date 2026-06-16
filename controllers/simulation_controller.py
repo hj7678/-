@@ -2200,8 +2200,9 @@ class SimulationController(QObject):
                 material.update_position(new_pos)
                 self.material_moved.emit(material)
 
-        # 更新小车4位置（在所有物料检查之后）
-        self.update_cart4_position(delta_seconds)
+        # 更新小车4位置 (FM接管时跳过)
+        if not self._use_feeding_master:
+            self.update_cart4_position(delta_seconds)
 
     def _get_conveyor_speed_multiplier(self, conv_id: str) -> float:
         """获取皮带的故障速度倍率"""

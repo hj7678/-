@@ -202,12 +202,20 @@ class SimulationFeedingBridge(QObject):
                 if action == "move":
                     target = cmd.get("target")
                     if target is not None:
-                        if ctrl._use_feeding_master:
+                            if ctrl._use_feeding_master:
                             # FM接管: 直接移动 (仿真cart物理引擎已停)
-                            ctrl.cart_positions[dev_id] = target
-                            ctrl.cart_sensor_positions[dev_id] = target
+                            if dev_id == 'Cart4':
+                                ctrl.cart4_position = target
+                                ctrl.cart4_sensor_position = target
+                                ctrl.cart4_is_moving = False
+                            else:
+                                ctrl.cart_positions[dev_id] = target
+                                ctrl.cart_sensor_positions[dev_id] = target
                         else:
-                            ctrl.cart_target_positions[dev_id] = target
+                            if dev_id == 'Cart4':
+                                ctrl.cart4_target_position = target
+                            else:
+                                ctrl.cart_target_positions[dev_id] = target
                         route_id = cmd.get("route_id")
                         if route_id:
                             ctx = ctrl.route_state_manager.get_route_context(route_id)
