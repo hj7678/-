@@ -124,7 +124,20 @@ class ScheduleManager:
         bin_ids = BELT_BINS.get(belt_id, [])
         if not bin_ids:
             return []
-        levels = self.stock.get_levels(bin_ids)
+        # D6: S1-S12线性→Stock的S1-1~S6-2行列格式映射
+        if belt_id == 'D6':
+            stock_ids = []
+            for sid in bin_ids:
+                if sid.startswith('S') and sid[1:].isdigit():
+                    n = int(sid[1:])
+                    col = (n - 1) // 2 + 1
+                    row = (n - 1) % 2 + 1
+                    stock_ids.append(f"S{col}-{row}")
+                else:
+                    stock_ids.append(sid)
+            levels = self.stock.get_levels(stock_ids)
+        else:
+            levels = self.stock.get_levels(bin_ids)
         return [
             {
                 'bin_id': b['bin_id'],

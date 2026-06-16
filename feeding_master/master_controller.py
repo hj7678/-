@@ -209,6 +209,17 @@ class FeedingMasterController:
                 from scheduling.bin_config import BELT_BINS
                 bids = BELT_BINS.get(belt_id, [])
                 belted[belt_id] = [f"{bid}={level_map.get(bid,{}).get('level_pct',0):.0f}%" for bid in bids[:3]]
+            # D6: 映射S bin格式
+            if belt_id == 'D6':
+                belted[belt_id] = []
+                for bid in bids[:3]:
+                    if bid.startswith('S') and bid[1:].isdigit():
+                        n = int(bid[1:])
+                        c, r = (n-1)//2+1, (n-1)%2+1
+                        stock_id = f"S{c}-{r}"
+                        belted[belt_id].append(f"{bid}={level_map.get(stock_id,{}).get('level_pct',0):.0f}%")
+                    else:
+                        belted[belt_id].append(f"{bid}={level_map.get(bid,{}).get('level_pct',0):.0f}%")
             print(f"[FM-Stock] 料位: 总{total:.0f}t | " +
                   " | ".join(f"{b}:{','.join(v)}" for b,v in belted.items()), flush=True)
 
@@ -228,8 +239,15 @@ class FeedingMasterController:
             cart_target = ctx.cart_target_position
             target_bin = ctx.target_bin or ''
 
+            # D6: 高位仓S1→S1-1格式映射
+            stock_target = target_bin
+            if target_bin.startswith('S') and target_bin[1:].isdigit() and '-' not in target_bin:
+                n = int(target_bin[1:])
+                col = (n - 1) // 2 + 1
+                row = (n - 1) % 2 + 1
+                stock_target = f"S{col}-{row}"
             level = 0.0
-            b = level_map.get(target_bin, {})
+            b = level_map.get(stock_target, {})
             if b:
                 level = b.get('level_pct', 0)
 

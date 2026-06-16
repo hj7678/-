@@ -95,10 +95,17 @@ class SimulationFeedingBridge(QObject):
         levels = {}
         for bid, sb in ctrl.small_bins.items():
             levels[bid] = sb.current_level
-        # 高位仓 (S1-1 ~ S6-2)
+        # 高位仓: 仿真用S1-S12线性, Stock用S1-1~S6-2行列格式, 做映射
         if hasattr(ctrl, 'view') and ctrl.view:
             for sid, silo in ctrl.view.silo_compartments.items():
-                levels[sid] = silo.get('current_level', 0)
+                cur = silo.get('current_level', 0)
+                if sid.startswith('S') and sid[1:].isdigit():
+                    n = int(sid[1:])  # S1 → 1, S12 → 12
+                    col = (n - 1) // 2 + 1
+                    row = (n - 1) % 2 + 1
+                    levels[f"S{col}-{row}"] = cur
+                else:
+                    levels[sid] = cur
         if levels:
             self._stock.set_levels_batch(levels)
         # 消耗速率每60秒同步一次 (变化不频繁)
