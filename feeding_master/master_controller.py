@@ -315,8 +315,9 @@ class FeedingMasterController:
                 ctx.clearing_start_time = self._total_runtime if next_state.value == 'clearing' else getattr(ctx, 'clearing_start_time', 0)
                 print(' | '.join(parts), flush=True)
 
-                # 路线完成 → 自动续
+                # 路线完成 → 释放资源 + 自动续
                 if next_state.value in ('waiting', 'standby'):
+                    self.route_manager._release_resources(route_id)
                     belt_id = CART_TO_BELT.get(cart_id, '')
                     self.scheduler.mark_completed(belt_id)
                     nxt = self.scheduler.get_next_bin(belt_id)
