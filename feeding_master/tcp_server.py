@@ -124,7 +124,7 @@ class FeedingMasterServer:
     def _handle_upper(self, client: socket.socket, addr: tuple):
         buf = b""
         try:
-            client.settimeout(30.0)
+            client.settimeout(None)  # 不超时, 等桥接推送
             while self._running:
                 chunk = client.recv(4096)
                 if not chunk:

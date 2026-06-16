@@ -924,8 +924,6 @@ class SimulationController(QObject):
         for conv_id in route['conveyors']:
             conveyor = self.conveyors.get(conv_id)
             if not conveyor or not conveyor.is_running:
-                if route_id == 'route5':
-                    print(f"[SPAWN-DEBUG] route5 belt {conv_id} not running, skipping", flush=True)
                 return
 
         ctx = self.route_state_manager.get_route_context(route_id)
@@ -933,8 +931,6 @@ class SimulationController(QObject):
             return
 
         if ctx.state != RouteState.FEEDING:
-            if route_id == 'route5':
-                print(f"[SPAWN-DEBUG] route5 state={ctx.state.value} (not FEEDING), skipping", flush=True)
             return
 
         # 路线⑧⑨：自动选择发料S仓并扣减料位
@@ -3279,19 +3275,13 @@ class SimulationController(QObject):
 
             # FM接管: cart在目标位 → 直接转FEEDING
             if self._use_feeding_master and current_pos == target_pos:
-                found = False
                 for route_id in list(self.active_routes):
                     ctx = self.route_state_manager.get_route_context(route_id)
-                    if ctx and ctx.assigned_cart == cart_id:
-                        print(f"[FM-Cart-DEBUG] {cart_id} route={route_id} state={ctx.state.value} active_routes={list(self.active_routes)}", flush=True)
-                        if ctx.state == RouteState.MOVING_TO_TARGET:
-                            self.route_state_manager._transition(ctx, RouteState.FEEDING)
-                            ctx.cart_moving = False
-                            self.cart_sensor_positions[cart_id] = current_pos
-                            print(f"[FM-Cart] {cart_id} 已在目标→FEEDING", flush=True)
-                            found = True
-                if found:
-                    continue
+                    if ctx and ctx.assigned_cart == cart_id and ctx.state == RouteState.MOVING_TO_TARGET:
+                        self.route_state_manager._transition(ctx, RouteState.FEEDING)
+                        ctx.cart_moving = False
+                        self.cart_sensor_positions[cart_id] = current_pos
+                continue
 
             # 检查是否有小车需要移动
             needs_moving = False
