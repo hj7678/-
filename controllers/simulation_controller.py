@@ -3203,9 +3203,13 @@ class SimulationController(QObject):
             belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}")
 
             if ctx.state != RouteState.MOVING_TO_TARGET:
-                print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
-                belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET")
-                continue
+                if self._use_feeding_master:
+                    # FM接管: 状态已由FM同步, 但cart物理到达仍需处理
+                    ctx.cart_moving = False
+                else:
+                    print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
+                    belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET")
+                    continue
             cart_is_moving = self.cart4_is_moving if cart_id == 'Cart4' else ctx.cart_moving
             if not cart_is_moving:
                 print(f"[CartArrival] {cart_id} 跳过: cart_is_moving=False", flush=True)
