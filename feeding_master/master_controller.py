@@ -125,26 +125,27 @@ class FeedingMasterController:
         sim_active = set(data.get('active_routes', []))
         sim_states = data.get('route_states', {})
 
-        # 只同步传感器输入, 不重新处理路线激活/停用 (避免每100ms重复触发)
+        # FM判断cart到达: 比较桥接推送的cart位置与目标位置
         route_cart_moving = data.get('route_cart_moving', {})
         for route_id in sim_active & self._active_routes:
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
                 continue
-            was_moving = ctx.cart_moving
             ctx.cart_moving = route_cart_moving.get(route_id, ctx.cart_moving)
-            # cart物理到达: 仿真已转FEEDING, FM同步跟进
-            if was_moving and not ctx.cart_moving and ctx.state == RouteState.MOVING_TO_TARGET:
-                cart_at_target = False
-                if ctx.assigned_cart == 'Cart4':
-                    cart4_pos = self._cart4_position if hasattr(self, '_cart4_position') else 1
-                    cart_at_target = (cart4_pos == ctx.cart_target_position)
-                elif ctx.assigned_cart:
-                    cart_at_target = (self._cart_positions.get(ctx.assigned_cart, 1) == ctx.cart_target_position)
-                if cart_at_target:
+            if ctx.state == RouteState.MOVING_TO_TARGET:
+                cart_id = ctx.assigned_cart
+                if cart_id == 'Cart4':
+                    cur = self._cart4_position if hasattr(self, '_cart4_position') else 1
+                    moving = self._cart4_is_moving if hasattr(self, '_cart4_is_moving') else False
+                elif cart_id:
+                    cur = self._cart_positions.get(cart_id, 1)
+                    moving = ctx.cart_moving
+                else:
+                    continue
+                if not moving and cur == ctx.cart_target_position:
                     self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                     ctx.feeding_start_time = self._total_runtime
-                    print(f"[FM-Sync] {route_id} cart物理到达 → FEEDING", flush=True)
+                    print(f"[FM] {route_id} cart到达→FEEDING pos={cur}", flush=True)
 
         # 首次激活: 仅处理新出现的路线
         route_targets = data.get('route_targets', {})

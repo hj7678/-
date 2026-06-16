@@ -144,12 +144,25 @@ class SimulationFeedingBridge(QObject):
 
     def apply_commands(self, commands: List[dict]):
         ctrl = self._ctrl
-        # FM接管: 路线加入active_routes (从cart命令推断)
-        for cmd in commands:
-            if cmd.get('device') == 'cart':
-                rid = cmd.get('route_id', '')
-                if rid and rid not in ctrl.active_routes:
-                    ctrl.active_routes.add(rid)
+        # FM状态同步到仿真 (FM是权威)
+        rs = getattr(self, '_pending_route_states', {})
+        if rs:
+            self._pending_route_states = {}
+            from controllers.route_state_manager import RouteState
+            for rid, info in rs.items():
+                ctx = ctrl.route_state_manager.get_route_context(rid)
+                if not ctx: continue
+                try:
+                    new_s = RouteState(info.get('state', '')) if isinstance(info, dict) else None
+                    if new_s and new_s != ctx.state:
+                        ctrl.route_state_manager._transition(ctx, new_s)
+                    if new_s and new_s != RouteState.IDLE:
+                        ctrl.active_routes.add(rid)
+                except: pass
+                if isinstance(info, dict):
+                    if info.get('target_bin'): ctx.target_bin = info['target_bin']; ctrl.route_to_bin[rid] = info['target_bin']
+                    if info.get('cart_target'): ctx.cart_target_position = info['cart_target']
+                    ctx.cart_moving = info.get('cart_moving', False)
         for cmd in commands:
             device = cmd.get("device", "")
             dev_id = cmd.get("id", "")
