@@ -225,12 +225,12 @@ class FeedingMasterController:
             print(f"[FM-Stock] 料位: 总{total:.0f}t | " +
                   " | ".join(f"{b}:{','.join(v)}" for b,v in belted.items()), flush=True)
 
-        # 追踪指令变化 (仅变化时输出)
+        # 追踪指令变化: new_cmds继承prev_cmds, 未被本帧更新的保持原状态
         prev_cmds = getattr(self, '_last_commands', {})
 
         # 2. 遍历活跃路线，执行状态机
         commands = []
-        new_cmds = {}
+        new_cmds = dict(prev_cmds)  # 继承上帧: 打开的斗仍然是打开
         for route_id in list(self._active_routes):
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
@@ -418,32 +418,22 @@ class FeedingMasterController:
 
         # 指令变化时输出
         if new_cmds != prev_cmds:
-            self._last_commands = new_cmds
+            self._last_commands = dict(new_cmds)
             changed = {k: v for k, v in new_cmds.items() if prev_cmds.get(k) != v}
             added = {k: v for k, v in new_cmds.items() if k not in prev_cmds}
-            removed = {k for k in prev_cmds if k not in new_cmds}
             parts = []
             if added:
                 belts = [k.split(':')[1] for k in added if k.startswith('belt:')]
                 hoppers = [k.split(':')[1] for k in added if k.startswith('hopper:')]
                 carts = [(k.split(':')[1], v) for k, v in added.items() if k.startswith('cart:')]
-                if belts:
-                    parts.append(f"启动皮带: {','.join(belts)}")
-                if hoppers:
-                    parts.append(f"打开斗: {','.join(hoppers)}")
-                if carts:
-                    parts.append(f"小车: {', '.join(f'{c}{t}' for c,t in carts)}")
+                if belts: parts.append(f"启动皮带: {','.join(belts)}")
+                if hoppers: parts.append(f"打开斗: {','.join(hoppers)}")
+                if carts: parts.append(f"小车: {', '.join(f'{c}{t}' for c,t in carts)}")
             if changed:
-                belts = [k.split(':')[1] for k in changed if k.startswith('belt:')]
-                if belts:
-                    parts.append(f"皮带变速: {','.join(belts)}")
-            if removed:
-                belts = [k.split(':')[1] for k in removed if k.startswith('belt:')]
-                hoppers = [k.split(':')[1] for k in removed if k.startswith('hopper:')]
-                if belts:
-                    parts.append(f"停止皮带: {','.join(belts)}")
-                if hoppers:
-                    parts.append(f"关闭斗: {','.join(hoppers)}")
+                closed = [k.split(':')[1] for k, v in changed.items() if k.startswith('hopper:') and v == 'close']
+                stopped = [k.split(':')[1] for k, v in changed.items() if k.startswith('belt:') and v == 'stop']
+                if closed: parts.append(f"关闭斗: {','.join(closed)}")
+                if stopped: parts.append(f"停止皮带: {','.join(stopped)}")
             if parts:
                 print(f"[FM] 指令变化: {'; '.join(parts)}", flush=True)
 
