@@ -924,6 +924,8 @@ class SimulationController(QObject):
         for conv_id in route['conveyors']:
             conveyor = self.conveyors.get(conv_id)
             if not conveyor or not conveyor.is_running:
+                if route_id == 'route5':
+                    print(f"[SPAWN-DEBUG] route5 belt {conv_id} not running, skipping", flush=True)
                 return
 
         ctx = self.route_state_manager.get_route_context(route_id)
@@ -931,6 +933,8 @@ class SimulationController(QObject):
             return
 
         if ctx.state != RouteState.FEEDING:
+            if route_id == 'route5':
+                print(f"[SPAWN-DEBUG] route5 state={ctx.state.value} (not FEEDING), skipping", flush=True)
             return
 
         # 路线⑧⑨：自动选择发料S仓并扣减料位
