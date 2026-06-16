@@ -258,6 +258,9 @@ class FeedingMasterController:
                 # 继续使用当前 state (已是FEEDING)
 
             # 状态引擎判定
+            belt_id_for_engine = CART_TO_BELT.get(cart_id, '')
+            has_next = bool(self.scheduler.get_next_bin(belt_id_for_engine)) if belt_id_for_engine else False
+            has_seq = self.scheduler.has_sequence(belt_id_for_engine) if belt_id_for_engine else False
             next_state, actions = self.state_engine.evaluate(
                 route_id, ctx.state,
                 level_sensors={'__target__': level},
@@ -266,6 +269,8 @@ class FeedingMasterController:
                 cart_moving=ctx.cart_moving,
                 cart=cart_id,
                 clearing_strategy=strategy,
+                schedule_has_next=has_next,
+                schedule_next_round_empty=(not has_seq and not has_next),
                 current_time=self._total_runtime,
                 sensor_clear_timers=sensor_clear_timers or None,
                 sensor_clear_timeouts=sensor_clear_timeouts or None,
