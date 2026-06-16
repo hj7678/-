@@ -138,39 +138,44 @@ class SimulationFeedingBridge(QObject):
         else:
             commands = msg.get('commands', [])
             route_states = msg.get('route_states', {})
-        from controllers.route_state_manager import RouteState
-        for rid, info in route_states.items():
-            ctx = self._ctrl.route_state_manager.get_route_context(rid)
-            if not ctx:
-                continue
-            state_str = info.get('state', '') if isinstance(info, dict) else info
-            try:
-                new_s = RouteState(state_str) if state_str else None
-                if new_s and new_s != ctx.state:
-                    # FM接管: 仿真物理层已推进到FEEDING+时, 不让FM的MOVE回退
-                    skip = (self._ctrl._use_feeding_master
-                            and ctx.state in (RouteState.FEEDING, RouteState.CLEARING, RouteState.WAITING)
-                            and new_s == RouteState.MOVING_TO_TARGET)
-                    if not skip:
-                        self._ctrl.route_state_manager._transition(ctx, new_s)
-                if new_s and new_s != RouteState.IDLE:
-                    self._ctrl.active_routes.add(rid)
-            except (ValueError, AttributeError):
-                pass
-            # FM接管: 同步target_bin + cart_target
-            if self._ctrl._use_feeding_master and isinstance(info, dict):
-                tb = info.get('target_bin', '')
-                if tb:
-                    ctx.target_bin = tb
-                    self._ctrl.route_to_bin[rid] = tb
-                ct = info.get('cart_target', 0)
-                if ct:
-                    ctx.cart_target_position = ct
-                ctx.cart_moving = info.get('cart_moving', False)
+        # 路线状态同步推迟到主线程 apply_commands 中处理
+        self._pending_route_states = route_states
         self.command_received.emit(commands)
 
     def apply_commands(self, commands: List[dict]):
         ctrl = self._ctrl
+        # 在主线程同步路线状态 (避免recv线程与主线程竞态)
+        rs = getattr(self, '_pending_route_states', {})
+        if rs:
+            self._pending_route_states = {}
+            from controllers.route_state_manager import RouteState
+            for rid, info in rs.items():
+                ctx = ctrl.route_state_manager.get_route_context(rid)
+                if not ctx:
+                    continue
+                state_str = info.get('state', '') if isinstance(info, dict) else info
+                try:
+                    new_s = RouteState(state_str) if state_str else None
+                    if new_s and new_s != ctx.state:
+                        if (ctrl._use_feeding_master
+                                and new_s == RouteState.MOVING_TO_TARGET
+                                and ctx.state.value in ('feeding', 'clearing', 'waiting', 'standby')):
+                            pass
+                        else:
+                            ctrl.route_state_manager._transition(ctx, new_s)
+                    if new_s and new_s != RouteState.IDLE:
+                        ctrl.active_routes.add(rid)
+                except (ValueError, AttributeError):
+                    pass
+                if ctrl._use_feeding_master and isinstance(info, dict):
+                    tb = info.get('target_bin', '')
+                    if tb:
+                        ctx.target_bin = tb
+                        ctrl.route_to_bin[rid] = tb
+                    ct = info.get('cart_target', 0)
+                    if ct:
+                        ctx.cart_target_position = ct
+                    ctx.cart_moving = info.get('cart_moving', False)
         for cmd in commands:
             device = cmd.get("device", "")
             dev_id = cmd.get("id", "")
