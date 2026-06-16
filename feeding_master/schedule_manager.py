@@ -51,9 +51,8 @@ class ScheduleManager:
         self._last_request: Dict[str, float] = {}
         self._last_emergency: Dict[str, float] = {}
 
-        # 防抖
+        # 防抖: 每个belt每次tick最多触发一次
         self._tick_triggered: set = set()
-        self._in_flight: set = set()  # 正在处理中的请求, 防止并发
 
         self._on_sequence: Optional[callable] = None
 
@@ -120,15 +119,8 @@ class ScheduleManager:
         return True
 
     def request_schedule_now(self, belt_id: str):
-        """强制请求调度（忽略冷却和阈值）"""
-        if belt_id in self._in_flight:
-            return
-        self._in_flight.add(belt_id)
-        bins = self._get_belt_bins(belt_id)
-        if not bins:
-            self._in_flight.discard(belt_id)
-            return
-        self._do_send(belt_id, bins)
+        """强制请求调度（忽略冷却）"""
+        self._request_schedule(belt_id)
 
     # ── 构建请求 ──
 
@@ -165,18 +157,12 @@ class ScheduleManager:
 
     def _request_schedule(self, belt_id: str):
         """发送调度请求到调度服务"""
-        if belt_id in self._tick_triggered or belt_id in self._in_flight:
+        if belt_id in self._tick_triggered:
             return
         self._tick_triggered.add(belt_id)
-        self._in_flight.add(belt_id)
 
         bins = self._get_belt_bins(belt_id)
         if not bins:
-            return
-
-        # 检查是否有料仓真正低于阈值 (避免全0虚警)
-        any_below = any(b['stock'] < IDLE_THRESHOLD_TONS for b in bins)
-        if not any_below:
             return
 
         cart_id = BELT_TO_CART.get(belt_id, '')
@@ -198,35 +184,13 @@ class ScheduleManager:
             "right_divert": right_div,
         }
 
-        # 异步发送 (持久连接)
-        t = threading.Thread(target=self._send_and_recv, args=(belt_id, payload), daemon=True)
-        t.start()
-
-    def _do_send(self, belt_id: str, bins: List[dict]):
-        cart_id = BELT_TO_CART.get(belt_id, '')
-        cart_pos = self._cart_positions.get(cart_id, 1) if hasattr(self, '_cart_positions') else 1
-        left_div, right_div = False, False
-        if hasattr(self, '_cart_divert'):
-            left_div, right_div = self._cart_divert.get(cart_id, (False, False))
-        if belt_id == 'D8':
-            cart_pos = self._map_d8_pos(cart_pos, left_div, right_div)
-        payload = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "belt_id": belt_id,
-            "boost_mode": False,
-            "bins": bins,
-            "cart_position": cart_pos,
-            "left_divert": left_div,
-            "right_divert": right_div,
-        }
         t = threading.Thread(target=self._send_and_recv, args=(belt_id, payload), daemon=True)
         t.start()
 
     def _send_and_recv(self, belt_id: str, payload: dict):
-        """短连接发送"""
+        """短连接发送 (调度请求不频繁, 避免持久连接竞态)"""
         port = SCHEDULING_PORTS.get(belt_id)
         if not port:
-            self._in_flight.discard(belt_id)
             return
         sock = None
         try:
@@ -249,7 +213,6 @@ class ScheduleManager:
         except Exception as e:
             print(f"[FM-Sched] {belt_id} 调度请求失败: {e}", file=sys.stderr)
         finally:
-            self._in_flight.discard(belt_id)
             if sock:
                 try:
                     sock.close()
