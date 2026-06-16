@@ -175,10 +175,10 @@ class SimulationFeedingBridge(QObject):
                     ct = info.get('cart_target', 0)
                     if ct:
                         ctx.cart_target_position = ct
-                    # cart_moving: FM=True不覆盖仿真已检测的False(物理到达优先)
-                    fm_cm = info.get('cart_moving', False)
-                    if not (fm_cm and not ctx.cart_moving):
-                        ctx.cart_moving = fm_cm
+                    # 状态被拦截时不覆盖cart_moving (sim物理到达优先)
+                    if not (new_s and new_s == RouteState.MOVING_TO_TARGET
+                            and ctx.state.value in ('feeding', 'clearing', 'waiting', 'standby')):
+                        ctx.cart_moving = info.get('cart_moving', False)
         for cmd in commands:
             device = cmd.get("device", "")
             dev_id = cmd.get("id", "")
