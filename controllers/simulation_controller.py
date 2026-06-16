@@ -148,6 +148,7 @@ class SimulationController(QObject):
         self._tcp_scheduling_client = None
         # FeedingMaster 桥接 (仿真 → 上料主控)
         self._feeding_bridge = None
+        self._use_feeding_master = False  # True=FM接管决策, False=仿真自己决策
         # Stock Management 拉回的料位 (用于 HMI 显示，不影响 small_bins 仿真逻辑)
         self.display_levels: Dict[str, float] = {}
         # 诊断模式："local" / "tcp"
@@ -1067,19 +1068,18 @@ class SimulationController(QObject):
                 print(f"[清理] materials: {old_count} → {len(self.materials)} (移除{old_count - len(self.materials)}个)", flush=True)
                 belt_log('system').info(f"[清理] materials: {old_count} → {len(self.materials)} (移除{old_count - len(self.materials)}个)")
 
-        # 检查料位是否达到阈值，触发清空状态
-        self._check_level_thresholds()
-
-        # 更新清空传感器计时器
-        self._update_clearing_sensor_timers()
-        # 检查CLEARING状态是否完成余料清空
-        self._check_clearing_completion()
-
-        # 自动上料：空闲皮带检查是否有料仓低于70%需触发调度
-        self._check_auto_feed_idle()
-
-        # 检查待停止路线是否完成余料清空
-        self._check_pending_stop_routes()
+        # FeedingMaster接管模式: 跳过仿真自身决策
+        if not self._use_feeding_master:
+            # 检查料位是否达到阈值，触发清空状态
+            self._check_level_thresholds()
+            # 更新清空传感器计时器
+            self._update_clearing_sensor_timers()
+            # 检查CLEARING状态是否完成余料清空
+            self._check_clearing_completion()
+            # 自动上料：空闲皮带检查是否有料仓低于70%需触发调度
+            self._check_auto_feed_idle()
+            # 检查待停止路线是否完成余料清空
+            self._check_pending_stop_routes()
 
         # 生成传感器数据并写入JSON文件（每秒一次）
         if self.enable_sensor_data_generation:
@@ -1735,30 +1735,40 @@ class SimulationController(QObject):
         print("[桥接] FeedingMaster 桥接已停止", flush=True)
 
     def _on_feeding_commands(self, commands: list):
-        """收到 FeedingMaster 控制指令 (并行监控: 仅打印, 不执行)"""
+        """收到 FeedingMaster 控制指令"""
         if not commands:
             return
-        # 限频: 最多每2秒打印一次
-        now = self.total_runtime
-        last = getattr(self, '_last_fm_cmd_print', 0)
-        if now - last < 2.0:
-            return
-        self._last_fm_cmd_print = now
 
-        carts = [c for c in commands if c.get('device') == 'cart']
-        belts = [c for c in commands if c.get('device') == 'belt']
-        hoppers = [c for c in commands if c.get('device') == 'hopper']
-        parts = []
-        if belts:
-            actions = set(c['action'] for c in belts)
-            parts.append(f"皮带{len(belts)}条({','.join(sorted(actions))})")
-        if hoppers:
-            actions = set(c['action'] for c in hoppers)
-            parts.append(f"斗{len(hoppers)}个({','.join(sorted(actions))})")
-        if carts:
-            parts.append(f"小车{carts[0]['id']}→{carts[0].get('target','?')}")
-        if parts:
-            print(f"[桥接-FM] 收到指令: {', '.join(parts)} [未执行]", flush=True)
+        if self._use_feeding_master:
+            # 接管模式: 执行FM指令替代仿真决策
+            self._feeding_bridge.apply_commands(commands)
+        else:
+            # 监控模式: 仅打印对比
+            now = self.total_runtime
+            last = getattr(self, '_last_fm_cmd_print', 0)
+            if now - last < 2.0:
+                return
+            self._last_fm_cmd_print = now
+            carts = [c for c in commands if c.get('device') == 'cart']
+            belts = [c for c in commands if c.get('device') == 'belt']
+            hoppers = [c for c in commands if c.get('device') == 'hopper']
+            parts = []
+            if belts:
+                actions = set(c['action'] for c in belts)
+                parts.append(f"皮带{len(belts)}条({','.join(sorted(actions))})")
+            if hoppers:
+                actions = set(c['action'] for c in hoppers)
+                parts.append(f"斗{len(hoppers)}个({','.join(sorted(actions))})")
+            if carts:
+                parts.append(f"小车{carts[0]['id']}→{carts[0].get('target','?')}")
+            if parts:
+                print(f"[桥接-FM] 收到指令: {', '.join(parts)} [未执行]", flush=True)
+
+    def set_use_feeding_master(self, enabled: bool):
+        """切换决策模式: True=FeedingMaster接管, False=仿真自己决策"""
+        self._use_feeding_master = enabled
+        mode = "FM接管" if enabled else "仿真自决"
+        print(f"[模式] 决策模式切换为: {mode}", flush=True)
 
     def _on_display_levels_updated(self, levels: list):
         """Stock Management 料位 → display_levels (仅 HMI 显示，不影响仿真逻辑)"""

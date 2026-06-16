@@ -135,6 +135,13 @@ class MainWindow(QMainWindow):
         self.top_bridge_btn.setStyleSheet(self.top_sched_btn.styleSheet())
         top_bar_layout.addWidget(self.top_bridge_btn)
 
+        self.top_fm_btn = QPushButton("FM接管")
+        self.top_fm_btn.setCheckable(True)
+        self.top_fm_btn.setFixedSize(56, 32)
+        self.top_fm_btn.setToolTip("FeedingMaster 接管决策: ON=FM控制仿真, OFF=仿真自决(监控模式)")
+        self.top_fm_btn.setStyleSheet(self.top_sched_btn.styleSheet())
+        top_bar_layout.addWidget(self.top_fm_btn)
+
         self.top_auto_btn = QPushButton("全部自动")
         self.top_auto_btn.setCheckable(True)
         self.top_auto_btn.setFixedSize(72, 32)
@@ -358,6 +365,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'top_sched_btn'):
             self.top_sched_btn.clicked.connect(self._on_scheduling_tcp_toggled)
             self.top_bridge_btn.clicked.connect(self._on_bridge_toggled)
+            self.top_fm_btn.clicked.connect(self._on_fm_takeover_toggled)
             self.top_auto_btn.clicked.connect(self._on_auto_mode_toggled)
         if hasattr(self, '_top_belt_btns'):
             for belt_id, btn in self._top_belt_btns.items():
@@ -615,7 +623,16 @@ class MainWindow(QMainWindow):
             self.controller.start_feeding_bridge()
         else:
             self.controller.stop_feeding_bridge()
+            # 关闭桥接时同步关闭FM接管
+            if hasattr(self, 'top_fm_btn'):
+                self.top_fm_btn.setChecked(False)
+            self.controller.set_use_feeding_master(False)
         self._update_status_bar(f"桥接模式: {'开' if enabled else '关'}")
+
+    def _on_fm_takeover_toggled(self, enabled: bool):
+        """FM接管开关 — FeedingMaster 接管仿真决策"""
+        self.controller.set_use_feeding_master(enabled)
+        self._update_status_bar(f"FM接管: {'开' if enabled else '关(监控)'}")
 
     def _on_auto_mode_toggled(self, enabled: bool):
         """全部皮带自动模式切换"""
