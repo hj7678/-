@@ -239,9 +239,9 @@ class FeedingMasterController:
                 continue
 
             cart_id = ctx.assigned_cart or ''
+            cart_target = ctx.cart_target_position  # 先赋值, 下面Cart4块要用
             if cart_id == 'Cart4':
                 cart_pos = max(1, self._cart4_position)
-                # FM刚激活路线时bridge还没推送cart4位置, 保守设为moving
                 if ctx.state == RouteState.MOVING_TO_TARGET and not self._cart4_is_moving:
                     if cart_pos == cart_target:
                         ctx.cart_moving = True  # 保守: 等bridge确认到达
@@ -249,7 +249,6 @@ class FeedingMasterController:
                     ctx.cart_moving = self._cart4_is_moving
             else:
                 cart_pos = self._cart_positions.get(cart_id, 1)
-            cart_target = ctx.cart_target_position
             target_bin = ctx.target_bin or ''
 
             # D6: 高位仓S1→S1-1格式映射
