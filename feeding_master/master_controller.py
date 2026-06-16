@@ -347,7 +347,7 @@ class FeedingMasterController:
                 ctx.clearing_start_time = self._total_runtime if next_state.value == 'clearing' else getattr(ctx, 'clearing_start_time', 0)
                 print(' | '.join(parts), flush=True)
 
-                # 路线完成 → 释放资源 + 自动续
+                # 路线完成 → 释放资源 (自动续料推迟到指令发送之后)
                 if next_state.value in ('waiting', 'standby'):
                     self.route_manager._release_resources(route_id)
                     belt_id = CART_TO_BELT.get(cart_id, '')
@@ -355,10 +355,7 @@ class FeedingMasterController:
                     nxt = self.scheduler.get_next_bin(belt_id)
                     if nxt:
                         self.scheduler.pop_next_bin(belt_id)
-                        route_id2 = self._pick_route_for_bin(belt_id, nxt)
-                        if route_id2:
-                            if self.activate_route(route_id2, nxt):
-                                print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
+                        self._pending_auto_continue = (belt_id, nxt)
 
             # 执行器命令
             route_conveyors = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
@@ -387,9 +384,11 @@ class FeedingMasterController:
                 if strategy == 'column_switch':
                     hopper_cmds = {hid: ActuatorAction.OPEN for hid in ctx.assigned_hoppers}
                 for hid, action in hopper_cmds.items():
+                    # 同斗多路线: 最后处理的路线指令覆盖前面的
+                    key = f"hopper:{hid}"
                     cmd = {'device': 'hopper', 'id': hid, 'action': action.value}
                     commands.append(cmd)
-                    new_cmds[f"hopper:{hid}"] = action.value
+                    new_cmds[key] = action.value  # 后写覆盖先写
 
             elif ctx.state == RouteState.WAITING and route_conveyors:
                 # WAITING: 非终点皮带保持运行, 仅终点皮带已在上方状态转换中停止
@@ -455,6 +454,16 @@ class FeedingMasterController:
                         'cart_moving': ctx.cart_moving,
                     }
             self.server.send_commands(commands, route_info)
+
+        # 5. 延迟自动续料: 等上一轮的关闭斗指令先执行, 下一tick再开新路线
+        pending = getattr(self, '_pending_auto_continue', None)
+        if pending:
+            self._pending_auto_continue = None
+            belt_id, nxt = pending
+            route_id2 = self._pick_route_for_bin(belt_id, nxt)
+            if route_id2:
+                if self.activate_route(route_id2, nxt):
+                    print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
     # ── 外部接口 ──
 
