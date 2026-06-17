@@ -731,6 +731,8 @@ class MainWindow(QMainWindow):
             self.controller.stop_udp_sender()
 
     def _on_diagnosis_mode_changed(self, mode: str):
+        if self.controller._use_feeding_master:
+            return  # FM接管: 诊断结果由FM推送, 不切换
         self.controller.set_diagnosis_mode(mode)
 
     def _on_diagnosis_tcp_toggled(self, enabled: bool):
