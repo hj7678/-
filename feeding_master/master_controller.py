@@ -703,7 +703,7 @@ class FeedingMasterController:
         print("[FM] 急停! 全部设备已停止", flush=True)
 
     def _on_manual_stop(self, route_id: str):
-        """手动停止: 逐步进入STANDBY"""
+        """手动停止: 根据当前状态决定行为"""
         if route_id not in self._active_routes:
             return
         ctx = self.route_manager.get_route_context(route_id)
@@ -711,19 +711,46 @@ class FeedingMasterController:
             return
         cart_id = ctx.assigned_cart or ''
         belt_id = CART_TO_BELT.get(cart_id, '')
-        self.route_manager._release_resources(route_id)
-        self.scheduler.mark_completed(belt_id)
-        # 清除待执行的自动续料 (防止stop后被auto-continue覆盖)
+        # 清除调度序列 (停止后不再自动续料)
+        self.scheduler._sequences.pop(belt_id, None)
         if getattr(self, '_pending_auto_continue', (None, None))[0] == belt_id:
             self._pending_auto_continue = None
-        # 清除该belt的调度序列 (防止stop后scheduler重新激活)
-        self.scheduler._sequences.pop(belt_id, None)
-        self.route_manager.set_route_state(route_id, RouteState.STANDBY)
-        self._active_routes.discard(route_id)
-        if not hasattr(self, '_deactivated_routes'):
-            self._deactivated_routes = set()
-        self._deactivated_routes.add(route_id)
-        print(f"[FM] 手动停止: {route_id} → STANDBY", flush=True)
+
+        if ctx.state == RouteState.FEEDING:
+            # 上料中 → 立即清空余料
+            self.route_manager.set_route_state(route_id, RouteState.CLEARING)
+            ctx.clearing_start_time = self._total_runtime
+            print(f"[FM] 手动停止: {route_id} FEEDING→CLEARING", flush=True)
+        elif ctx.state == RouteState.CLEARING:
+            # 清空中 → 完成后节能待机(不自动续料, 上面已清序列)
+            self.route_manager._release_resources(route_id)
+            self.scheduler.mark_completed(belt_id)
+            self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+            self._active_routes.discard(route_id)
+            if not hasattr(self, '_deactivated_routes'):
+                self._deactivated_routes = set()
+            self._deactivated_routes.add(route_id)
+            print(f"[FM] 手动停止: {route_id} CLEARING→STANDBY", flush=True)
+        elif ctx.state == RouteState.WAITING:
+            # 等待续料 → 直接节能待机
+            self.route_manager._release_resources(route_id)
+            self.scheduler.mark_completed(belt_id)
+            self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+            self._active_routes.discard(route_id)
+            if not hasattr(self, '_deactivated_routes'):
+                self._deactivated_routes = set()
+            self._deactivated_routes.add(route_id)
+            print(f"[FM] 手动停止: {route_id} WAITING→STANDBY", flush=True)
+        else:
+            # MOVING_TO_TARGET等 → 直接停
+            self.route_manager._release_resources(route_id)
+            self.scheduler.mark_completed(belt_id)
+            self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+            self._active_routes.discard(route_id)
+            if not hasattr(self, '_deactivated_routes'):
+                self._deactivated_routes = set()
+            self._deactivated_routes.add(route_id)
+            print(f"[FM] 手动停止: {route_id} {ctx.state.value}→STANDBY", flush=True)
 
     def deactivate_route(self, route_id: str):
         """停用路线"""

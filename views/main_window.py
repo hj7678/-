@@ -515,24 +515,6 @@ class MainWindow(QMainWindow):
                 # FM接管: 通知FM停止路线
                 if self.controller._feeding_bridge is not None:
                     self.controller._feeding_bridge.send_manual_stop(route_id)
-                    # 本地立即停止: 停止所有皮带+关斗, 设为IDLE (不等FM响应)
-                    route_cfg = config.FEED_ROUTES.get(route_id, {})
-                    for cid in route_cfg.get('conveyors', []):
-                        conv = self.controller.conveyors.get(cid)
-                        if conv: conv.stop()
-                    for hid in route_cfg.get('hoppers', []):
-                        if hid:
-                            hp = self.controller.hoppers.get(hid)
-                            if hp: hp.is_open = False
-                    ctx = self.controller.route_state_manager.get_route_context(route_id)
-                    if ctx:
-                        from controllers.route_state_manager import RouteState
-                        self.controller.route_state_manager._transition(ctx, RouteState.STANDBY)
-                    self.controller.active_routes.discard(route_id)
-                    # 清除桥接pending状态(防止FM下一帧指令覆盖)
-                    if hasattr(self.controller, '_feeding_bridge') and self.controller._feeding_bridge:
-                        self.controller._feeding_bridge._pending_route_states = {}
-                    self.controller.mark_dirty()
                     self._update_status_bar(f"FM手动停止: {route_name}")
                 return
         if enable:
