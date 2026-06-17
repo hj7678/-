@@ -346,7 +346,7 @@ class FeedingMasterController:
                 ctx.clearing_start_time = self._total_runtime if next_state.value == 'clearing' else getattr(ctx, 'clearing_start_time', 0)
                 print(' | '.join(parts), flush=True)
 
-                # 路线完成 → 释放资源 (自动续料推迟到指令发送之后)
+                # 路线完成 → 释放资源 + 自动续料/节能待机
                 if next_state.value in ('waiting', 'standby'):
                     self.route_manager._release_resources(route_id)
                     belt_id = CART_TO_BELT.get(cart_id, '')
@@ -355,6 +355,18 @@ class FeedingMasterController:
                     if nxt:
                         self.scheduler.pop_next_bin(belt_id)
                         self._pending_auto_continue = (belt_id, nxt)
+                    else:
+                        # 无下一仓: 进入节能待机, 停止所有皮带
+                        self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+                        route_convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
+                        for cid in route_convs:
+                            commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                            new_cmds[f"belt:{cid}"] = 'stop'
+                        for hid in ctx.assigned_hoppers:
+                            commands.append({'device': 'hopper', 'id': hid, 'action': 'close'})
+                            new_cmds[f"hopper:{hid}"] = 'close'
+                        parts.append("节能待机")
+                        ctx.clearing_start_time = 0
 
             # 执行器命令
             route_conveyors = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
