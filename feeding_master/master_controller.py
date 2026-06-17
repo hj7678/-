@@ -454,29 +454,7 @@ class FeedingMasterController:
                 'executing_bin': dict(self.scheduler._executing_bin),
                 'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
             }
-            # 操作日志 (含已停用路线: STANDBY消息)
-            oplog = []
-            _last_opl = getattr(self, '_last_oplog_state', {})
-            for rid in list(self._active_routes) + list(getattr(self, '_deactivated_routes', set())):
-                ctx = self.route_manager.get_route_context(rid)
-                if ctx and ctx.state != RouteState.IDLE:
-                    cart_id = ctx.assigned_cart or ''
-                    pos = self._cart_positions.get(cart_id, 1) if cart_id else 0
-                    target = ctx.target_bin or ''
-                    key = f"{rid}:{ctx.state.value}:{pos}"
-                    if key != _last_opl.get(rid, ''):
-                        _last_opl[rid] = key
-                        state_label = {
-                            'moving_to_target': f"路线{rid} 小车{cart_id} pos={pos}→{ctx.cart_target_position}",
-                            'feeding': f"路线{rid} 上料中 → {target}",
-                            'clearing': f"路线{rid} 清空余料中 → {target}",
-                            'waiting': f"路线{rid} → {target} 上料完成",
-                            'standby': f"路线{rid} 节能待机",
-                        }.get(ctx.state.value, f"路线{rid} {ctx.state.value}")
-                        oplog.append({'route_id': rid, 'state': ctx.state.value,
-                                      'msg': state_label, 'target': target})
-            self._last_oplog_state = _last_opl
-            self.server.send_commands(commands, route_info, sched_info, oplog)
+            self.server.send_commands(commands, route_info, sched_info)
             if hasattr(self, '_deactivated_routes'):
                 self._deactivated_routes.clear()
 
