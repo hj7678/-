@@ -71,9 +71,6 @@
     "scheduling_active": true,
     "route_targets": {
       "route1": "P1-1", "route5": "S3"
-    },
-    "route_cart_moving": {
-      "route1": false, "route5": true
     }
   }
 }
@@ -119,13 +116,23 @@
 
 `hopper_states` 值为 `true`=开，`false`=关。`hopper_weights` 为当前吨数（float）。
 
-**`cart_positions`** — Cart1/2/3 物理位置（int, 1-7）：
+**`cart_positions`** — 4 个小车物理位置（int, 18s/格移动）：
 
-| ID | 所在皮带 | 说明 |
-|-----|---------|------|
-| Cart1 | D7 | P1 配料站 |
-| Cart2 | D8 | P2/P3 配料站 |
-| Cart3 | D9 | P4 配料站 |
+| ID | 所在皮带 | 位置范围 | 配料站 |
+|-----|---------|---------|--------|
+| Cart1 | D7 | 1-7 | P1 |
+| Cart2 | D8 | 1-7 | P2/P3 |
+| Cart3 | D9 | 1-7 | P4 |
+| Cart4 | D6 | 1-6 | 高位储料仓 S1~S12 |
+
+**`cart_moving`** — 4 个小车的移动状态（bool）：
+
+| ID | 说明 |
+|-----|------|
+| Cart1 | D7 小车是否在 18s/格 移动中 |
+| Cart2 | D8 小车是否在 18s/格 移动中 |
+| Cart3 | D9 小车是否在 18s/格 移动中 |
+| Cart4 | D6 小车是否在 18s/格 移动中 |
 
 **`cart_divert`** — 分料传感器，`[左分料, 右分料]`，Cart1 永远 `[true,false]`，Cart2 可变，Cart3 永远 `[false,true]`。
 
@@ -135,10 +142,6 @@
 |------|---------|
 | E 系列 | E1, E2, E4, E5, E6, E7, E8, E9, E10 |
 | D 系列 | D1, D2, D3, D4, D5, D6, D7, D8, D9, D13 |
-
-**`cart4_position`** — Cart4 物理位置（int, 1-6），D6 高位储料仓。
-
-**`cart4_is_moving`** — Cart4 是否在 18s/格 物理移动中。
 
 **`active_routes`** — 当前活跃路线（`string[]`），路线 ID: `route1` ~ `route8`。
 
@@ -156,8 +159,6 @@
 **`scheduling_active`** — `bool`，UI"调度服务"按钮状态。
 
 **`route_targets`** — 每条路线当前目标料仓 ID。P 仓格式 `P{列}-{行}`（如 `P1-1`），S 仓格式 `S{编号}`（如 `S3`，编号 1-12）。
-
-**`route_cart_moving`** — 每条路线的小车是否在移动（`bool`）。
 
 ---
 
@@ -180,9 +181,26 @@
 {"type": "manual_stop", "route_id": "route1"}
 ```
 
+FM 收到后根据路线当前状态分级处理：
+
+| 路线状态 | FM 行为 |
+|---------|---------|
+| FEEDING | → CLEARING（立即清空）→ 等清空完成 → STANDBY |
+| CLEARING | 保持清空 → 等完成 → STANDBY |
+| WAITING | → STANDBY（立即） |
+| MOVING_TO_TARGET | → STANDBY（立即） |
+
+所有情况下清除自动续料序列，停止后不会再被覆盖。
+
 ---
 
 ### 1.4 emergency_stop — 急停
+
+```json
+{"type": "emergency_stop"}
+```
+
+FM 收到后立即停止全部皮带、关闭全部斗、释放所有路线资源。仅在手动模式（调度服务关闭）下可用。
 
 ```json
 {"type": "emergency_stop"}
@@ -252,7 +270,7 @@
 | `cart_target` | int | 小车目标位置 |
 | `cart_moving` | bool | 小车是否移动中 |
 
-IDLE 状态的路线只含 `state` 字段（用于通知上位机移除路线）。
+`state: "idle"` 的路线表示已停用，上位机应从 `active_routes` 中移除该路线。停用的路线只含 `state` 字段。
 
 #### 2.1.3 `schedule` — 调度序列
 
