@@ -63,13 +63,9 @@ class ScheduleManager:
     # ── 每周期 tick ──
 
     def set_active(self, active: bool):
-        was_inactive = not getattr(self, '_active', False)
         self._active = active
-        # 首次激活: 强制请求全部皮带调度
-        if active and was_inactive:
-            print("[FM-Sched] 调度服务已激活, 强制请求初始调度", flush=True)
-            for belt_id in ['D7', 'D8', 'D9', 'D6']:
-                self.request_schedule_now(belt_id)
+        if active:
+            print("[FM-Sched] 调度服务已激活", flush=True)
 
     def tick(self, total_runtime: float):
         """检查是否需要触发调度"""
