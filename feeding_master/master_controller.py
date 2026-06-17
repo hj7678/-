@@ -119,6 +119,7 @@ class FeedingMasterController:
         self._cart_divert = {
             k: tuple(v) for k, v in data.get('cart_divert', {}).items()
         }
+        self._cart_limits = data.get('cart_limits', {})
         self.scheduler.update_cart_state(self._cart_positions, self._cart_divert)
         # 同步调度开关: UI点击"调度服务"后FM才开始请求调度
         self.scheduler.set_active(data.get('scheduling_active', False))
@@ -143,37 +144,7 @@ class FeedingMasterController:
                     ctx.feeding_start_time = self._total_runtime
                     print(f"[FM] {route_id} cart到达→FEEDING pos={cur}", flush=True)
 
-        # 首次激活: 仅处理新出现的路线
-        route_targets = data.get('route_targets', {})
-        for route_id in sim_active - self._active_routes:
-            ctx = self.route_manager.get_route_context(route_id)
-            target = route_targets.get(route_id, '')
-            state_str = sim_states.get(route_id, 'idle') if isinstance(sim_states, dict) else 'idle'
-
-            if target and ctx:
-                ctx.target_bin = target
-                # 从 target_bin 推算小车目标位置
-                if '-' in target:
-                    try:
-                        ctx.cart_target_position = int(target.split('-')[1])
-                    except ValueError:
-                        pass
-                if state_str != 'idle':
-                    try:
-                        new_state = RouteState(state_str)
-                        self.route_manager._transition(ctx, new_state)
-                    except ValueError:
-                        pass
-
-            self._active_routes.add(route_id)
-            # 标记为执行中, 防止调度器重复激活
-            belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
-            if belt_id and target:
-                self.scheduler.mark_executing(belt_id, route_id, target)
-            print(f"[FeedingMaster] 路线 {route_id} [{state_str}]" +
-                  (f" → {target}" if target else "") + " 已同步", flush=True)
-
-        # FM自主管理路线生命周期, 不从仿真同步移除
+        # FM自主管理路线生命周期, 不从仿真同步添加/移除
 
     # ── 主循环 ──
 
@@ -715,8 +686,9 @@ class FeedingMasterController:
         self.scheduler._sequences.pop(belt_id, None)
         if getattr(self, '_pending_auto_continue', (None, None))[0] == belt_id:
             self._pending_auto_continue = None
-        # 清除scheduler执行追踪(防止idle检测重新触发)
+        # 清除scheduler状态(防止idle检测重新触发)
         self.scheduler.mark_completed(belt_id)
+        self.scheduler._last_request[belt_id] = self._total_runtime  # 重置冷却
 
         if ctx.state == RouteState.FEEDING:
             self.route_manager.set_route_state(route_id, RouteState.CLEARING)

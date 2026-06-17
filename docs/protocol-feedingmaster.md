@@ -48,7 +48,14 @@
     "cart_divert": {
       "Cart1": [true, false],
       "Cart2": [true, false],
-      "Cart3": [false, true]
+      "Cart3": [false, true],
+      "Cart4": [true, false]
+    },
+    "cart_limits": {
+      "Cart1": [false, false],
+      "Cart2": [false, false],
+      "Cart3": [false, false],
+      "Cart4": [false, false]
     },
     "belt_states": {
       "E1": false, "E2": false, "E4": false, "E5": false,
@@ -134,7 +141,23 @@
 | Cart3 | D9 小车是否在 18s/格 移动中 |
 | Cart4 | D6 小车是否在 18s/格 移动中 |
 
-**`cart_divert`** — 分料传感器，`[左分料, 右分料]`，Cart1 永远 `[true,false]`，Cart2 可变，Cart3 永远 `[false,true]`。
+**`cart_divert`** — 4 个小车分料传感器 `[左分料, 右分料]`：
+
+| ID | 左分料=true | 右分料=true | 说明 |
+|-----|-----------|-----------|------|
+| Cart1 | 始终 | — | 只负责 P1 |
+| Cart2 | P2 | P3 | 可变 |
+| Cart3 | — | 始终 | 只负责 P4 |
+| Cart4 | S1~S6 | S7~S12 | 当前位置决定 |
+
+**`cart_limits`** — 4 个小车极限传感器 `[左极限, 右极限]`，`true`=触碰极限位：
+
+| ID | 左极限 | 右极限 | 说明 |
+|-----|-------|-------|------|
+| Cart1 | 位置=1 | 位置=7 | 默认 false |
+| Cart2 | 位置=1 | 位置=7 | 默认 false |
+| Cart3 | 位置=1 | 位置=7 | 默认 false |
+| Cart4 | 位置=1 | 位置=6 | 默认 false |
 
 **`belt_states`** / **`belt_speeds`** — 19 条皮带，`true`=运行中：
 
