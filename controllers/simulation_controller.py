@@ -1078,14 +1078,12 @@ class SimulationController(QObject):
             self._check_level_thresholds()
             # 更新清空传感器计时器
             self._update_clearing_sensor_timers()
-            # 检查CLEARING状态是否完成余料清空
-            self._check_clearing_completion()
-            # 自动上料：空闲皮带检查是否有料仓低于70%需触发调度
-            self._check_auto_feed_idle()
-            # 检查待停止路线是否完成余料清空
-            self._check_pending_stop_routes()
-            # 清空策略特殊动作
-            self._apply_clearing_strategy_actions()
+            # FM接管: 清空/调度/策略全由FM管理, 仿真不干预
+            if not self._use_feeding_master:
+                self._check_clearing_completion()
+                self._check_auto_feed_idle()
+                self._check_pending_stop_routes()
+                self._apply_clearing_strategy_actions()
 
         # 生成传感器数据并写入JSON文件（每秒一次）
         if self.enable_sensor_data_generation:
