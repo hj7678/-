@@ -479,11 +479,11 @@ class FeedingMasterController:
             ctx = self.route_manager.get_route_context(route_id)
             if ctx and ctx.assigned_cart:
                 cart_id = ctx.assigned_cart
+                cur = self._cart_positions.get(cart_id, 1)
                 # Cart4: 用compute_cart4_target_position算真实目标(start_route不处理S格式)
                 tgt = (compute_cart4_target_position(target_bin) 
                        if cart_id == 'Cart4' and target_bin.startswith('S')
                        else ctx.cart_target_position)
-                print(f"[FM-DEBUG] activate: {route_id} cart={cart_id} cur={cur} tgt={tgt} pos={dict(self._cart_positions)}", flush=True)
                 if cur == tgt:
                     ctx.cart_target_position = tgt  # 修正
                     self.route_manager.set_route_state(route_id, RouteState.FEEDING)
