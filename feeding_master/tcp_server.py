@@ -176,7 +176,6 @@ class FeedingMasterServer:
         elif msg_type == "manual_start" and self._on_manual_start:
             self._on_manual_start(msg.get("bin_id", ""), msg.get("route_id", ""))
         elif msg_type == "manual_stop" and self._on_manual_stop:
-            print(f"[FM-Server] 收到manual_stop: {msg.get('route_id','')}", flush=True)
             self._on_manual_stop(msg.get("route_id", ""))
         elif msg_type == "emergency_stop" and self._on_emergency_stop:
             self._on_emergency_stop()

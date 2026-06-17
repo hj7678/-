@@ -83,7 +83,6 @@ class SimulationFeedingBridge(QObject):
 
     def send_manual_stop(self, route_id: str):
         """手动停止: 通知FM停用路线"""
-        print(f"[桥接] send_manual_stop: {route_id}", flush=True)
         self._fm._send({"type": "manual_stop", "route_id": route_id})
 
     def tick(self):
