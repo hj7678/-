@@ -483,14 +483,24 @@ class FeedingMasterController:
     # ── 外部接口 ──
 
     def activate_route(self, route_id: str, target_bin: str):
-        """激活一条路线"""
+        """激活一条路线, 若cart已在目标位则直接FEEDING跳过MOVE"""
         ok = self.route_manager.start_route(route_id, target_bin)
         if ok:
+            ctx = self.route_manager.get_route_context(route_id)
+            if ctx and ctx.assigned_cart:
+                cart_id = ctx.assigned_cart
+                cur = (self._cart4_position if cart_id == 'Cart4'
+                       else self._cart_positions.get(cart_id, 1))
+                if cur == ctx.cart_target_position:
+                    self.route_manager.set_route_state(route_id, RouteState.FEEDING)
+                    ctx.feeding_start_time = self._total_runtime
+                    print(f"[FeedingMaster] 路线 {route_id} → {target_bin} cart已在位→FEEDING", flush=True)
+                else:
+                    print(f"[FeedingMaster] 路线 {route_id} → {target_bin} 已激活", flush=True)
             self._active_routes.add(route_id)
             belt_id = CART_TO_BELT.get(
                 self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
             self.scheduler.mark_executing(belt_id, route_id, target_bin)
-            print(f"[FeedingMaster] 路线 {route_id} → {target_bin} 已激活", flush=True)
         else:
             print(f"[FeedingMaster] 路线 {route_id} 激活失败 (资源占用?)", flush=True)
         return ok
