@@ -703,7 +703,7 @@ class FeedingMasterController:
         print("[FM] 急停! 全部设备已停止", flush=True)
 
     def _on_manual_stop(self, route_id: str):
-        """手动停止: 根据当前状态决定行为"""
+        """手动停止"""
         if route_id not in self._active_routes:
             return
         ctx = self.route_manager.get_route_context(route_id)
@@ -711,21 +711,25 @@ class FeedingMasterController:
             return
         cart_id = ctx.assigned_cart or ''
         belt_id = CART_TO_BELT.get(cart_id, '')
-        # 清除调度序列 (停止后不再自动续料)
+        # 清除序列+待执行(防止auto-continue覆盖)
         self.scheduler._sequences.pop(belt_id, None)
         if getattr(self, '_pending_auto_continue', (None, None))[0] == belt_id:
             self._pending_auto_continue = None
+        # 清除scheduler执行追踪(防止idle检测重新触发)
+        self.scheduler.mark_completed(belt_id)
 
         if ctx.state == RouteState.FEEDING:
-            # 上料中 → 进入清空 → 清空完成后自动STANDBY
             self.route_manager.set_route_state(route_id, RouteState.CLEARING)
             ctx.clearing_start_time = self._total_runtime
-            print(f"[FM] 手动停止: {route_id} FEEDING→CLEARING→(完成)→STANDBY", flush=True)
-        elif ctx.state == RouteState.CLEARING:
-            # 清空中 → 保持清空, 完成后自动STANDBY(序列已清, 不会续料)
-            print(f"[FM] 手动停止: {route_id} CLEARING保持→(完成)→STANDBY", flush=True)
-        elif ctx.state == RouteState.WAITING:
-            # 等待续料 → 直接节能待机
+            print(f"[FM] 手动停止: {route_id} FEEDING→CLEARING→STANDBY", flush=True)
+        elif ctx.state in (RouteState.CLEARING, RouteState.WAITING, RouteState.MOVING_TO_TARGET):
+            self.route_manager._release_resources(route_id)
+            self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+            self._active_routes.discard(route_id)
+            if not hasattr(self, '_deactivated_routes'):
+                self._deactivated_routes = set()
+            self._deactivated_routes.add(route_id)
+            print(f"[FM] 手动停止: {route_id} {ctx.state.value}→STANDBY", flush=True)
             self.route_manager._release_resources(route_id)
             self.scheduler.mark_completed(belt_id)
             self.route_manager.set_route_state(route_id, RouteState.STANDBY)
