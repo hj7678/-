@@ -366,6 +366,7 @@ class FeedingMasterController:
                         for hid in ctx.assigned_hoppers:
                             commands.append({'device': 'hopper', 'id': hid, 'action': 'close'})
                             new_cmds[f"hopper:{hid}"] = 'close'
+                        self._active_routes.discard(route_id)  # 移除: 避免画布残留
                         parts.append("节能待机")
                         ctx.clearing_start_time = 0
 
