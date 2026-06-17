@@ -509,10 +509,12 @@ class MainWindow(QMainWindow):
         route_name = config.FEED_ROUTES[route_id]['name']
         if self.controller._use_feeding_master:
             if enable:
-                # FM接管手动模式: 已通过_on_bin_clicked触发, 此处不做操作
                 return
             else:
-                # FM接管: 通知FM停止路线
+                if self.controller._auto_feeding_active:
+                    self._update_status_bar("自动模式: 请先关闭调度服务再停止路线")
+                    self.control_panel.route_buttons[route_id].setChecked(True)
+                    return
                 if self.controller._feeding_bridge is not None:
                     self.controller._feeding_bridge.send_manual_stop(route_id)
                     self._update_status_bar(f"FM手动停止: {route_name}")
@@ -816,9 +818,13 @@ class MainWindow(QMainWindow):
 
     def _on_emergency_stop_clicked(self):
         """急停按钮：立即切断所有输出"""
-        if self.controller._use_feeding_master and self.controller._feeding_bridge is not None:
-            self.controller._feeding_bridge._fm._send({"type": "emergency_stop"})
-            self._update_status_bar("FM急停已发送")
+        if self.controller._use_feeding_master:
+            if self.controller._auto_feeding_active:
+                self._update_status_bar("自动模式: 请先关闭调度服务再急停")
+                return
+            if self.controller._feeding_bridge is not None:
+                self.controller._feeding_bridge._fm._send({"type": "emergency_stop"})
+                self._update_status_bar("FM急停已发送")
             return
         if hasattr(self.controller, 'lifecycle'):
             self.controller.lifecycle.emergency_stop(self.controller)
@@ -944,7 +950,9 @@ class MainWindow(QMainWindow):
     def _on_feed_point_selected(self, feed_point: str, route_id: str, dest_bin: str, silo_bin: str = ''):
         """处理上料点选择"""
         if self.controller._use_feeding_master:
-            # FM接管: 通过桥接通知FM激活路线
+            if self.controller._auto_feeding_active:
+                self._update_status_bar("自动模式: 请先关闭调度服务再手动上料")
+                return
             if self.controller._feeding_bridge is not None:
                 self.controller._feeding_bridge.send_manual_start(dest_bin, route_id)
                 self._update_status_bar(f"FM手动上料: {config.FEED_ROUTES[route_id]['name']} → {dest_bin}")
