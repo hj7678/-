@@ -219,7 +219,7 @@ class DiagnosisEngine:
                 for hid in cfg.get('hopper_ids', []):
                     self._hopper_switch_fault_start.pop(f"{hid}:switch_open_in_clearing", None)
                     self._hopper_switch_fault_start.pop(f"{hid}:switch_stuck_open", None)
-                    self._hopper_switch_fault_start.pop(f"{hid}:switch_stuck_open_moving", None)
+                    pass  # 不再追踪
                     self._hopper_switch_fault_start.pop(f"{hid}:switch_open_in_standby", None)
                 for sid in cfg.get('proximity_sensor_ids', []):
                     self._proximity_fault_start.pop(f"{sid}:stuck_low_mid_feeding", None)
@@ -252,7 +252,7 @@ class DiagnosisEngine:
                         self._conveyor_fault_start.pop(f"{cid}:should_stop_in_moving", None)
                         self._conveyor_fault_start.pop(f"{cid}:should_run_in_moving", None)
                     for hid in route.hopper_ids:
-                        self._hopper_switch_fault_start.pop(f"{hid}:switch_stuck_open_moving", None)
+                        pass  # 不再追踪移动阶段的斗开关
                 # 离开CLEARING阶段时，清理该路线相关的clearing故障追踪key
                 if prev_state == RouteState.CLEARING:
                     for cid in route.conveyor_ids:
@@ -304,24 +304,7 @@ class DiagnosisEngine:
         #             ))
         #     else:
         #         self._proximity_fault_start.pop(f"{sid}:stuck_high_moving", None)
-        for hid in route.hopper_ids:
-            hopper = snapshot.hoppers.get(hid)
-            if not hopper:
-                continue
-            if hopper.switch_open:
-                key = f"{hid}:switch_stuck_open_moving"
-                start = self._hopper_switch_fault_start.get(key, snapshot.timestamp)
-                self._hopper_switch_fault_start[key] = start
-                if snapshot.timestamp - start >= HOPPER_SWITCH_STUCK_OPEN_DURATION:
-                    results.append(DiagnosisResult(
-                        sensor_id=hid,
-                        fault_type="hopper_switch_stuck_open",
-                        confidence=0.85,
-                        description=f"{hid}开关故障(卡开): 小车移动阶段开关为true持续{snapshot.timestamp-start:.0f}s",
-                        category="hopper_switch",
-                    ))
-            else:
-                self._hopper_switch_fault_start.pop(f"{hid}:switch_stuck_open_moving", None)
+        # 小车移动阶段: 中转斗可开可关, 不检查
 
         if route.conveyor_ids:
             end_cid = route.conveyor_ids[-1]
