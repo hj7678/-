@@ -816,8 +816,13 @@ class MainWindow(QMainWindow):
 
     def _on_emergency_stop_clicked(self):
         """急停按钮：立即切断所有输出"""
-        self.controller.lifecycle.emergency_stop(self.controller)
-        self._update_status_bar("急停！所有输出已切断")
+        if self.controller._use_feeding_master and self.controller._feeding_bridge is not None:
+            self.controller._feeding_bridge._fm._send({"type": "emergency_stop"})
+            self._update_status_bar("FM急停已发送")
+            return
+        if hasattr(self.controller, 'lifecycle'):
+            self.controller.lifecycle.emergency_stop(self.controller)
+            self._update_status_bar("急停！所有输出已切断")
         self.operation_log.add_log("!!! 急停 !!!", "#E74C3C")
         self.logger.info("急停触发")
 

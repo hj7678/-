@@ -96,6 +96,7 @@ class FeedingMasterController:
         self.server.on_sensor_states(self._on_sensor_states)
         self.server.on_manual_start(self._on_manual_start)
         self.server.on_manual_stop(self._on_manual_stop)
+        self.server.on_emergency_stop(self._on_emergency_stop)
 
     def _configure_state_engine(self):
         for rid, r in config.FEED_ROUTES.items():
@@ -647,6 +648,31 @@ class FeedingMasterController:
         belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
         self.scheduler.mark_executing(belt_id, route_id, bin_id)
         print(f"[FM] 手动上料: {route_id} → {bin_id}", flush=True)
+
+    def _on_emergency_stop(self):
+        """急停: 立即停止所有路线 + 关全部设备"""
+        for route_id in list(self._active_routes):
+            ctx = self.route_manager.get_route_context(route_id)
+            if ctx:
+                self.route_manager._release_resources(route_id)
+                belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
+                self.scheduler.mark_completed(belt_id)
+        self._active_routes.clear()
+        # 急停指令通过commands下发: 停止所有皮带、关闭所有斗
+        cmds = []
+        from controllers.plc_runtime.actuator import compute_emergency_stop_commands
+        estop = compute_emergency_stop_commands(
+            list(self.conveyors.keys()) if not hasattr(self, 'conveyors') or not self.conveyors
+            else self.conveyors,
+            list(self.hoppers.keys())
+        )
+        # 简单处理: 直接发送全停指令
+        for cid in config.CONVEYORS:
+            cmds.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+        for hid in config.TRANSFER_HOPPERS:
+            cmds.append({'device': 'hopper', 'id': hid, 'action': 'close'})
+        self.server.send_commands(cmds)
+        print("[FM] 急停! 全部设备已停止", flush=True)
 
     def _on_manual_stop(self, route_id: str):
         """手动停止: 逐步进入STANDBY"""

@@ -40,6 +40,7 @@ class FeedingMasterServer:
         self._on_sensor_states: Optional[Callable[[dict], None]] = None
         self._on_manual_start: Optional[Callable[[str, str], None]] = None
         self._on_manual_stop: Optional[Callable[[str], None]] = None
+        self._on_emergency_stop: Optional[Callable[[], None]] = None
 
     # ── 回调注册 ──
 
@@ -51,6 +52,9 @@ class FeedingMasterServer:
 
     def on_manual_stop(self, callback):
         self._on_manual_stop = callback
+
+    def on_emergency_stop(self, callback):
+        self._on_emergency_stop = callback
 
     # ── 发送控制指令 ──
 
@@ -171,5 +175,7 @@ class FeedingMasterServer:
             self._on_manual_start(msg.get("bin_id", ""), msg.get("route_id", ""))
         elif msg_type == "manual_stop" and self._on_manual_stop:
             self._on_manual_stop(msg.get("route_id", ""))
+        elif msg_type == "emergency_stop" and self._on_emergency_stop:
+            self._on_emergency_stop()
         elif msg_type == "heartbeat":
             pass  # 心跳忽略
