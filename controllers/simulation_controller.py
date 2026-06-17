@@ -2850,6 +2850,11 @@ class SimulationController(QObject):
         """获取所有故障传感器ID"""
         return self.fault_diagnosis.get_faulty_sensor_ids()
 
+    def set_diagnosis_results(self, results: list):
+        """FM推送的故障诊断结果"""
+        self.diagnosis_result = [(r.get('sensor_id', ''), r.get('description', '')) for r in results]
+        self.mark_dirty()
+
     def get_diagnosis_result(self) -> List[Tuple[str, str]]:
         """获取诊断结果（兼容旧格式）"""
         return self.diagnosis_result.copy()

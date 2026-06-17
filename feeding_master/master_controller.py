@@ -65,6 +65,11 @@ class FeedingMasterController:
         self.server = tcp_server
         self.stock = StockClient()
 
+        # 故障诊断客户端
+        self._diag_client = None
+        self._diag_thread: Optional[threading.Thread] = None
+        self._diag_results: list = []
+
         # 路线管理
         self.route_manager = get_route_state_manager()
         self.state_engine = StateTransitionEngine()
@@ -176,6 +181,7 @@ class FeedingMasterController:
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        self._start_diag_client()
         print("[FeedingMaster] 控制循环已启动 (50ms)", flush=True)
 
     def stop(self):
@@ -475,7 +481,11 @@ class FeedingMasterController:
                 'executing_bin': dict(self.scheduler._executing_bin),
                 'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
             }
-            self.server.send_commands(commands, route_info, sched_info)
+            diag = None
+            if self._diag_results:
+                diag = list(self._diag_results)
+                self._diag_results.clear()
+            self.server.send_commands(commands, route_info, sched_info, diag)
             if hasattr(self, '_deactivated_routes'):
                 self._deactivated_routes.clear()
 
@@ -774,6 +784,63 @@ class FeedingMasterController:
             if ctx.assigned_hoppers:
                 return 'sequential'
         return 'reverse'
+
+    def _start_diag_client(self):
+        """启动故障诊断客户端 (后台线程)"""
+        if self._diag_thread:
+            return
+        import socket as _sk
+        self._diag_thread = threading.Thread(target=self._diag_loop, daemon=True)
+        self._diag_thread.start()
+
+    def _diag_loop(self):
+        import socket as _sk, json as _json
+        while self._running:
+            try:
+                sock = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
+                sock.settimeout(3)
+                sock.connect(('127.0.0.1', 8897))
+                # 发送状态快照
+                snap = self._build_diag_snapshot()
+                sock.sendall((_json.dumps(snap, ensure_ascii=False) + "\n").encode("utf-8"))
+                # 接收诊断结果
+                buf = b""
+                sock.settimeout(5)
+                while b"\n" not in buf:
+                    chunk = sock.recv(4096)
+                    if not chunk: break
+                    buf += chunk
+                if buf:
+                    resp = _json.loads(buf.decode("utf-8").strip())
+                    if resp.get("ok"):
+                        self._diag_results = resp.get("results", [])
+                sock.close()
+            except Exception:
+                pass
+            time.sleep(0.5)  # 500ms间隔
+
+    def _build_diag_snapshot(self) -> dict:
+        """构建诊断快照"""
+        routes = []
+        for rid in self._active_routes:
+            ctx = self.route_manager.get_route_context(rid)
+            if not ctx: continue
+            cart_id = ctx.assigned_cart or ''
+            routes.append({
+                "route_id": rid,
+                "state": ctx.state.value,
+                "cart_id": cart_id,
+                "cart_position": self._cart_positions.get(cart_id, 1),
+                "cart_moving": self._cart_moving.get(cart_id, False),
+                "target_bin": ctx.target_bin or '',
+            })
+        return {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "routes": routes,
+            "conveyors": {cid: conv.is_running for cid, conv in self.conveyors.items()},
+            "hoppers": {hid: h.is_open for hid, h in self.hoppers.items()},
+            "proximity": dict(self._sensor_states.get('proximity', {})),
+        }
 
     def deactivate_route(self, route_id: str):
         """停用路线"""
