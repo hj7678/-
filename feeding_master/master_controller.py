@@ -115,8 +115,7 @@ class FeedingMasterController:
         """接收 Upper Computer 转发的传感器状态"""
         self._sensor_states = data
         self._cart_positions = data.get('cart_positions', {})
-        self._cart4_position = data.get('cart4_position', 1)
-        self._cart4_is_moving = data.get('cart4_is_moving', False)
+        self._cart_moving = data.get('cart_moving', {})
         self._cart_divert = {
             k: tuple(v) for k, v in data.get('cart_divert', {}).items()
         }
@@ -128,23 +127,17 @@ class FeedingMasterController:
         sim_active = set(data.get('active_routes', []))
         sim_states = data.get('route_states', {})
 
-        # FM判断cart到达: 比较桥接推送的cart位置与目标位置
-        route_cart_moving = data.get('route_cart_moving', {})
+        # FM判断cart到达: 统一比较cart位置与目标位置
         for route_id in sim_active & self._active_routes:
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
                 continue
-            ctx.cart_moving = route_cart_moving.get(route_id, ctx.cart_moving)
-            if ctx.state == RouteState.MOVING_TO_TARGET:
-                cart_id = ctx.assigned_cart
-                if cart_id == 'Cart4':
-                    cur = self._cart4_position if hasattr(self, '_cart4_position') else 1
-                    moving = self._cart4_is_moving if hasattr(self, '_cart4_is_moving') else False
-                elif cart_id:
-                    cur = self._cart_positions.get(cart_id, 1)
-                    moving = ctx.cart_moving
-                else:
-                    continue
+            cart_id = ctx.assigned_cart
+            if cart_id:
+                ctx.cart_moving = self._cart_moving.get(cart_id, False)
+            if ctx.state == RouteState.MOVING_TO_TARGET and cart_id:
+                cur = self._cart_positions.get(cart_id, 1)
+                moving = self._cart_moving.get(cart_id, False)
                 if not moving and cur == ctx.cart_target_position:
                     self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                     ctx.feeding_start_time = self._total_runtime
@@ -234,16 +227,10 @@ class FeedingMasterController:
                 continue
 
             cart_id = ctx.assigned_cart or ''
-            cart_target = ctx.cart_target_position  # 先赋值, 下面Cart4块要用
-            if cart_id == 'Cart4':
-                cart_pos = max(1, self._cart4_position)
-                if ctx.state == RouteState.MOVING_TO_TARGET and not self._cart4_is_moving:
-                    if cart_pos == cart_target:
-                        ctx.cart_moving = True  # 保守: 等bridge确认到达
-                else:
-                    ctx.cart_moving = self._cart4_is_moving
-            else:
-                cart_pos = self._cart_positions.get(cart_id, 1)
+            cart_target = ctx.cart_target_position
+            cart_pos = self._cart_positions.get(cart_id, 1) if cart_id else 1
+            if cart_id:
+                ctx.cart_moving = self._cart_moving.get(cart_id, False)
             target_bin = ctx.target_bin or ''
 
             level = 0.0
@@ -502,8 +489,7 @@ class FeedingMasterController:
                 ctx = self.route_manager.get_route_context(rid)
                 if ctx and ctx.state != RouteState.IDLE:
                     cart_id = ctx.assigned_cart or ''
-                    pos = (self._cart4_position if cart_id == 'Cart4'
-                           else self._cart_positions.get(cart_id, 1))
+                    pos = self._cart_positions.get(cart_id, 1) if cart_id else 0
                     target = ctx.target_bin or ''
                     key = f"{rid}:{ctx.state.value}:{pos}"
                     if key != _last_opl.get(rid, ''):
@@ -541,8 +527,7 @@ class FeedingMasterController:
             ctx = self.route_manager.get_route_context(route_id)
             if ctx and ctx.assigned_cart:
                 cart_id = ctx.assigned_cart
-                cur = (self._cart4_position if cart_id == 'Cart4'
-                       else self._cart_positions.get(cart_id, 1))
+                cur = self._cart_positions.get(cart_id, 1)
                 if cur == ctx.cart_target_position:
                     self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                     ctx.feeding_start_time = self._total_runtime

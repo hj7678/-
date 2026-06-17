@@ -188,7 +188,12 @@ class SimulationController(QObject):
         self.cart4_is_moving = False  # 是否在移动中
         self.cart4_sensor_position = 1  # 传感器报告的位置（等小车实际到达后才更新）
 
-        # Cart1/2/3位置管理（虚拟小车，位置由物料决定）
+        # Cart1/2/3 移动状态
+        self._cart1_is_moving = False
+        self._cart2_is_moving = False
+        self._cart3_is_moving = False
+
+        # Cart1/2/3位置管理（水平滑轨小车，18s/格物理移动）
         self.cart_positions: Dict[str, int] = {
             'Cart1': 1,
             'Cart2': 1,
@@ -3272,6 +3277,10 @@ class SimulationController(QObject):
                     ctx = self.route_state_manager.get_route_context(route_id)
                     if ctx and ctx.assigned_cart == cart_id:
                         ctx.cart_moving = False
+                # 同步cart移动状态
+                if cart_id == 'Cart1': self._cart1_is_moving = False
+                elif cart_id == 'Cart2': self._cart2_is_moving = False
+                elif cart_id == 'Cart3': self._cart3_is_moving = False
                 continue
 
             # 检查是否有小车需要移动
@@ -3346,6 +3355,9 @@ class SimulationController(QObject):
             ctx.clearing_strategy = self._resolve_clearing_strategy(route_id)
             # 更新传感器位置（只有实际到达后才更新）
             self.cart_sensor_positions[cart_id] = current_pos
+            if cart_id == 'Cart1': self._cart1_is_moving = False
+            elif cart_id == 'Cart2': self._cart2_is_moving = False
+            elif cart_id == 'Cart3': self._cart3_is_moving = False
 
             # 更新 executing_bin 追踪（提前移动路线跳过了 _on_auto_feed_route_completed）
             cart_to_belt = {'Cart1': 'D7', 'Cart2': 'D8', 'Cart3': 'D9'}

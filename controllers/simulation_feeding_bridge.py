@@ -121,20 +121,25 @@ class SimulationFeedingBridge(QObject):
             "proximity": {sid: s.is_active for sid, s in ctrl.sensors.items()},
             "hopper_states": {hid: h.is_open for hid, h in ctrl.hoppers.items()},
             "hopper_weights": {hid: h.get_display_weight() for hid, h in ctrl.hoppers.items()},
-            "cart_positions": dict(ctrl.cart_positions),
+            "cart_positions": {
+                'Cart1': ctrl.cart_positions.get('Cart1', 1),
+                'Cart2': ctrl.cart_positions.get('Cart2', 1),
+                'Cart3': ctrl.cart_positions.get('Cart3', 1),
+                'Cart4': ctrl.cart4_position,
+            },
+            "cart_moving": {
+                'Cart1': getattr(ctrl, '_cart1_is_moving', False),
+                'Cart2': getattr(ctrl, '_cart2_is_moving', False),
+                'Cart3': getattr(ctrl, '_cart3_is_moving', False),
+                'Cart4': ctrl.cart4_is_moving,
+            },
             "cart_divert": {cid: list(div) for cid, div in ctrl.cart_divert.items()},
             "belt_states": {cid: conv.is_running for cid, conv in ctrl.conveyors.items()},
             "belt_speeds": {cid: conv.current_speed for cid, conv in ctrl.conveyors.items()},
-            "cart4_position": ctrl.cart4_position,
-            "cart4_is_moving": ctrl.cart4_is_moving,
             "active_routes": list(ctrl.active_routes),
             "route_states": ctrl.route_state_manager.get_all_route_states(),
             "scheduling_active": ctrl._auto_feeding_active,
             "route_targets": dict(ctrl.route_to_bin),
-            "route_cart_moving": {
-                rid: (ctx.cart_moving if (ctx := ctrl.route_state_manager.get_route_context(rid)) else False)
-                for rid in ctrl.active_routes
-            },
         }
         self._fm.send_sensor_states(sensor_data)
 
@@ -233,6 +238,9 @@ class SimulationFeedingBridge(QObject):
                                 ctrl.cart4_is_moving = False
                         else:
                             ctrl.cart_target_positions[dev_id] = target
+                            if dev_id == 'Cart1': ctrl._cart1_is_moving = (ctrl.cart_positions.get('Cart1', 1) != target)
+                            if dev_id == 'Cart2': ctrl._cart2_is_moving = (ctrl.cart_positions.get('Cart2', 1) != target)
+                            if dev_id == 'Cart3': ctrl._cart3_is_moving = (ctrl.cart_positions.get('Cart3', 1) != target)
                         route_id = cmd.get("route_id")
                         if route_id:
                             ctx = ctrl.route_state_manager.get_route_context(route_id)

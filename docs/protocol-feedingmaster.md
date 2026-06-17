@@ -40,7 +40,10 @@
       "hopper4": 0.0, "hopper5": 0.0, "hopper6": 0.0, "hopper7": 0.0
     },
     "cart_positions": {
-      "Cart1": 1, "Cart2": 1, "Cart3": 1
+      "Cart1": 1, "Cart2": 1, "Cart3": 1, "Cart4": 1
+    },
+    "cart_moving": {
+      "Cart1": false, "Cart2": false, "Cart3": false, "Cart4": false
     },
     "cart_divert": {
       "Cart1": [true, false],
@@ -59,8 +62,6 @@
       "D1": 0.0, "D2": 0.0, "D3": 0.0, "D4": 0.0, "D5": 0.0,
       "D6": 0.0, "D7": 0.0, "D8": 0.0, "D9": 0.0, "D13": 0.0
     },
-    "cart4_position": 1,
-    "cart4_is_moving": false,
     "active_routes": ["route1", "route5"],
     "route_states": {
       "route1": "feeding", "route2": "idle", "route3": "idle",
