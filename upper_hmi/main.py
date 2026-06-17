@@ -27,9 +27,9 @@ def main():
     window.controller._runtime_timer.start()
     window.controller._last_runtime_ms = 0
     window.controller.feed_timer.start(window.controller.feed_interval)
-    # 同步顶栏按钮
-    if hasattr(window, 'top_bridge_btn'): window.top_bridge_btn.setChecked(True)
-    if hasattr(window, 'top_fm_btn'): window.top_fm_btn.setChecked(True)
+    # 隐藏不需要的按钮(FM接管+桥接已默认启用)
+    if hasattr(window, 'top_bridge_btn'): window.top_bridge_btn.hide()
+    if hasattr(window, 'top_fm_btn'): window.top_fm_btn.hide()
 
     window.show()
     sys.exit(app.exec_())
