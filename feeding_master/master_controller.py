@@ -578,38 +578,6 @@ class FeedingMasterController:
         candidates.sort()
         return candidates[0][2]
 
-    def _resolve_clearing_strategy(self, route_id: str) -> str:
-        """根据下一料仓与当前料仓的关系确定清空策略"""
-        ctx = self.route_manager.get_route_context(route_id)
-        if not ctx or not ctx.target_bin:
-            return 'reverse'
-
-        # D6: 一律换列
-        if ctx.assigned_cart == 'Cart4':
-            return 'column_switch'
-
-        belt_id = CART_TO_BELT.get(ctx.assigned_cart, '')
-        if not belt_id:
-            return 'reverse'
-
-        nxt = self.scheduler.get_next_bin(belt_id)
-        if not nxt:
-            return 'reverse'
-
-        cur_col = ctx.target_bin.split('-')[0]
-        next_col = nxt.split('-')[0]
-
-        if cur_col != next_col:
-            return 'column_switch'
-
-        cur_row = int(ctx.target_bin.split('-')[1])
-        next_row = int(nxt.split('-')[1])
-
-        if next_row < cur_row and cur_row >= 4:
-            if ctx.assigned_hoppers:
-                return 'sequential'
-        return 'reverse'
-
     # ── 清空检测 ──
 
     def _calc_endpoint_timeout(self, belt_id: str, target_bin: str) -> float:
