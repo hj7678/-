@@ -16,18 +16,20 @@ def main():
     window = MainWindow()
     window.setWindowTitle("上位机 HMI — FM接管模式")
 
-    # 自动初始化料位
+    # 自动初始化料位 + 桥接 + FM接管
     window.controller.randomize_bin_levels_percent(25, 90)
-    # 自动连接桥接
     window.controller.start_feeding_bridge()
-    # 自动启用FM接管 (调度由FM负责)
     window.controller.set_use_feeding_master(True)
-    window.controller._auto_feeding_active = True  # 激活FM的调度检测
+    # 调度由UI"调度服务"按钮控制(FM接管下不启动仿真调度, 只设_auto_feeding_active)
+    window.controller._auto_feeding_active = False  # 初始关闭, 等用户点击
     # 自动仿真运行
     window.controller.is_running = True
     window.controller._runtime_timer.start()
     window.controller._last_runtime_ms = 0
     window.controller.feed_timer.start(window.controller.feed_interval)
+    # 同步顶栏按钮
+    if hasattr(window, 'top_bridge_btn'): window.top_bridge_btn.setChecked(True)
+    if hasattr(window, 'top_fm_btn'): window.top_fm_btn.setChecked(True)
 
     window.show()
     sys.exit(app.exec_())

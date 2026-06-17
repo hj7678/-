@@ -589,6 +589,11 @@ class MainWindow(QMainWindow):
 
     def _on_scheduling_tcp_toggled(self, enabled: bool):
         """调度服务连接开关"""
+        if self.controller._use_feeding_master:
+            # FM接管: 只切换_auto_feeding_active, FM的scheduler自动响应
+            self.controller._auto_feeding_active = enabled
+            self._update_status_bar(f"调度服务: {'开(FM)' if enabled else '关'}")
+            return
         if enabled:
             # D7皮带：弹窗让用户选择上料点
             fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
@@ -619,6 +624,12 @@ class MainWindow(QMainWindow):
 
     def _on_bridge_toggled(self, enabled: bool):
         """桥接模式开关 — 连接/断开 FeedingMaster 上料主控"""
+        if self.controller._use_feeding_master:
+            if not enabled:
+                # FM接管时不允许关闭桥接
+                if hasattr(self, 'top_bridge_btn'):
+                    self.top_bridge_btn.setChecked(True)
+            return
         if enabled:
             self.controller.start_feeding_bridge()
         else:
@@ -631,11 +642,23 @@ class MainWindow(QMainWindow):
 
     def _on_fm_takeover_toggled(self, enabled: bool):
         """FM接管开关 — FeedingMaster 接管仿真决策"""
+        if not enabled and self.controller._use_feeding_master:
+            # FM接管时不允许关闭
+            if hasattr(self, 'top_fm_btn'):
+                self.top_fm_btn.setChecked(True)
+            return
         self.controller.set_use_feeding_master(enabled)
         self._update_status_bar(f"FM接管: {'开' if enabled else '关(监控)'}")
 
     def _on_auto_mode_toggled(self, enabled: bool):
         """全部皮带自动模式切换"""
+        if self.controller._use_feeding_master:
+            # FM接管: 全部自动=开启调度
+            self.controller._auto_feeding_active = enabled
+            if hasattr(self, 'top_sched_btn'):
+                self.top_sched_btn.setChecked(enabled)
+            self._update_status_bar(f"自动上料: {'开' if enabled else '关'}")
+            return
         self.controller.set_auto_mode(enabled)
         # 同步顶栏按钮
         if hasattr(self, 'top_auto_btn'):
