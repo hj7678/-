@@ -716,6 +716,41 @@ class FeedingMasterController:
             print(f"[FM-Sched] {belt_id} 启动调度", flush=True)
             self.scheduler.request_schedule_now(belt_id)
 
+    def _resolve_clearing_strategy(self, route_id: str) -> str:
+        """根据缓存序列中下一同列料仓确定清空策略(AI纯仿真逻辑)"""
+        ctx = self.route_manager.get_route_context(route_id)
+        if not ctx or not ctx.target_bin:
+            return 'reverse'
+        if ctx.assigned_cart == 'Cart4':
+            return 'column_switch'
+        cart_to_belt = {'Cart1': 'D7', 'Cart2': 'D8', 'Cart3': 'D9'}
+        belt_id = cart_to_belt.get(ctx.assigned_cart, '')
+        if not belt_id:
+            return 'reverse'
+        seq = list(self.scheduler._sequences.get(belt_id, []))
+        if not seq:
+            return 'reverse'
+        cur_col = ctx.target_bin.split('-')[0]
+        cur_row = int(ctx.target_bin.split('-')[1])
+        # 找序列中第一个同列仓
+        same_col_next = None
+        has_other_col = False
+        for bid in seq:
+            if bid.startswith(cur_col + '-'):
+                if same_col_next is None:
+                    try:
+                        same_col_next = int(bid.split('-')[1])
+                    except ValueError:
+                        pass
+            else:
+                has_other_col = True
+        if same_col_next is None:
+            return 'column_switch' if has_other_col else 'reverse'
+        if same_col_next < cur_row and cur_row >= 4:
+            if ctx.assigned_hoppers:
+                return 'sequential'
+        return 'reverse'
+
     def deactivate_route(self, route_id: str):
         """停用路线"""
         self.route_manager.stop_route(route_id)
