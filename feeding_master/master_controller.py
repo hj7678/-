@@ -709,9 +709,15 @@ class FeedingMasterController:
         ctx = self.route_manager.get_route_context(route_id)
         if not ctx:
             return
+        cart_id = ctx.assigned_cart or ''
+        belt_id = CART_TO_BELT.get(cart_id, '')
         self.route_manager._release_resources(route_id)
-        belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
         self.scheduler.mark_completed(belt_id)
+        # 清除待执行的自动续料 (防止stop后被auto-continue覆盖)
+        if getattr(self, '_pending_auto_continue', (None, None))[0] == belt_id:
+            self._pending_auto_continue = None
+        # 清除该belt的调度序列 (防止stop后scheduler重新激活)
+        self.scheduler._sequences.pop(belt_id, None)
         self.route_manager.set_route_state(route_id, RouteState.STANDBY)
         self._active_routes.discard(route_id)
         if not hasattr(self, '_deactivated_routes'):
