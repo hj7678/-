@@ -661,11 +661,23 @@ class MainWindow(QMainWindow):
     def _on_auto_mode_toggled(self, enabled: bool):
         """全部皮带自动模式切换"""
         if self.controller._use_feeding_master:
-            # FM接管: 全部自动=开启调度
-            self.controller._auto_feeding_active = enabled
-            if hasattr(self, 'top_sched_btn'):
-                self.top_sched_btn.setChecked(enabled)
-            self._update_status_bar(f"自动上料: {'开' if enabled else '关'}")
+            if enabled:
+                # D7需要选择上料点
+                fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
+                item, ok = QInputDialog.getItem(self, "选择D7上料点",
+                    "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
+                if ok:
+                    self.controller._d7_feed_override = item.split()[0]
+                if self.controller._feeding_bridge is not None:
+                    for bid in ['D6', 'D7', 'D8', 'D9']:
+                        self.controller._feeding_bridge._fm._send(
+                            {"type": "belt_active", "belt_id": bid, "active": True})
+                if hasattr(self, 'top_sched_btn'):
+                    self.top_sched_btn.setChecked(True)
+                if hasattr(self, '_top_belt_btns'):
+                    for btn in self._top_belt_btns.values():
+                        btn.setChecked(True)
+                self._update_status_bar("全部皮带自动调度已启动")
             return
         self.controller.set_auto_mode(enabled)
         # 同步顶栏按钮

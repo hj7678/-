@@ -97,6 +97,7 @@ class FeedingMasterController:
         self.server.on_manual_start(self._on_manual_start)
         self.server.on_manual_stop(self._on_manual_stop)
         self.server.on_emergency_stop(self._on_emergency_stop)
+        self.server.on_belt_active(self._on_belt_active)
 
     def _configure_state_engine(self):
         for rid, r in config.FEED_ROUTES.items():
@@ -699,6 +700,12 @@ class FeedingMasterController:
                 self._deactivated_routes = set()
             self._deactivated_routes.add(route_id)
             print(f"[FM] 手动停止: {route_id} {ctx.state.value}→STANDBY", flush=True)
+
+    def _on_belt_active(self, belt_id: str, active: bool):
+        """UI点击皮带按钮 → 强制启动该皮带调度"""
+        if active and belt_id in ('D6', 'D7', 'D8', 'D9'):
+            self.scheduler.request_schedule_now(belt_id)
+            print(f"[FM] 皮带 {belt_id} 手动启动调度", flush=True)
 
     def deactivate_route(self, route_id: str):
         """停用路线"""
