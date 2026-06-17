@@ -901,6 +901,7 @@ class ControlPanel(QWidget):
         diag_mode_layout.addWidget(self.diag_local_radio)
         diag_mode_layout.addWidget(self.diag_tcp_radio)
         layout.addLayout(diag_mode_layout)
+        self.diag_mode_layout = diag_mode_layout
 
         # TCP 诊断服务按钮
         self.diag_tcp_btn = QPushButton("诊断服务：未连接")
