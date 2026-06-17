@@ -453,10 +453,10 @@ class FeedingMasterController:
                 'executing_bin': dict(self.scheduler._executing_bin),
                 'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
             }
-            # 操作日志 (状态变化时才推送到HMI)
+            # 操作日志 (含已停用路线: STANDBY消息)
             oplog = []
             _last_opl = getattr(self, '_last_oplog_state', {})
-            for rid in self._active_routes:
+            for rid in list(self._active_routes) + list(getattr(self, '_deactivated_routes', set())):
                 ctx = self.route_manager.get_route_context(rid)
                 if ctx and ctx.state != RouteState.IDLE:
                     cart_id = ctx.assigned_cart or ''
