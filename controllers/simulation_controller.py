@@ -3302,10 +3302,12 @@ class SimulationController(QObject):
                 self._cart_move_timers[cart_id] += delta_seconds
                 if self._cart_move_timers[cart_id] >= move_one_position_time:
                     self._cart_move_timers[cart_id] = 0.0
+                    old_pos = current_pos
                     if current_pos < target_pos:
                         self.cart_positions[cart_id] = current_pos + 1
                     else:
                         self.cart_positions[cart_id] = current_pos - 1
+                    print(f"[{cart_id}] 移动: {old_pos} → {self.cart_positions[cart_id]} (目标={target_pos})", flush=True)
                     # 同步传感器上报值（实时跟踪实际位置）
                     self.cart_sensor_positions[cart_id] = self.cart_positions[cart_id]
 
