@@ -751,7 +751,21 @@ class MainWindow(QMainWindow):
 
     def _on_top_stop_clicked(self):
         """顶栏停止按钮 - 停止任意运行中的路线（含自动模式启动的）"""
-        # 过滤掉节能待机(STANDBY)的路线
+        if self.controller._use_feeding_master and self.controller._feeding_bridge is not None:
+            active = [rid for rid in self.controller.active_routes
+                      if self.controller.route_state_manager.get_route_state(rid) != 'standby']
+            if not active:
+                self._update_status_bar("没有运行中的路线")
+                return
+            if len(active) == 1:
+                self.controller._feeding_bridge.send_manual_stop(active[0])
+                self._update_status_bar(f"FM手动停止: {active[0]}")
+            else:
+                items = [f"{rid} {config.FEED_ROUTES.get(rid,{}).get('name',rid)}" for rid in active]
+                item, ok = QInputDialog.getItem(self, "停止路线", "选择要停止的路线:", items, 0, False)
+                if ok and item:
+                    self.controller._feeding_bridge.send_manual_stop(item.split()[0])
+            return
         active = [rid for rid in self.controller.active_routes
                   if self.controller.route_state_manager.get_route_state(rid) != 'standby']
         if not active:
