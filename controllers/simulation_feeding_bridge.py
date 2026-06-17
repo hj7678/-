@@ -135,11 +135,20 @@ class SimulationFeedingBridge(QObject):
         if isinstance(msg, list):
             commands = msg
             route_states = {}
+            schedule = {}
         else:
             commands = msg.get('commands', [])
             route_states = msg.get('route_states', {})
+            schedule = msg.get('schedule', {})
         # 路线状态同步推迟到主线程 apply_commands 中处理
         self._pending_route_states = route_states
+        # 调度序列同步到仿真 (HMI显示用)
+        if schedule:
+            sd = schedule
+            if hasattr(self._ctrl, '_executing_bin'):
+                self._ctrl._executing_bin.update(sd.get('executing_bin', {}))
+            if hasattr(self._ctrl, '_scheduled_sequence'):
+                self._ctrl._scheduled_sequence.update(sd.get('sequences', {}))
         self.command_received.emit(commands)
 
     def apply_commands(self, commands: List[dict]):

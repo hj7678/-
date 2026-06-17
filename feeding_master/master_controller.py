@@ -439,7 +439,7 @@ class FeedingMasterController:
         # 3. 调度引擎联动
         self.scheduler.tick(self._total_runtime)
 
-        # 4. 推送控制指令 (含路线状态用于仿真同步)
+        # 4. 推送控制指令 (含路线状态+调度序列用于HMI显示)
         if commands:
             route_info = {}
             for rid in self._active_routes:
@@ -451,7 +451,11 @@ class FeedingMasterController:
                         'cart_target': ctx.cart_target_position,
                         'cart_moving': ctx.cart_moving,
                     }
-            self.server.send_commands(commands, route_info)
+            sched_info = {
+                'executing_bin': dict(self.scheduler._executing_bin),
+                'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
+            }
+            self.server.send_commands(commands, route_info, sched_info)
 
         # 5. 延迟自动续料: 等上一轮的关闭斗指令先执行, 下一tick再开新路线
         pending = getattr(self, '_pending_auto_continue', None)
