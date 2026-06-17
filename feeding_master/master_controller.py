@@ -143,9 +143,19 @@ class FeedingMasterController:
                     cur = self._cart_positions.get(cart_id, 1)
                     moving = self._cart_moving.get(cart_id, False)
                     if not moving and cur == ctx.cart_target_position:
-                        self.route_manager.set_route_state(route_id, RouteState.FEEDING)
-                        ctx.feeding_start_time = self._total_runtime
-                        print(f"[FM] {route_id} cart到达→FEEDING pos={cur}", flush=True)
+                        # 检查分料状态是否匹配目标列
+                        divert_ok = True
+                        if cart_id in ('Cart1', 'Cart2', 'Cart3'):
+                            div = self._cart_divert.get(cart_id, (True, False))
+                            target_col = (ctx.target_bin or '').split('-')[0] if ctx.target_bin else ''
+                            col_map = {'P1': (True, False), 'P2': (True, False), 'P3': (False, True), 'P4': (False, True)}
+                            expected = col_map.get(target_col)
+                            if expected and tuple(div) != expected:
+                                divert_ok = False
+                        if divert_ok:
+                            self.route_manager.set_route_state(route_id, RouteState.FEEDING)
+                            ctx.feeding_start_time = self._total_runtime
+                            print(f"[FM] {route_id} cart到达→FEEDING pos={cur}", flush=True)
 
         # FM自主管理路线生命周期, 不从仿真同步添加/移除
 
