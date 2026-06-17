@@ -511,10 +511,6 @@ class MainWindow(QMainWindow):
             if enable:
                 return
             else:
-                if self.controller._auto_feeding_active:
-                    self._update_status_bar("自动模式: 请先关闭调度服务再停止路线")
-                    self.control_panel.route_buttons[route_id].setChecked(True)
-                    return
                 if self.controller._feeding_bridge is not None:
                     self.controller._feeding_bridge.send_manual_stop(route_id)
                     self._update_status_bar(f"FM手动停止: {route_name}")
