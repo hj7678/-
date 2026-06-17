@@ -368,7 +368,10 @@ class FeedingMasterController:
                         for hid in ctx.assigned_hoppers:
                             commands.append({'device': 'hopper', 'id': hid, 'action': 'close'})
                             new_cmds[f"hopper:{hid}"] = 'close'
-                        self._active_routes.discard(route_id)  # 移除: 避免画布残留
+                        self._active_routes.discard(route_id)
+                        if not hasattr(self, '_deactivated_routes'):
+                            self._deactivated_routes = set()
+                        self._deactivated_routes.add(route_id)
                         parts.append("节能待机")
                         ctx.clearing_start_time = 0
 
@@ -466,9 +469,20 @@ class FeedingMasterController:
         self.scheduler.tick(self._total_runtime)
 
         # 4. 推送控制指令 (含路线状态+调度序列用于HMI显示)
-        if commands:
+        deactivated = getattr(self, '_deactivated_routes', set())
+        if commands or deactivated:
             route_info = {}
             for rid in self._active_routes:
+                ctx = self.route_manager.get_route_context(rid)
+                if ctx:
+                    route_info[rid] = {
+                        'state': ctx.state.value,
+                        'target_bin': ctx.target_bin or '',
+                        'cart_target': ctx.cart_target_position,
+                        'cart_moving': ctx.cart_moving,
+                    }
+            for rid in deactivated:
+                route_info[rid] = {'state': 'idle'}
                 ctx = self.route_manager.get_route_context(rid)
                 if ctx:
                     route_info[rid] = {
@@ -500,6 +514,8 @@ class FeedingMasterController:
                     oplog.append({'route_id': rid, 'state': ctx.state.value,
                                   'msg': state_label, 'target': target})
             self.server.send_commands(commands, route_info, sched_info, oplog)
+            if hasattr(self, '_deactivated_routes'):
+                self._deactivated_routes.clear()
 
         # 5. 延迟自动续料: 等上一轮的关闭斗指令先执行, 下一tick再开新路线
         pending = getattr(self, '_pending_auto_continue', None)
@@ -675,8 +691,12 @@ class FeedingMasterController:
                 self.route_manager._release_resources(route_id)
                 belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
                 self.scheduler.mark_completed(belt_id)
+        deactivated = list(self._active_routes)
         self._active_routes.clear()
-        # 急停指令通过commands下发: 停止所有皮带、关闭所有斗
+        if not hasattr(self, '_deactivated_routes'):
+            self._deactivated_routes = set()
+        self._deactivated_routes.update(deactivated)
+        # 急停指令通过commands下发
         cmds = []
         from controllers.plc_runtime.actuator import compute_emergency_stop_commands
         estop = compute_emergency_stop_commands(
@@ -699,12 +719,14 @@ class FeedingMasterController:
         ctx = self.route_manager.get_route_context(route_id)
         if not ctx:
             return
-        # 释放资源
         self.route_manager._release_resources(route_id)
         belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
         self.scheduler.mark_completed(belt_id)
         self.route_manager.set_route_state(route_id, RouteState.STANDBY)
         self._active_routes.discard(route_id)
+        if not hasattr(self, '_deactivated_routes'):
+            self._deactivated_routes = set()
+        self._deactivated_routes.add(route_id)
         print(f"[FM] 手动停止: {route_id} → STANDBY", flush=True)
 
     def deactivate_route(self, route_id: str):

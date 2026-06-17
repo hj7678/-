@@ -187,6 +187,8 @@ class SimulationFeedingBridge(QObject):
                         ctrl.route_state_manager._transition(ctx, new_s)
                     if new_s and new_s != RouteState.IDLE:
                         ctrl.active_routes.add(rid)
+                    else:
+                        ctrl.active_routes.discard(rid)
                 except: pass
                 if isinstance(info, dict):
                     if info.get('target_bin'): ctx.target_bin = info['target_bin']; ctrl.route_to_bin[rid] = info['target_bin']
