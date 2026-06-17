@@ -717,20 +717,13 @@ class FeedingMasterController:
             self._pending_auto_continue = None
 
         if ctx.state == RouteState.FEEDING:
-            # 上料中 → 立即清空余料
+            # 上料中 → 进入清空 → 清空完成后自动STANDBY
             self.route_manager.set_route_state(route_id, RouteState.CLEARING)
             ctx.clearing_start_time = self._total_runtime
-            print(f"[FM] 手动停止: {route_id} FEEDING→CLEARING", flush=True)
+            print(f"[FM] 手动停止: {route_id} FEEDING→CLEARING→(完成)→STANDBY", flush=True)
         elif ctx.state == RouteState.CLEARING:
-            # 清空中 → 完成后节能待机(不自动续料, 上面已清序列)
-            self.route_manager._release_resources(route_id)
-            self.scheduler.mark_completed(belt_id)
-            self.route_manager.set_route_state(route_id, RouteState.STANDBY)
-            self._active_routes.discard(route_id)
-            if not hasattr(self, '_deactivated_routes'):
-                self._deactivated_routes = set()
-            self._deactivated_routes.add(route_id)
-            print(f"[FM] 手动停止: {route_id} CLEARING→STANDBY", flush=True)
+            # 清空中 → 保持清空, 完成后自动STANDBY(序列已清, 不会续料)
+            print(f"[FM] 手动停止: {route_id} CLEARING保持→(完成)→STANDBY", flush=True)
         elif ctx.state == RouteState.WAITING:
             # 等待续料 → 直接节能待机
             self.route_manager._release_resources(route_id)
