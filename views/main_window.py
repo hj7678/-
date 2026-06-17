@@ -816,6 +816,9 @@ class MainWindow(QMainWindow):
 
     def _on_self_test_clicked(self):
         """自检按钮"""
+        if self.controller._use_feeding_master:
+            self._update_status_bar("FM接管模式暂不支持自检")
+            return
         self._update_status_bar("正在执行系统自检...")
         result = self.controller.do_self_test()
         if result.passed:
