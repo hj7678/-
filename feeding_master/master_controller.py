@@ -480,6 +480,7 @@ class FeedingMasterController:
             if ctx and ctx.assigned_cart:
                 cart_id = ctx.assigned_cart
                 cur = self._cart_positions.get(cart_id, 1)
+                print(f"[FM-DEBUG] activate: {route_id} cart={cart_id} cur={cur} tgt={ctx.cart_target_position} pos={dict(self._cart_positions)}", flush=True)
                 if cur == ctx.cart_target_position:
                     self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                     ctx.feeding_start_time = self._total_runtime
