@@ -507,6 +507,16 @@ class MainWindow(QMainWindow):
     def _on_route_toggled(self, route_id: str, enable: bool):
         """路线切换"""
         route_name = config.FEED_ROUTES[route_id]['name']
+        if self.controller._use_feeding_master:
+            if enable:
+                # FM接管手动模式: 已通过_on_bin_clicked触发, 此处不做操作
+                return
+            else:
+                # FM接管: 通知FM停止路线
+                if self.controller._feeding_bridge is not None:
+                    self.controller._feeding_bridge.send_manual_stop(route_id)
+                    self._update_status_bar(f"FM手动停止: {route_name}")
+                return
         if enable:
             # 先检查路线是否可用（路线⑧⑨的 feed_point 是 silo_out，不做激光传感器检查）
             if not self.controller.is_route_available(route_id):

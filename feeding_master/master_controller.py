@@ -95,6 +95,7 @@ class FeedingMasterController:
         # 注册回调
         self.server.on_sensor_states(self._on_sensor_states)
         self.server.on_manual_start(self._on_manual_start)
+        self.server.on_manual_stop(self._on_manual_stop)
 
     def _configure_state_engine(self):
         for rid, r in config.FEED_ROUTES.items():
@@ -646,6 +647,21 @@ class FeedingMasterController:
         belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
         self.scheduler.mark_executing(belt_id, route_id, bin_id)
         print(f"[FM] 手动上料: {route_id} → {bin_id}", flush=True)
+
+    def _on_manual_stop(self, route_id: str):
+        """手动停止: 逐步进入STANDBY"""
+        if route_id not in self._active_routes:
+            return
+        ctx = self.route_manager.get_route_context(route_id)
+        if not ctx:
+            return
+        # 释放资源
+        self.route_manager._release_resources(route_id)
+        belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
+        self.scheduler.mark_completed(belt_id)
+        self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+        self._active_routes.discard(route_id)
+        print(f"[FM] 手动停止: {route_id} → STANDBY", flush=True)
 
     def deactivate_route(self, route_id: str):
         """停用路线"""

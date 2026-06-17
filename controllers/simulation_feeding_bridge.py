@@ -81,6 +81,10 @@ class SimulationFeedingBridge(QObject):
         """手动上料: 通知FM激活指定路线"""
         self._fm._send({"type": "manual_start", "bin_id": bin_id, "route_id": route_id})
 
+    def send_manual_stop(self, route_id: str):
+        """手动停止: 通知FM停用路线"""
+        self._fm._send({"type": "manual_stop", "route_id": route_id})
+
     def tick(self):
         """每帧: 推送料位→Stock, 推送传感器→FeedingMaster"""
         if not self._enabled:
