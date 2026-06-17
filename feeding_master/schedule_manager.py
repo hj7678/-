@@ -169,7 +169,6 @@ class ScheduleManager:
             "left_divert": left_div,
             "right_divert": right_div,
             "maintenance_bins": list(getattr(self, '_maintenance_bins', set())),
-            "laser_states": getattr(self, '_laser_states', {}),
         }
 
         t = threading.Thread(target=self._send_and_recv, args=(belt_id, payload), daemon=True)

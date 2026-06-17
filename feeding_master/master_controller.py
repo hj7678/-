@@ -522,12 +522,20 @@ class FeedingMasterController:
         if not available:
             return None
 
-        # 优先选第一条可用路线
+        # 根据上料点激光传感器过滤有料的路线
+        laser = getattr(self.scheduler, '_laser_states', {})
         prefix = bin_id.split('-')[0]
         priority_map = config.FEED_POINT_PRIORITY.get(prefix, {})
 
         candidates = []
         for feed_point, route_id in available:
+            # feed3 优先级供 P2/P3，P4 不使用 feed3
+            if feed_point == 'feed3' and prefix not in ('P2', 'P3'):
+                continue
+            # silo_out 无需激光检测（默认有料）
+            has_material = (feed_point == 'silo_out' or laser.get(feed_point, True))
+            if not has_material:
+                continue
             priority = priority_map.get(feed_point, 99)
             candidates.append((priority, feed_point, route_id))
 
