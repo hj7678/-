@@ -704,8 +704,8 @@ class FeedingMasterController:
     def _on_belt_active(self, belt_id: str, active: bool):
         """UI点击皮带按钮 → 强制启动该皮带调度"""
         if active and belt_id in ('D6', 'D7', 'D8', 'D9'):
+            print(f"[FM-Sched] {belt_id} 启动调度", flush=True)
             self.scheduler.request_schedule_now(belt_id)
-            print(f"[FM] 皮带 {belt_id} 手动启动调度", flush=True)
 
     def deactivate_route(self, route_id: str):
         """停用路线"""

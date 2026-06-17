@@ -63,9 +63,12 @@ class ScheduleManager:
     # ── 每周期 tick ──
 
     def set_active(self, active: bool):
+        was = getattr(self, '_active', False)
         self._active = active
-        if active:
+        if active and not was:
             print("[FM-Sched] 调度服务已激活", flush=True)
+        elif not active and was:
+            print("[FM-Sched] 调度服务已关闭", flush=True)
 
     def tick(self, total_runtime: float):
         """检查是否需要触发调度"""
