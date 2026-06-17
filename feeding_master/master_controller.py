@@ -353,26 +353,25 @@ class FeedingMasterController:
                     commands.append(cmd)
                     new_cmds[f"belt:{cid}"] = action.value
 
-                # 追踪斗状态：从上一帧的 new_cmds 推断当前斗是开还是关
-                _hs = {}
-                for hid in ctx.assigned_hoppers:
-                    prev = prev_cmds.get(f"hopper:{hid}", 'close')
-                    _hs[hid] = (prev == 'open')
-                hopper_cmds = compute_hopper_commands(
-                    ctx.assigned_hoppers,
-                    is_feeding=(ctx.state == RouteState.FEEDING),
-                    cart_at_target=cart_at_target,
-                    hopper_states=_hs,
-                )
-                # 换列策略: CLEARING期间斗保持打开, 不生成关闭指令
-                if strategy == 'column_switch':
-                    hopper_cmds = {hid: ActuatorAction.OPEN for hid in ctx.assigned_hoppers}
-                for hid, action in hopper_cmds.items():
-                    # 同斗多路线: 最后处理的路线指令覆盖前面的
-                    key = f"hopper:{hid}"
-                    cmd = {'device': 'hopper', 'id': hid, 'action': action.value}
-                    commands.append(cmd)
-                    new_cmds[key] = action.value  # 后写覆盖先写
+                # MOVING_TO_TARGET: 不改变斗状态 (保持上一轮的开关)
+                if ctx.state != RouteState.MOVING_TO_TARGET:
+                    _hs = {}
+                    for hid in ctx.assigned_hoppers:
+                        prev = prev_cmds.get(f"hopper:{hid}", 'close')
+                        _hs[hid] = (prev == 'open')
+                    hopper_cmds = compute_hopper_commands(
+                        ctx.assigned_hoppers,
+                        is_feeding=(ctx.state == RouteState.FEEDING),
+                        cart_at_target=cart_at_target,
+                        hopper_states=_hs,
+                    )
+                    if strategy == 'column_switch':
+                        hopper_cmds = {hid: ActuatorAction.OPEN for hid in ctx.assigned_hoppers}
+                    for hid, action in hopper_cmds.items():
+                        key = f"hopper:{hid}"
+                        cmd = {'device': 'hopper', 'id': hid, 'action': action.value}
+                        commands.append(cmd)
+                        new_cmds[key] = action.value
 
             elif ctx.state == RouteState.WAITING and route_conveyors:
                 # WAITING: 非终点皮带保持运行, 仅终点皮带已在上方状态转换中停止
