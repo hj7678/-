@@ -122,6 +122,8 @@ class FeedingMasterController:
         }
         self._cart_limits = data.get('cart_limits', {})
         self.scheduler.update_cart_state(self._cart_positions, self._cart_divert)
+        self.scheduler._laser_states = data.get('laser_sensor_states', {})
+        self.scheduler._maintenance_bins = set(data.get('maintenance_bins', []))
         # 同步调度开关: UI点击"调度服务"后FM才开始请求调度
         self.scheduler.set_active(data.get('scheduling_active', False))
 

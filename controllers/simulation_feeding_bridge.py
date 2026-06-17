@@ -155,6 +155,8 @@ class SimulationFeedingBridge(QObject):
             "route_states": ctrl.route_state_manager.get_all_route_states(),
             "scheduling_active": ctrl._auto_feeding_active,
             "route_targets": dict(ctrl.route_to_bin),
+            "laser_sensor_states": dict(ctrl.laser_sensor_states) if hasattr(ctrl, 'laser_sensor_states') else {},
+            "maintenance_bins": list(ctrl.get_maintenance_bins()) if hasattr(ctrl, 'get_maintenance_bins') else [],
         }
         self._fm.send_sensor_states(sensor_data)
 
