@@ -167,7 +167,7 @@ class SimulationFeedingBridge(QObject):
                 if not ctx: continue
                 try:
                     new_s = RouteState(info.get('state', '')) if isinstance(info, dict) else None
-                    if new_s and new_s != ctx.state:
+                    if new_s and new_s != ctx.state and new_s != RouteState.MOVING_TO_TARGET:
                         ctrl.route_state_manager._transition(ctx, new_s)
                     if new_s and new_s != RouteState.IDLE:
                         ctrl.active_routes.add(rid)
