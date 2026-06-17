@@ -77,6 +77,10 @@ class SimulationFeedingBridge(QObject):
     def randomize_stock_levels(self, lo_pct: float = 25.0, hi_pct: float = 90.0):
         self._stock.randomize_all(lo_pct, hi_pct)
 
+    def send_manual_start(self, bin_id: str, route_id: str):
+        """手动上料: 通知FM激活指定路线"""
+        self._fm._send({"type": "manual_start", "bin_id": bin_id, "route_id": route_id})
+
     def tick(self):
         """每帧: 推送料位→Stock, 推送传感器→FeedingMaster"""
         if not self._enabled:

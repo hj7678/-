@@ -928,6 +928,12 @@ class MainWindow(QMainWindow):
 
     def _on_feed_point_selected(self, feed_point: str, route_id: str, dest_bin: str, silo_bin: str = ''):
         """处理上料点选择"""
+        if self.controller._use_feeding_master:
+            # FM接管: 通过桥接通知FM激活路线
+            if self.controller._feeding_bridge is not None:
+                self.controller._feeding_bridge.send_manual_start(dest_bin, route_id)
+                self._update_status_bar(f"FM手动上料: {config.FEED_ROUTES[route_id]['name']} → {dest_bin}")
+            return
         from controllers.route_state_manager import RouteState
 
         ctx = self.controller.route_state_manager.get_route_context(route_id)

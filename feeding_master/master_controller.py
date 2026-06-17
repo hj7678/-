@@ -94,6 +94,7 @@ class FeedingMasterController:
 
         # 注册回调
         self.server.on_sensor_states(self._on_sensor_states)
+        self.server.on_manual_start(self._on_manual_start)
 
     def _configure_state_engine(self):
         for rid, r in config.FEED_ROUTES.items():
@@ -608,6 +609,22 @@ class FeedingMasterController:
 
         ctx.sensor_clear_timers = timers
         return timers, timeouts
+
+    def _on_manual_start(self, bin_id: str, route_id: str):
+        """手动上料: 上位机点击料仓触发"""
+        if self.scheduler.is_executing(CART_TO_BELT.get(
+                self.route_manager.ROUTE_CARTS.get(route_id, ''), '')):
+            print(f"[FM] 手动上料拒绝: {route_id} 皮带已在执行中", flush=True)
+            return
+        if route_id not in config.FEED_ROUTES:
+            print(f"[FM] 手动上料失败: 未知路线 {route_id}", flush=True)
+            return
+        if not self.activate_route(route_id, bin_id):
+            return
+        # 手动模式不走调度序列, 直接标记执行中
+        belt_id = CART_TO_BELT.get(self.route_manager.ROUTE_CARTS.get(route_id, ''), '')
+        self.scheduler.mark_executing(belt_id, route_id, bin_id)
+        print(f"[FM] 手动上料: {route_id} → {bin_id}", flush=True)
 
     def deactivate_route(self, route_id: str):
         """停用路线"""
