@@ -145,9 +145,18 @@ class FeedingMasterController:
                     if not moving and cur == ctx.cart_target_position:
                         # 检查分料状态是否匹配目标列
                         divert_ok = True
-                        if cart_id in ('Cart1', 'Cart2', 'Cart3'):
-                            div = self._cart_divert.get(cart_id, (True, False))
-                            target_col = (ctx.target_bin or '').split('-')[0] if ctx.target_bin else ''
+                        div = self._cart_divert.get(cart_id, (True, False))
+                        target_bin = ctx.target_bin or ''
+                        if cart_id == 'Cart4' and target_bin.startswith('S'):
+                            try:
+                                n = int(target_bin[1:])
+                                expected = (True, False) if 1 <= n <= 6 else (False, True)
+                                if tuple(div) != expected:
+                                    divert_ok = False
+                            except ValueError:
+                                pass
+                        elif cart_id in ('Cart1', 'Cart2', 'Cart3'):
+                            target_col = target_bin.split('-')[0] if target_bin else ''
                             col_map = {'P1': (True, False), 'P2': (True, False), 'P3': (False, True), 'P4': (False, True)}
                             expected = col_map.get(target_col)
                             if expected and tuple(div) != expected:
