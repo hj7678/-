@@ -131,7 +131,7 @@ class SimulationFeedingBridge(QObject):
                 'Cart1': list(ctrl.cart_divert.get('Cart1', (True, False))),
                 'Cart2': list(ctrl.cart_divert.get('Cart2', (True, False))),
                 'Cart3': list(ctrl.cart_divert.get('Cart3', (False, True))),
-                'Cart4': [ctrl.cart4_position <= 6, ctrl.cart4_position > 6],
+                'Cart4': _cart4_divert(ctrl),
             },
             "cart_limits": {
                 'Cart1': [ctrl.cart_sensor_positions.get('Cart1', 1) == 1,
@@ -263,3 +263,18 @@ class SimulationFeedingBridge(QObject):
                                 ctx.cart_moving = True
                                 ctx.cart_target_position = target
         ctrl.mark_dirty()  # 通知UI刷新
+
+
+def _cart4_divert(ctrl) -> list:
+    """Cart4分料: 左=S1~S6, 右=S7~S12"""
+    ctx = ctrl.route_state_manager.get_route_context('route5')
+    if not ctx or not ctx.target_bin:
+        return [True, False]  # 默认左分料
+    tb = ctx.target_bin
+    if tb.startswith('S') and tb[1:].isdigit():
+        n = int(tb[1:])
+        if 1 <= n <= 6:
+            return [True, False]
+        elif 7 <= n <= 12:
+            return [False, True]
+    return [True, False]
