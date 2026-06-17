@@ -481,7 +481,25 @@ class FeedingMasterController:
                 'executing_bin': dict(self.scheduler._executing_bin),
                 'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
             }
-            self.server.send_commands(commands, route_info, sched_info)
+            # 操作日志 (写入HMI)
+            oplog = []
+            for rid in self._active_routes:
+                ctx = self.route_manager.get_route_context(rid)
+                if ctx and ctx.state != RouteState.IDLE:
+                    cart_id = ctx.assigned_cart or ''
+                    pos = (self._cart4_position if cart_id == 'Cart4'
+                           else self._cart_positions.get(cart_id, 1))
+                    target = ctx.target_bin or ''
+                    state_label = {
+                        'moving_to_target': f"路线{rid} 小车{cart_id} pos={pos}→{ctx.cart_target_position}",
+                        'feeding': f"路线{rid} 上料中 → {target}",
+                        'clearing': f"路线{rid} 清空余料中 → {target}",
+                        'waiting': f"路线{rid} → {target} 上料完成",
+                        'standby': f"路线{rid} 节能待机",
+                    }.get(ctx.state.value, f"路线{rid} {ctx.state.value}")
+                    oplog.append({'route_id': rid, 'state': ctx.state.value,
+                                  'msg': state_label, 'target': target})
+            self.server.send_commands(commands, route_info, sched_info, oplog)
 
         # 5. 延迟自动续料: 等上一轮的关闭斗指令先执行, 下一tick再开新路线
         pending = getattr(self, '_pending_auto_continue', None)

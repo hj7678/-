@@ -157,6 +157,18 @@ class SimulationFeedingBridge(QObject):
                 self._ctrl._executing_bin.update(sd.get('executing_bin', {}))
             if hasattr(self._ctrl, '_scheduled_sequence'):
                 self._ctrl._scheduled_sequence.update(sd.get('sequences', {}))
+        # 操作日志: 写入belt_log让HMI显示
+        oplog = msg.get('operation_log', [])
+        if oplog:
+            from belt_logger import belt_log as _bl
+            belt_map = {'route1': 'D7', 'route2': 'D7', 'route3': 'D7',
+                        'route4': 'D9', 'route5': 'D6',
+                        'route6': 'D8', 'route7': 'D9', 'route8': 'D8'}
+            for entry in oplog:
+                rid = entry.get('route_id', '')
+                bid = belt_map.get(rid, '')
+                if bid:
+                    _bl(bid).info(entry.get('msg', ''))
         self.command_received.emit(commands)
 
     def apply_commands(self, commands: List[dict]):

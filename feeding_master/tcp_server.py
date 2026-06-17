@@ -58,7 +58,7 @@ class FeedingMasterServer:
 
     # ── 发送控制指令 ──
 
-    def send_commands(self, commands: list, route_info: dict = None, sched_info: dict = None):
+    def send_commands(self, commands: list, route_info: dict = None, sched_info: dict = None, oplog: list = None):
         """推送控制指令给 Upper Computer"""
         payload = {
             "type": "command",
@@ -68,6 +68,8 @@ class FeedingMasterServer:
             payload["route_states"] = route_info
         if sched_info:
             payload["schedule"] = sched_info
+        if oplog:
+            payload["operation_log"] = oplog
         self._send(payload)
 
     def send_state_snapshot(self, snapshot: dict):
