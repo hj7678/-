@@ -440,7 +440,8 @@ class FeedingMasterController:
                         'cart_moving': ctx.cart_moving,
                     }
             for rid in deactivated:
-                route_info[rid] = {'state': 'idle'}
+                ctx = self.route_manager.get_route_context(rid)
+                route_info[rid] = {'state': ctx.state.value if ctx else 'standby'}
                 ctx = self.route_manager.get_route_context(rid)
                 if ctx:
                     route_info[rid] = {
