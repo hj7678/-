@@ -28,6 +28,7 @@ HOPPER_SWITCH_STUCK_OPEN_DURATION = 30
 CLEARING_FAULT_DURATION = 60.0    # clearing阶段故障需持续60s才判定
 STANDBY_FAULT_DURATION = 3.0     # standby阶段故障需持续3s才判定
 MOVING_FAULT_DURATION = 3.0       # moving阶段无规定时间的故障需持续3s才判定
+DEFAULT_FAULT_DURATION = 3.0      # 所有未指定持续时间的故障统一3s判定
 
 # 阶段特定常量
 FEEDING_UPSTREAM_LIT_TIMEOUT_S = 80.0     # feeding: 上游点亮超时判卡低（末尾传感器）
@@ -360,26 +361,38 @@ class DiagnosisEngine:
         for cid in route.conveyor_ids:
             conv = snapshot.conveyors.get(cid)
             if conv and not conv.is_running:
-                results.append(DiagnosisResult(
-                    sensor_id=f"{cid}_state",
-                    fault_type="conveyor_should_run",
-                    confidence=0.85,
-                    description=f"皮带{cid}异常: feeding阶段应运行但为停止",
-                    category="conveyor",
-                ))
+                key = f"{cid}:feeding_should_run"
+                start = self._conveyor_fault_start.get(key, ts)
+                self._conveyor_fault_start[key] = start
+                if ts - start >= DEFAULT_FAULT_DURATION:
+                    results.append(DiagnosisResult(
+                        sensor_id=f"{cid}_state",
+                        fault_type="conveyor_should_run",
+                        confidence=0.85,
+                        description=f"皮带{cid}异常: feeding阶段应运行但为停止(持续{ts-start:.0f}s)",
+                        category="conveyor",
+                    ))
+            else:
+                self._conveyor_fault_start.pop(f"{cid}:feeding_should_run", None)
 
         for hid in route.hopper_ids:
             hopper = snapshot.hoppers.get(hid)
             if not hopper:
                 continue
             if not hopper.switch_open:
-                results.append(DiagnosisResult(
-                    sensor_id=hid,
-                    fault_type="hopper_switch_stuck_closed",
-                    confidence=0.80,
-                    description=f"{hid}开关故障(卡关): feeding阶段开关未打开",
-                    category="hopper_switch",
-                ))
+                key = f"{hid}:feeding_closed"
+                start = self._hopper_switch_fault_start.get(key, ts)
+                self._hopper_switch_fault_start[key] = start
+                if ts - start >= DEFAULT_FAULT_DURATION:
+                    results.append(DiagnosisResult(
+                        sensor_id=hid,
+                        fault_type="hopper_switch_stuck_closed",
+                        confidence=0.80,
+                        description=f"{hid}开关故障(卡关): feeding阶段开关未打开(持续{ts-start:.0f}s)",
+                        category="hopper_switch",
+                    ))
+            else:
+                self._hopper_switch_fault_start.pop(f"{hid}:feeding_closed", None)
 
         for sid in route.proximity_sensor_ids:
             sensor = snapshot.proximity_sensors.get(sid)
@@ -434,14 +447,20 @@ class DiagnosisEngine:
                 up_off = len(upstream) > 0 and all(not s.state for s in upstream)
                 down_off = len(downstream) > 0 and all(not s.state for s in downstream)
                 if up_off and down_off:
-                    results.append(DiagnosisResult(
-                        sensor_id=sid,
-                        fault_type="stuck_high",
-                        confidence=0.90,
-                        description=f"接近开关{sid}故障(卡高): 上/下游均未点亮但本传感器点亮",
-                        category="proximity",
-                    ))
-                elif is_last:
+                    key_high = f"{sid}:stuck_high_feeding"
+                    start = self._proximity_fault_start.get(key_high, ts)
+                    self._proximity_fault_start[key_high] = start
+                    if ts - start >= DEFAULT_FAULT_DURATION:
+                        results.append(DiagnosisResult(
+                            sensor_id=sid,
+                            fault_type="stuck_high",
+                            confidence=0.90,
+                            description=f"接近开关{sid}故障(卡高): 上/下游均未点亮但本传感器点亮(持续{ts-start:.0f}s)",
+                            category="proximity",
+                        ))
+                else:
+                    self._proximity_fault_start.pop(f"{sid}:stuck_high_feeding", None)
+                if is_last:
                     upstream_false_count = sum(1 for s in upstream if not s.state)
                     if upstream_false_count >= 2:
                         key = f"{sid}:stuck_high_tail_feeding"
@@ -548,22 +567,34 @@ class DiagnosisEngine:
                     continue
                 if cid == end_cid:
                     if conv.is_running:
-                        results.append(DiagnosisResult(
-                            sensor_id=f"{cid}_state",
-                            fault_type="conveyor_should_stop",
-                            confidence=0.85,
-                            description=f"皮带{cid}异常: waiting阶段终点皮带应停止但为运行",
-                            category="conveyor",
-                        ))
+                        key = f"{cid}:waiting_stop"
+                        start = self._conveyor_fault_start.get(key, ts)
+                        self._conveyor_fault_start[key] = start
+                        if ts - start >= DEFAULT_FAULT_DURATION:
+                            results.append(DiagnosisResult(
+                                sensor_id=f"{cid}_state",
+                                fault_type="conveyor_should_stop",
+                                confidence=0.85,
+                                description=f"皮带{cid}异常: waiting阶段终点皮带应停止但为运行(持续{ts-start:.0f}s)",
+                                category="conveyor",
+                            ))
+                    else:
+                        self._conveyor_fault_start.pop(f"{cid}:waiting_stop", None)
                 else:
                     if not conv.is_running:
-                        results.append(DiagnosisResult(
-                            sensor_id=f"{cid}_state",
-                            fault_type="conveyor_should_run",
-                            confidence=0.85,
-                            description=f"皮带{cid}异常: waiting阶段非终点皮带应运行但为停止",
-                            category="conveyor",
-                        ))
+                        key = f"{cid}:waiting_run"
+                        start = self._conveyor_fault_start.get(key, ts)
+                        self._conveyor_fault_start[key] = start
+                        if ts - start >= DEFAULT_FAULT_DURATION:
+                            results.append(DiagnosisResult(
+                                sensor_id=f"{cid}_state",
+                                fault_type="conveyor_should_run",
+                                confidence=0.85,
+                                description=f"皮带{cid}异常: waiting阶段非终点皮带应运行但为停止(持续{ts-start:.0f}s)",
+                                category="conveyor",
+                            ))
+                    else:
+                        self._conveyor_fault_start.pop(f"{cid}:waiting_run", None)
 
         # for sid in route.proximity_sensor_ids:
         #     sensor = snapshot.proximity_sensors.get(sid)
@@ -581,13 +612,19 @@ class DiagnosisEngine:
             if not hopper:
                 continue
             if hopper.switch_open:
-                results.append(DiagnosisResult(
-                    sensor_id=hid,
-                    fault_type="hopper_switch_stuck_open",
-                    confidence=0.85,
-                    description=f"{hid}开关故障(卡开): 上料完成阶段应为false",
-                    category="hopper_switch",
-                ))
+                key = f"{hid}:waiting_open"
+                start = self._hopper_switch_fault_start.get(key, ts)
+                self._hopper_switch_fault_start[key] = start
+                if ts - start >= DEFAULT_FAULT_DURATION:
+                    results.append(DiagnosisResult(
+                        sensor_id=hid,
+                        fault_type="hopper_switch_stuck_open",
+                        confidence=0.85,
+                        description=f"{hid}开关故障(卡开): waiting阶段应为false(持续{ts-start:.0f}s)",
+                        category="hopper_switch",
+                    ))
+            else:
+                self._hopper_switch_fault_start.pop(f"{hid}:waiting_open", None)
             vol = self._weight_volatility(hid, 3.0)
             if vol > WAITING_WEIGHT_VOLATILITY_THRESHOLD:
                 results.append(DiagnosisResult(
