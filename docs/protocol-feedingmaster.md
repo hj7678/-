@@ -284,7 +284,10 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
       "D9": [],
       "D6": []
     }
-  }
+  },
+  "diagnosis": [
+    {"sensor_id": "S-E1", "fault_type": "stuck_high", "confidence": 0.95, "description": "...", "category": "proximity"}
+  ]
 }
 ```
 
