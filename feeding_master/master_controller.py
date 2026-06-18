@@ -36,6 +36,9 @@ from state_transition_engine import StateTransitionEngine
 from feeding_master.tcp_server import FeedingMasterServer
 from feeding_master.stock_client import StockClient
 from feeding_master.schedule_manager import ScheduleManager, CART_TO_BELT, BELT_TO_CART
+from feeding_master.clearing_config import (
+    get_clearing_threshold, SEQUENTIAL_EARLY_MOVE_DELAY, MIN_FEEDING_TIME,
+)
 
 import config
 
@@ -246,7 +249,7 @@ class FeedingMasterController:
             # 最小feeding时间: 刚进入FEEDING或刚自动续料, 3s内不触发清空
             if ctx.state == RouteState.FEEDING:
                 feeding_elapsed = self._total_runtime - getattr(ctx, 'feeding_start_time', 0)
-                if feeding_elapsed < 3.0 and strategy == 'reverse':
+                if feeding_elapsed < MIN_FEEDING_TIME and strategy == 'reverse':
                     strategy = 'reverse'  # 保持, 但跳过清空判定
 
             # 清空计时器 (所有策略都追踪传感器)
@@ -259,7 +262,7 @@ class FeedingMasterController:
             if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
                     and cart_id in ('Cart1', 'Cart2') and not getattr(ctx, 'early_moved_from_clearing', False)):
                 clearing_elapsed = self._total_runtime - getattr(ctx, 'clearing_start_time', 0)
-                if clearing_elapsed >= 3.0:
+                if clearing_elapsed >= SEQUENTIAL_EARLY_MOVE_DELAY:
                     belt_id = CART_TO_BELT.get(cart_id, '')
                     nxt = self.scheduler.get_next_bin(belt_id)
                     if nxt:
@@ -317,9 +320,7 @@ class FeedingMasterController:
                     if strategy != 'reverse':
                         parts.append(f"策略: {strategy}")
                 elif next_state.value == 'clearing':
-                    threshold = {'sequential': 98, 'reverse': 95, 'column_switch': 92}.get(strategy, 95)
-                    if cart_id == 'Cart3':
-                        threshold = 94
+                    threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
                     parts.append(f"料位{level:.0f}%≥{threshold}% 策略={strategy}")
                 elif next_state.value == 'moving_to_target':
                     parts.append(f"小车 {cart_id}→{cart_target}")
