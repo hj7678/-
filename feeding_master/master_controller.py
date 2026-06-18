@@ -287,6 +287,7 @@ class FeedingMasterController:
 
             # 状态引擎判定
             belt_id_for_engine = CART_TO_BELT.get(cart_id, '')
+            self.state_engine._override_threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
             has_next = bool(self.scheduler.get_next_bin(belt_id_for_engine)) if belt_id_for_engine else False
             has_seq = self.scheduler.has_sequence(belt_id_for_engine) if belt_id_for_engine else False
             next_state, actions = self.state_engine.evaluate(

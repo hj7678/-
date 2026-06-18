@@ -16,10 +16,6 @@ from typing import Dict, List, Optional, Tuple, Callable
 # 模块顶层不直接导入，在 _get_route_state 中延迟导入
 
 
-# 清空策略阈值
-STRATEGY_THRESHOLDS = {'sequential': 98, 'reverse': 95, 'column_switch': 92}
-
-
 class StateTransitionEngine:
     """基于传感器状态的路线阶段判定引擎
 
@@ -110,10 +106,10 @@ class StateTransitionEngine:
             level = level_sensors.get('__target__', 0)
             if '__target__' not in level_sensors:
                 return current_state, actions
-            threshold = STRATEGY_THRESHOLDS.get(clearing_strategy, 95)
-            # Special cases
-            if cart == 'Cart3': threshold = 94      # D9 fixed
-            if cart == 'Cart4': threshold = 95      # D6: column_switch behavior but 95%
+            threshold = getattr(self, '_override_threshold', None)
+            if threshold is None:
+                threshold = {'sequential': 98, 'reverse': 95, 'column_switch': 88}.get(clearing_strategy, 95)
+            if cart == 'D9': threshold = 94  # D9 Cart3 backward compat
             if level >= threshold:
                 actions['close_hoppers'] = (clearing_strategy != 'column_switch')
                 if clearing_strategy == 'sequential':
