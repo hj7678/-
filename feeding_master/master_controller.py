@@ -722,36 +722,25 @@ class FeedingMasterController:
             self.scheduler.request_schedule_now(belt_id)
 
     def _resolve_clearing_strategy(self, route_id: str) -> str:
-        """根据缓存序列中下一同列料仓确定清空策略(AI纯仿真逻辑)"""
+        """根据缓存序列中紧挨的下一个料仓判断清空策略(与纯仿真一致)"""
         ctx = self.route_manager.get_route_context(route_id)
         if not ctx or not ctx.target_bin:
             return 'reverse'
         if ctx.assigned_cart == 'Cart4':
             return 'column_switch'
-        cart_to_belt = {'Cart1': 'D7', 'Cart2': 'D8', 'Cart3': 'D9'}
-        belt_id = cart_to_belt.get(ctx.assigned_cart, '')
+        belt_id = CART_TO_BELT.get(ctx.assigned_cart, '')
         if not belt_id:
             return 'reverse'
-        seq = list(self.scheduler._sequences.get(belt_id, []))
-        if not seq:
+        nxt = self.scheduler.get_next_bin(belt_id)
+        if not nxt:
             return 'reverse'
         cur_col = ctx.target_bin.split('-')[0]
+        next_col = nxt.split('-')[0]
+        if cur_col != next_col:
+            return 'column_switch'
         cur_row = int(ctx.target_bin.split('-')[1])
-        # 找序列中第一个同列仓
-        same_col_next = None
-        has_other_col = False
-        for bid in seq:
-            if bid.startswith(cur_col + '-'):
-                if same_col_next is None:
-                    try:
-                        same_col_next = int(bid.split('-')[1])
-                    except ValueError:
-                        pass
-            else:
-                has_other_col = True
-        if same_col_next is None:
-            return 'column_switch' if has_other_col else 'reverse'
-        if same_col_next < cur_row and cur_row >= 4:
+        next_row = int(nxt.split('-')[1])
+        if next_row < cur_row and cur_row >= 4:
             if ctx.assigned_hoppers:
                 return 'sequential'
         return 'reverse'
