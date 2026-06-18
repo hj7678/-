@@ -49,7 +49,7 @@ class TcpDataAdapter:
     def build_snapshot(self, data: dict) -> SystemSnapshot:
         ts = self._parse_timestamp(data.get('timestamp', ''))
         conveyor_states = self._parse_conveyor_states(data.get('conveyor_sensors', {}))
-        active_route_ids = self._infer_active_routes(data.get('feed_signals', {}))
+        active_route_ids = self._infer_active_routes(data.get('feed_signals', {}), route_states_raw)
 
         route_states_raw: Dict[str, str] = data.get('route_states', {})
 
@@ -150,14 +150,18 @@ class TcpDataAdapter:
                     states[cid] = False
         return states
 
-    def _infer_active_routes(self, feed_signals: dict) -> List[str]:
-        """从上料信号推断活跃路线"""
+    def _infer_active_routes(self, feed_signals: dict, route_states: dict) -> List[str]:
+        """从上料信号+路线状态推断活跃路线"""
         active: List[str] = []
         for signal_id, sdata in feed_signals.items():
             if _val(sdata, False):
                 route_ids = FEED_SIGNAL_TO_ROUTES.get(signal_id, [])
                 active.extend(route_ids)
-        return list(dict.fromkeys(active))  # 去重保持顺序
+        # 从route_states中补充(feed_signals为空时用状态推断)
+        for route_id, state in route_states.items():
+            if state and state not in ('idle', '') and route_id not in active:
+                active.append(route_id)
+        return list(dict.fromkeys(active))
 
     @staticmethod
     def _resolve_route_state(route_id: str, route_cfg: dict,
