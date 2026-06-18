@@ -967,14 +967,20 @@ class DiagnosisEngine:
                     for cid in route.conveyor_ids
                 )
                 if running:
-                    results.append(DiagnosisResult(
-                        sensor_id=route_id,
-                        fault_type="route_all_sensors_false",
-                        confidence=0.55,
-                        description=f"{route_id}异常: FEEDING状态但所有接近开关为false",
-                        category="cross_sensor",
-                        related_sensors=list(route.proximity_sensor_ids),
-                    ))
+                    key = f"{route_id}:all_sensors_false"
+                    if key not in self._conveyor_fault_start:
+                        self._conveyor_fault_start[key] = ts
+                    if ts - self._conveyor_fault_start[key] >= DEFAULT_FAULT_DURATION:
+                        results.append(DiagnosisResult(
+                            sensor_id=route_id,
+                            fault_type="route_all_sensors_false",
+                            confidence=0.55,
+                            description=f"{route_id}异常: FEEDING但所有传感器为false(持续{ts-self._conveyor_fault_start[key]:.0f}s)",
+                            category="cross_sensor",
+                            related_sensors=list(route.proximity_sensor_ids),
+                        ))
+                else:
+                    self._conveyor_fault_start.pop(f"{route_id}:all_sensors_false", None)
 
             # 规则2：开关开 + 称重持续增加
             for hopper_id in route.hopper_ids:
