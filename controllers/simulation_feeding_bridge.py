@@ -251,8 +251,13 @@ class SimulationFeedingBridge(QObject):
                     elif action == "close":
                         hopper.is_open = False
 
+            elif device == "feed_point":
+                if action in ("start", "on"):
+                    ctrl.set_feed_point_active(cmd["id"], True)
+                elif action in ("stop", "off"):
+                    ctrl.set_feed_point_active(cmd["id"], False)
+
             elif device == "cart":
-                if action == "move":
                     target = cmd.get("target")
                     if target is not None:
                         if dev_id == 'Cart4':

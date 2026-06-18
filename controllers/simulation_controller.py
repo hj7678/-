@@ -3583,6 +3583,11 @@ class SimulationController(QObject):
                 key = f"{cart_id}_{suffix}"
                 self.control_strategy_generator.clear_fault_override(key)
 
+    def set_feed_point_active(self, feed_point_id: str, active: bool):
+        """FM控制上料点启停 (feed1_1/feed1_2/feed2_1/feed2_2/feed3)"""
+        if feed_point_id in self.feed_points:
+            self.feed_points[feed_point_id]['active'] = active
+
     def get_cart_fault_status(self) -> dict:
         """获取所有小车传感器故障状态"""
         result = {}

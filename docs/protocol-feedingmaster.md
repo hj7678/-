@@ -302,6 +302,8 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 **中转斗** (`device: "hopper"`): `action`: `"open"` | `"close"`。ID: `hopper1` ~ `hopper7`。
 
+**上料点** (`device: "feed_point"`): `action`: `"start"` | `"stop"`。ID: `feed1_1` / `feed1_2` / `feed2_1` / `feed2_2` / `feed3`（`silo_out` 无需控制）。
+
 **小车** (`device: "cart"`): `action`: `"move"`。附加字段：`target`（目标位置 int），`route_id`（关联路线 string）。ID: `Cart1`, `Cart2`, `Cart3`, `Cart4`。
 
 #### 2.1.2 `route_states` — 路线状态
