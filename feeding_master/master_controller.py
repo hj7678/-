@@ -484,10 +484,10 @@ class FeedingMasterController:
                 'executing_bin': dict(self.scheduler._executing_bin),
                 'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
             }
-            diag = None
             if self._diag_results:
-                diag = list(self._diag_results)
+                self._last_diag = list(self._diag_results)
                 self._diag_results.clear()
+            diag = getattr(self, '_last_diag', None)
             self.server.send_commands(commands, route_info, sched_info, diag)
             if hasattr(self, '_deactivated_routes'):
                 self._deactivated_routes.clear()
