@@ -506,6 +506,9 @@ class FeedingMasterController:
         ok = self.route_manager.start_route(route_id, target_bin)
         if ok:
             ctx = self.route_manager.get_route_context(route_id)
+            if ctx:
+                ctx.clearing_strategy = 'reverse'
+                ctx.early_moved_from_clearing = False
             if ctx and ctx.assigned_cart:
                 cart_id = ctx.assigned_cart
                 cur = self._cart_positions.get(cart_id, 1)
