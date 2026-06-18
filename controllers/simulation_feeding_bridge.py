@@ -90,9 +90,12 @@ class SimulationFeedingBridge(QObject):
         if not self._enabled:
             return
 
-        # 自动重连 (FM中途重启)
+        # 自动重连 (每3秒尝试一次, 避免阻塞tick)
+        now = time.time()
         if not self._fm.is_connected():
-            self._fm.ensure_connected()
+            if now - getattr(self, '_last_reconnect_attempt', 0) > 3.0:
+                self._last_reconnect_attempt = now
+                self._fm.ensure_connected()
 
         ctrl = self._ctrl
 
