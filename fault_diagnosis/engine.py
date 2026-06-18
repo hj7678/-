@@ -815,14 +815,13 @@ class DiagnosisEngine:
                     category="cart",
                 ))
 
-            # 规则3：无任务时分料激活
-            has_active = bool(snapshot.active_route_ids)
-            if not has_active and (cart.left_divert or cart.right_divert):
+            # 规则3: 分料互斥检查(必须一true一false, 不能同时true)
+            if cart.left_divert and cart.right_divert:
                 results.append(DiagnosisResult(
                     sensor_id=f"{cart_id}_divert",
-                    fault_type="divert_no_task",
-                    confidence=0.50,
-                    description=f"{cart_id}分料异常: 无活跃路线但分料传感器激活",
+                    fault_type="divert_mutual_exclusion",
+                    confidence=0.95,
+                    description=f"{cart_id}分料异常: 左右分料同时为true",
                     category="cart",
                 ))
 
