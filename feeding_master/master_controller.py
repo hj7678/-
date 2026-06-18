@@ -724,8 +724,9 @@ class FeedingMasterController:
             print(f"[FM] 手动停止: {route_id} {ctx.state.value}→STANDBY", flush=True)
 
     def _on_belt_active(self, belt_id: str, active: bool):
-        """UI点击皮带按钮 → 强制启动该皮带调度"""
+        """UI点击皮带按钮 → 激活该皮带 + 强制启动调度"""
         if active and belt_id in ('D6', 'D7', 'D8', 'D9'):
+            self.scheduler._belt_activated[belt_id] = True
             print(f"[FM-Sched] {belt_id} 启动调度", flush=True)
             self.scheduler.request_schedule_now(belt_id)
 

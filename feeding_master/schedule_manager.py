@@ -53,6 +53,7 @@ class ScheduleManager:
 
         # 防抖: 每个belt每次tick最多触发一次
         self._tick_triggered: set = set()
+        self._belt_activated: Dict[str, bool] = {b: False for b in ['D6','D7','D8','D9']}
 
         self._on_sequence: Optional[callable] = None
 
@@ -71,11 +72,13 @@ class ScheduleManager:
             print("[FM-Sched] 调度服务已关闭", flush=True)
 
     def tick(self, total_runtime: float):
-        """检查是否需要触发调度"""
+        """检查是否需要触发调度(仅已激活的belt)"""
         if not getattr(self, '_active', False):
             return
         self._tick_triggered.clear()
         for belt_id in SCHEDULING_PORTS:
+            if not self._belt_activated.get(belt_id, False):
+                continue
             if self._check_emergency(belt_id, total_runtime):
                 continue
             if self._check_idle(belt_id, total_runtime):
