@@ -9,6 +9,7 @@
 | 编码 | UTF-8 |
 | 格式 | JSON Lines（每条消息以 `\n` 结尾） |
 | 连接模型 | 上位机为客户端。FM 同时只接受一个连接，新连接自动断开旧连接。 |
+| 重连 | 上位机自动重连（每 3s），先启 HMI 后启 FM 也能正常工作 |
 | 通信模式 | 全双工 |
 
 ---
@@ -191,6 +192,8 @@
 
 **`maintenance_bins`** — 检修中的料仓 ID 列表，FM 传给调度引擎排除。
 
+**`d7_feed_override`** — D7 用户在 UI 选择的上料点（`feed1_1`/`feed1_2`/`feed2_1`），FM 只激活该上料点的路线。
+
 ---
 
 ### 1.2 manual_start — 手动上料
@@ -321,6 +324,24 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 | `executing_bin` | `{string: string}` | 每条皮带 (D6/D7/D8/D9) 当前执行的料仓，空串=无 |
 | `sequences` | `{string: [string]}` | 每条皮带的调度队列 |
 
+#### 2.1.4 `diagnosis` — 故障诊断结果
+
+FM → :8890 → 结果通过此字段推送。故障持续则持续推送，消失后 3s 清空。`null` 清空 HMI。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `sensor_id` | string | 传感器 ID |
+| `fault_type` | string | stuck_low / stuck_high / conveyor_should_run 等 |
+| `confidence` | float | 0-1 |
+| `description` | string | 简化描述 |
+| `category` | string | proximity / hopper_switch / conveyor / cart / cross_sensor |
+
+HMI 显示格式：`[类别] ID: 故障名`，如 `[接近开关] S-D13: 卡低`。
+
+#### 2.1.5 诊断快照（FM → :8890）
+
+FM 每 500ms 向 :8890 发送状态快照，包含 `sensors` / `hoppers` / `conveyor_sensors` / `cart_sensors` / `route_states` / `clearing_strategies`。
+
 ---
 
 ## 三、路线与设备对应关系
@@ -371,7 +392,16 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
   │── manual_stop  ─────────────────→│  用户点击停止按钮
   │── emergency_stop ───────────────→│  急停按钮
   │── belt_active   ─────────────────→│  用户点击全部自动/单条皮带
+  │                                   │
+  │  FM ←── :8890 ──→ 诊断引擎         │  状态快照 → 诊断, 结果 ← FM
 ```
+
+## 六、一键启动
+
+```bash
+py start_fm.py
+```
+按顺序启动 Stock→调度→诊断→FM→HMI（每个间隔 2s），各服务独立窗口。
 
 ---
 
