@@ -150,18 +150,9 @@ class TcpDiagnosisServer:
         snapshot = self.adapter.build_snapshot(data)
         results = self.engine.diagnose(snapshot)
 
-        # DEBUG: 打印关键数据帮助排查
-        route_states = data.get('route_states', {})
-        active_routes = [rid for rid, r in snapshot.routes.items() if r.state.value != 'idle']
-        if active_routes:
-            logger.info(f"活跃路线: {[(rid, snapshot.routes[rid].state.value) for rid in active_routes]}")
-            logger.info(f"route_states入参: {route_states}")
-            for rid in active_routes:
-                r = snapshot.routes[rid]
-                states = [(sid, snapshot.proximity_sensors[sid].state) for sid in r.proximity_sensor_ids if sid in snapshot.proximity_sensors]
-                logger.info(f"  {rid} 传感器状态: {states}")
+        # 诊断结果日志(仅异常时输出)
         if results:
-            logger.info(f"诊断结果: {len(results)}条 — {[(r.sensor_id, r.fault_type, r.confidence) for r in results[:5]]}")
+            logger.info(f"诊断: {len(results)}个故障 — {[(r.sensor_id, r.fault_type) for r in results[:5]]}")
         ts = data.get("timestamp", "") or datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         diagnosis_text = _format_diagnosis_results(results)
         response = {
