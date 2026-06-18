@@ -872,6 +872,7 @@ class DiagnosisEngine:
                     r = snapshot.routes.get(rid)
                     if r and r.state == RouteState.CLEARING and strategies.get(rid) == 'sequential':
                         sequential_endpoint = True
+                        logger.info(f"顺序终点跳过 {cid} route={rid} strat={strategies.get(rid)}")
                         break
             if any_active and not is_endpoint:
                 if not conv.is_running:
