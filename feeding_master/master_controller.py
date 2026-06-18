@@ -358,7 +358,7 @@ class FeedingMasterController:
                         if not hasattr(self, '_deactivated_routes'):
                             self._deactivated_routes = set()
                         self._deactivated_routes.add(route_id)
-                        parts.append("节能待机")
+                        print(f"[FM] {route_id}: waiting → standby | 节能待机", flush=True)
                         ctx.clearing_start_time = 0
 
             # 执行器命令
