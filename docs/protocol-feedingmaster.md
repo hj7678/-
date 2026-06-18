@@ -302,7 +302,18 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 **中转斗** (`device: "hopper"`): `action`: `"open"` | `"close"`。ID: `hopper1` ~ `hopper7`。
 
-**上料点** (`device: "feed_point"`): `action`: `"start"` | `"stop"`。ID: `feed1_1` / `feed1_2` / `feed2_1` / `feed2_2` / `feed3`（`silo_out` 无需控制）。
+**上料点** (`device: "feed_point"`): `action`: `"start"` | `"stop"`（或 `"on"` | `"off"`）。
+
+| ID | 对应上料点 | 路线 |
+|-----|---------|------|
+| feed1_1 | 上料点1-1 | route1 |
+| feed1_2 | 上料点1-2 | route2 |
+| feed2_1 | 上料点2-1 | route3 |
+| feed2_2 | 上料点2-2 | route4/route5 |
+| feed3 | 上料点3 | route6 |
+| silo_out | 高位储料仓 | route7/route8 |
+
+FM 在 FEEDING 阶段启动对应上料点，CLEARING 阶段停止。
 
 **小车** (`device: "cart"`): `action`: `"move"`。附加字段：`target`（目标位置 int），`route_id`（关联路线 string）。ID: `Cart1`, `Cart2`, `Cart3`, `Cart4`。
 
