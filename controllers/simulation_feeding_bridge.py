@@ -195,9 +195,9 @@ class SimulationFeedingBridge(QObject):
                 self._ctrl._scheduled_sequence.clear()
                 self._ctrl._scheduled_sequence.update(sd.get('sequences', {}))
         # 故障诊断结果转发到仿真
-        diag = msg.get('diagnosis', [])
-        if diag and hasattr(self._ctrl, 'set_diagnosis_results'):
-            self._ctrl.set_diagnosis_results(diag)
+        diag = msg.get('diagnosis', None)
+        if hasattr(self._ctrl, 'set_diagnosis_results'):
+            self._ctrl.set_diagnosis_results(diag if diag else [])
         self.command_received.emit(commands)
 
     def apply_commands(self, commands: List[dict]):
