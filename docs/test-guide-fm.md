@@ -5,8 +5,9 @@
 ### 一键启动（推荐）
 
 ```bash
-start_fm.bat
+py start_fm.py
 ```
+或双击 `start_fm.py`（如关联 .py 文件）。
 
 ### 手动启动（5 终端）
 
