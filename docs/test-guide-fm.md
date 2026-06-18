@@ -51,7 +51,7 @@ python -m upper_hmi.main
 | 8894 | 调度 D6 | T2 |
 | 8895 | Stock | T1 |
 | 8896 | FeedingMaster | T4 |
-| 8897 | 故障诊断 | T3 |
+| 8890 | 故障诊断 | T3 |
 
 ## 常见问题
 

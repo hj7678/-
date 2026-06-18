@@ -759,7 +759,7 @@ class FeedingMasterController:
             try:
                 sock = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
                 sock.settimeout(3)
-                sock.connect(('127.0.0.1', 8897))
+                sock.connect(('127.0.0.1', 8890))
                 # 发送状态快照
                 snap = self._build_diag_snapshot()
                 sock.sendall((_json.dumps(snap, ensure_ascii=False) + "\n").encode("utf-8"))
@@ -780,26 +780,54 @@ class FeedingMasterController:
             time.sleep(0.5)  # 500ms间隔
 
     def _build_diag_snapshot(self) -> dict:
-        """构建诊断快照"""
-        routes = []
+        """构建诊断快照 (匹配 TcpDataAdapter 格式)"""
+        # 传感器: {"S-E1": bool, ...}
+        sensors = dict(self._sensor_states.get('proximity', {}))
+        # 斗: {"hopper1": {"switch": bool, "weight": float}, ...}
+        hoppers = {}
+        for hid, h in self.hoppers.items():
+            hoppers[hid] = {"switch": h.is_open, "weight": h.get_display_weight()}
+        # 皮带转速传感器: {"S-CV-E1": int, ...}
+        speed_map = {
+            'E1': 'S-CV-E1','E2': 'S-CV-E2','E4': 'S-CV-E4','E5': 'S-CV-E5',
+            'E6': 'S-CV-E6','E7': 'S-CV-E7','E8': 'S-CV-E8','E9': 'S-CV-E9','E10': 'S-CV-E10',
+            'D1': 'S-CV-D1','D2': 'S-CV-D2','D3': 'S-CV-D3','D4': 'S-CV-D4','D5': 'S-CV-D5',
+            'D6': 'S-CV-D6','D7': 'S-CV-D7','D8': 'S-CV-D8','D9': 'S-CV-D9','D13': 'S-CV-D13',
+        }
+        conv_sensors = {}
+        for cid, conv in self.conveyors.items():
+            sid = speed_map.get(cid)
+            if sid:
+                conv_sensors[sid] = int(conv.current_speed * 100) if conv.is_running else 0
+        # 小车: {"Cart1": {"position": int, "left_limit": bool, ...}, ...}
+        carts = {}
+        for cart_id in ['Cart1', 'Cart2', 'Cart3']:
+            pos = self._cart_positions.get(cart_id, 1)
+            carts[cart_id] = {
+                "position": pos, "left_limit": pos==1, "right_limit": pos==7,
+                "left_divert": self._cart_divert.get(cart_id, (True,False))[0],
+                "right_divert": self._cart_divert.get(cart_id, (False,True))[1],
+            }
+        pos4 = self._cart_positions.get('Cart4', 1)
+        carts['Cart4'] = {
+            "position": pos4, "left_limit": pos4==1, "right_limit": pos4==6,
+            "left_divert": self._cart_divert.get('Cart4', (True,False))[0],
+            "right_divert": self._cart_divert.get('Cart4', (False,True))[1],
+        }
+        # 路线状态
+        route_states = {}
         for rid in self._active_routes:
             ctx = self.route_manager.get_route_context(rid)
-            if not ctx: continue
-            cart_id = ctx.assigned_cart or ''
-            routes.append({
-                "route_id": rid,
-                "state": ctx.state.value,
-                "cart_id": cart_id,
-                "cart_position": self._cart_positions.get(cart_id, 1),
-                "cart_moving": self._cart_moving.get(cart_id, False),
-                "target_bin": ctx.target_bin or '',
-            })
+            if ctx:
+                route_states[rid] = ctx.state.value
         return {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "routes": routes,
-            "conveyors": {cid: conv.is_running for cid, conv in self.conveyors.items()},
-            "hoppers": {hid: h.is_open for hid, h in self.hoppers.items()},
-            "proximity": dict(self._sensor_states.get('proximity', {})),
+            "sensors": sensors,
+            "hoppers": hoppers,
+            "conveyor_sensors": conv_sensors,
+            "cart_sensors": carts,
+            "route_states": route_states,
+            "feed_signals": {},  # FM模式无此数据
         }
 
     def deactivate_route(self, route_id: str):
