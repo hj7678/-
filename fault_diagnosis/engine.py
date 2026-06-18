@@ -22,7 +22,7 @@ from fault_diagnosis.types import (
     DiagnosisResult,
 )
 
-REPORT_COOLDOWN = 30.0
+REPORT_COOLDOWN = 1.0
 CONVEYOR_FAULT_DURATION = 10.0
 HOPPER_SWITCH_STUCK_OPEN_DURATION = 30
 CLEARING_FAULT_DURATION = 60.0    # clearing阶段故障需持续60s才判定
@@ -409,6 +409,7 @@ class DiagnosisEngine:
                         elapsed = ts - was
                         logger.info(f"卡低计时 {sid}: {elapsed:.1f}s/8s")
                     if ts - was >= FEEDING_MIDDLE_STUCK_LOW_DURATION:
+                        logger.info(f"卡低检测! {sid} {ts-was:.1f}s ≥ 8s")
                         results.append(DiagnosisResult(
                             sensor_id=sid,
                             fault_type="stuck_low",
