@@ -267,7 +267,10 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
     {"device": "belt", "id": "D7", "action": "stop"},
     {"device": "hopper", "id": "hopper1", "action": "open"},
     {"device": "hopper", "id": "hopper3", "action": "close"},
-    {"device": "cart", "id": "Cart1", "action": "move", "target": 3, "route_id": "route1"}
+    {"device": "feed_point", "id": "feed1_1", "action": "start"},
+    {"device": "feed_point", "id": "feed2_1", "action": "stop"},
+    {"device": "cart", "id": "Cart1", "action": "move", "target": 3, "route_id": "route1"},
+    {"device": "cart", "id": "Cart4", "action": "move", "target": 6, "route_id": "route5"}
   ],
   "route_states": {
     "route1": {"state": "feeding", "target_bin": "P1-1", "cart_target": 1, "cart_moving": false},
