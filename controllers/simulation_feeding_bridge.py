@@ -117,8 +117,13 @@ class SimulationFeedingBridge(QObject):
             self._stock.set_consumption_rates_batch(rates)
 
         # 推送传感器状态到 FeedingMaster
+        # 故障覆盖(最高优先级): 故障模拟注入的传感器值
+        fault_overrides = {}
+        if hasattr(ctrl, 'control_strategy_generator'):
+            fault_overrides = getattr(ctrl.control_strategy_generator, 'fault_overrides', {})
+
         sensor_data = {
-            "proximity": {sid: s.is_active for sid, s in ctrl.sensors.items()},
+            "proximity": {sid: fault_overrides.get(sid, s.is_active) for sid, s in ctrl.sensors.items()},
             "hopper_states": {hid: h.is_open for hid, h in ctrl.hoppers.items()},
             "hopper_weights": {hid: h.get_display_weight() for hid, h in ctrl.hoppers.items()},
             "cart_positions": {
