@@ -9,10 +9,10 @@ FeedingMaster 调度与清空策略配置
 # 当目标料仓料位达到此阈值时触发 CLEARING
 # ══════════════════════════════════════════════
 CLEARING_THRESHOLDS = {
-    'D7': {'sequential': 98, 'reverse': 95, 'column_switch': 88},
-    'D8': {'sequential': 98, 'reverse': 95, 'column_switch': 88},
-    'D9': {'sequential': 98, 'reverse': 94, 'column_switch': 88},  # Cart3特殊
-    'D6': {'sequential': 98, 'reverse': 95, 'column_switch': 88},
+    'D7': {'sequential': 98, 'reverse': 95, 'column_switch': 90},
+    'D8': {'sequential': 98, 'reverse': 95, 'column_switch': 90},
+    'D9': {'sequential': 90, 'reverse': 90, 'column_switch': 90},  # Cart3特殊
+    'D6': {'sequential': 93, 'reverse': 93, 'column_switch': 93},
 }
 
 # ══════════════════════════════════════════════

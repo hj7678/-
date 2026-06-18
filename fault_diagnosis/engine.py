@@ -32,7 +32,7 @@ DEFAULT_FAULT_DURATION = 3.0      # 所有未指定持续时间的故障统一3s
 
 # 阶段特定常量
 FEEDING_UPSTREAM_LIT_TIMEOUT_S = 80.0     # feeding: 上游点亮超时判卡低（末尾传感器）
-FEEDING_MIDDLE_STUCK_LOW_DURATION = 8.0  # feeding: 传感器卡低需持续时长
+FEEDING_MIDDLE_STUCK_LOW_DURATION = 40.0  # feeding: 传感器卡低需持续时长
 CLEARING_PROXIMITY_MAX_LIT_S = 50.0         # clearing: 接近开关最大点亮时长
 
 WAITING_WEIGHT_VOLATILITY_THRESHOLD = 3  # waiting: 称重波动阈值(t)
