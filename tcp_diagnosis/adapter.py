@@ -49,9 +49,8 @@ class TcpDataAdapter:
     def build_snapshot(self, data: dict) -> SystemSnapshot:
         ts = self._parse_timestamp(data.get('timestamp', ''))
         conveyor_states = self._parse_conveyor_states(data.get('conveyor_sensors', {}))
-        active_route_ids = self._infer_active_routes(data.get('feed_signals', {}), route_states_raw)
-
         route_states_raw: Dict[str, str] = data.get('route_states', {})
+        active_route_ids = self._infer_active_routes(data.get('feed_signals', {}), route_states_raw)
 
         routes: Dict[str, RouteSnapshot] = {}
         for route_id, route_cfg in FEED_ROUTES.items():
