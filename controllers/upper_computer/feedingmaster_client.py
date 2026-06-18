@@ -61,6 +61,16 @@ class FeedingMasterClient:
             except Exception:
                 pass
 
+    def is_connected(self) -> bool:
+        with self._lock:
+            return self._sock is not None and self._running
+
+    def ensure_connected(self) -> bool:
+        if self.is_connected():
+            return True
+        self.disconnect()
+        return self.connect()
+
     def send_sensor_states(self, data: dict):
         """发送传感器状态给 FeedingMaster"""
         payload = {"type": "sensor_states", "data": data}

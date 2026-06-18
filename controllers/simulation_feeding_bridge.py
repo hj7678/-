@@ -90,6 +90,10 @@ class SimulationFeedingBridge(QObject):
         if not self._enabled:
             return
 
+        # 自动重连 (FM中途重启)
+        if not self._fm.is_connected():
+            self._fm.ensure_connected()
+
         ctrl = self._ctrl
 
         # 限频: FM接管时100ms, 监控时500ms
