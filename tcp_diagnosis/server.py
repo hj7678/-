@@ -153,6 +153,10 @@ class TcpDiagnosisServer:
         # 诊断结果日志
         if results:
             logger.info(f"诊断: {len(results)}个故障 — {[(r.sensor_id, r.fault_type) for r in results[:5]]}")
+        else:
+            active = [(rid, r.state.value) for rid, r in snapshot.routes.items() if r.state.value != 'idle']
+            if active:
+                logger.info(f"活跃路线状态: {active}")
         ts = data.get("timestamp", "") or datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         diagnosis_text = _format_diagnosis_results(results)
         response = {
