@@ -401,9 +401,13 @@ class DiagnosisEngine:
                 middle_ok = (up_ok and down_ok)
                 if middle_ok or first_ok or last_ok:
                     key = f"{sid}:stuck_low_mid_feeding"
-                    start = self._proximity_fault_start.get(key, ts)
-                    self._proximity_fault_start[key] = start
-                    logger.info(f"卡低计时 {sid}: {(ts-start):.1f}s/8s first_ok={first_ok} middle_ok={middle_ok}")
+                    was = self._proximity_fault_start.get(key, 0)
+                    if was == 0:
+                        self._proximity_fault_start[key] = ts
+                        logger.info(f"卡低计时 {sid}: 开始计时 ts={ts:.3f}")
+                    else:
+                        elapsed = ts - was
+                        logger.info(f"卡低计时 {sid}: {elapsed:.1f}s/8s")
                     if ts - start >= FEEDING_MIDDLE_STUCK_LOW_DURATION:
                         results.append(DiagnosisResult(
                             sensor_id=sid,
