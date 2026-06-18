@@ -486,8 +486,13 @@ class FeedingMasterController:
             }
             if self._diag_results:
                 self._last_diag = list(self._diag_results)
+                self._last_diag_time = self._total_runtime
                 self._diag_results.clear()
-            diag = getattr(self, '_last_diag', None)
+            # 故障超过5s未更新则清除HMI显示
+            diag = None
+            if hasattr(self, '_last_diag') and hasattr(self, '_last_diag_time'):
+                if self._total_runtime - self._last_diag_time < 5.0:
+                    diag = self._last_diag
             self.server.send_commands(commands, route_info, sched_info, diag)
             if hasattr(self, '_deactivated_routes'):
                 self._deactivated_routes.clear()

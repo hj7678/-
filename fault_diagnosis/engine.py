@@ -22,7 +22,7 @@ from fault_diagnosis.types import (
     DiagnosisResult,
 )
 
-REPORT_COOLDOWN = 30.0
+REPORT_COOLDOWN = 1.0  # 实时推送, 不做冷却
 CONVEYOR_FAULT_DURATION = 10.0
 HOPPER_SWITCH_STUCK_OPEN_DURATION = 30
 CLEARING_FAULT_DURATION = 60.0    # clearing阶段故障需持续60s才判定
