@@ -786,8 +786,9 @@ class FeedingMasterController:
                     buf += chunk
                 if buf:
                     resp = _json.loads(buf.decode("utf-8").strip())
-                    if resp.get("ok"):
-                        self._diag_results = resp.get("results", [])
+                    results = resp.get("diagnosis_results", [])
+                    if results:
+                        self._diag_results = results
             except Exception:
                 if sock:
                     try: sock.close()
@@ -835,10 +836,9 @@ class FeedingMasterController:
         }
         # 路线状态
         route_states = {}
-        for rid in self._active_routes:
+        for rid in ['route1','route2','route3','route4','route5','route6','route7','route8']:
             ctx = self.route_manager.get_route_context(rid)
-            if ctx:
-                route_states[rid] = ctx.state.value
+            route_states[rid] = ctx.state.value if ctx else 'idle'
         return {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "sensors": sensors,
