@@ -1,22 +1,21 @@
 # FM 接管模式 — 测试运行指南
 
-## 启动顺序（5 终端）
+## 启动
+
+### 一键启动（推荐）
 
 ```bash
-# 终端 1: Stock 料仓数据
-python -m stock_management.main
+start_fm.bat
+```
 
-# 终端 2: 调度引擎
-python -m scheduling.main
+### 手动启动（5 终端）
 
-# 终端 3: 故障诊断 (可选, 不启动则 FM 静默跳过)
-python -m tcp_diagnosis.main
-
-# 终端 4: FeedingMaster 控制大脑
-python -m feeding_master.main
-
-# 终端 5: 上位机 HMI (自动 FM 接管)
-python -m upper_hmi.main
+```bash
+# 终端 1: Stock    python -m stock_management.main
+# 终端 2: 调度      python -m scheduling.main
+# 终端 3: 诊断     python -m tcp_diagnosis.main
+# 终端 4: FM       python -m feeding_master.main
+# 终端 5: HMI      python -m upper_hmi.main
 ```
 
 ## 操作流程
