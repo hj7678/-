@@ -387,11 +387,13 @@ class DiagnosisEngine:
             downstream = self._get_downstream_sensors(route, sid, snapshot)
             is_last = self._is_last_sensor(route, sid)
 
-            # 卡低：上游和下游都true，本传感器false
+            # 卡低：上游和/或下游都true，本传感器false
             if not sensor.state:
                 up_ok = len(upstream) > 0 and all(s.state for s in upstream)
                 down_ok = len(downstream) > 0 and all(s.state for s in downstream)
-                if up_ok and down_ok:
+                # 首传感器: 只有下游, 下游全true即可
+                # 中间传感器: 上游和下游都true
+                if (up_ok and down_ok) or (not upstream and down_ok):
                     key = f"{sid}:stuck_low_mid_feeding"
                     start = self._proximity_fault_start.get(key, ts)
                     self._proximity_fault_start[key] = start
