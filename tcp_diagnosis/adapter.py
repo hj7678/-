@@ -113,7 +113,7 @@ class TcpDataAdapter:
                 right_divert=bool(_val(cart.get('right_divert', {}), False)),
             )
 
-        return SystemSnapshot(
+        snapshot = SystemSnapshot(
             timestamp=ts,
             active_route_ids=active_route_ids,
             routes=routes,
@@ -122,6 +122,8 @@ class TcpDataAdapter:
             conveyors=conveyor_snapshots,
             carts=cart_snapshots,
         )
+        snapshot.clearing_strategies = data.get('clearing_strategies', {})
+        return snapshot
 
     def _parse_timestamp(self, ts_str: str) -> float:
         """解析时间戳字符串为 float（秒），失败则用当前时间"""

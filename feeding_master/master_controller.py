@@ -844,6 +844,12 @@ class FeedingMasterController:
         for rid in ['route1','route2','route3','route4','route5','route6','route7','route8']:
             ctx = self.route_manager.get_route_context(rid)
             route_states[rid] = ctx.state.value if ctx else 'idle'
+        # 清空策略传给诊断 (用于顺序策略终点皮带例外)
+        clearing_strategies = {}
+        for rid in ['route1','route2','route3','route4','route5','route6','route7','route8']:
+            ctx = self.route_manager.get_route_context(rid)
+            if ctx and hasattr(ctx, 'clearing_strategy'):
+                clearing_strategies[rid] = ctx.clearing_strategy
         return {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "sensors": sensors,
@@ -851,6 +857,7 @@ class FeedingMasterController:
             "conveyor_sensors": conv_sensors,
             "cart_sensors": carts,
             "route_states": route_states,
+            "clearing_strategies": clearing_strategies,
             "feed_signals": {},  # FM模式无此数据
         }
 

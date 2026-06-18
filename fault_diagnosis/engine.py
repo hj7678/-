@@ -903,6 +903,15 @@ class DiagnosisEngine:
             is_endpoint = cid in belt_endpoints and any(
                 snapshot.routes.get(rid) and snapshot.routes[rid].state in active_states
                 for rid in belt_endpoints.get(cid, set()))
+            # 顺序策略终点: CLEARING期间终点皮带故意停止, 跳过检查
+            sequential_endpoint = False
+            if is_endpoint:
+                strategies = getattr(snapshot, 'clearing_strategies', {})
+                for rid in belt_endpoints.get(cid, set()):
+                    r = snapshot.routes.get(rid)
+                    if r and r.state == RouteState.CLEARING and strategies.get(rid) == 'sequential':
+                        sequential_endpoint = True
+                        break
             if any_active and not is_endpoint:
                 if not conv.is_running:
                     key = f"{cid}:should_run"
@@ -913,7 +922,11 @@ class DiagnosisEngine:
                             description=f"皮带{cid} 应运行但停止", category="conveyor"))
                 else: self._conveyor_fault_start.pop(f"{cid}:should_run", None)
             elif any_active and is_endpoint:
-                if any_fc:
+                if sequential_endpoint:
+                    # 顺序策略: 终点皮带清空期被故意停止, 不检查
+                    self._conveyor_fault_start.pop(f"{cid}:endpoint_run", None)
+                    self._conveyor_fault_start.pop(f"{cid}:endpoint_stop", None)
+                elif any_fc:
                     if not conv.is_running:
                         key = f"{cid}:endpoint_run"
                         if key not in self._conveyor_fault_start: self._conveyor_fault_start[key] = ts
