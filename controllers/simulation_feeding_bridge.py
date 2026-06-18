@@ -176,8 +176,10 @@ class SimulationFeedingBridge(QObject):
         if schedule:
             sd = schedule
             if hasattr(self._ctrl, '_executing_bin'):
+                self._ctrl._executing_bin.clear()
                 self._ctrl._executing_bin.update(sd.get('executing_bin', {}))
             if hasattr(self._ctrl, '_scheduled_sequence'):
+                self._ctrl._scheduled_sequence.clear()
                 self._ctrl._scheduled_sequence.update(sd.get('sequences', {}))
         # 故障诊断结果转发到仿真
         diag = msg.get('diagnosis', [])
