@@ -22,7 +22,7 @@ from fault_diagnosis.types import (
     DiagnosisResult,
 )
 
-REPORT_COOLDOWN = 1.0
+REPORT_COOLDOWN = 30.0
 CONVEYOR_FAULT_DURATION = 10.0
 HOPPER_SWITCH_STUCK_OPEN_DURATION = 30
 CLEARING_FAULT_DURATION = 60.0    # clearing阶段故障需持续60s才判定
@@ -404,12 +404,7 @@ class DiagnosisEngine:
                     was = self._proximity_fault_start.get(key, 0)
                     if was == 0:
                         self._proximity_fault_start[key] = ts
-                        logger.info(f"卡低计时 {sid}: 开始计时 ts={ts:.3f}")
-                    else:
-                        elapsed = ts - was
-                        logger.info(f"卡低计时 {sid}: {elapsed:.1f}s/8s")
-                    if ts - was >= FEEDING_MIDDLE_STUCK_LOW_DURATION:
-                        logger.info(f"卡低检测! {sid} {ts-was:.1f}s ≥ 8s")
+                    elif ts - was >= FEEDING_MIDDLE_STUCK_LOW_DURATION:
                         results.append(DiagnosisResult(
                             sensor_id=sid,
                             fault_type="stuck_low",

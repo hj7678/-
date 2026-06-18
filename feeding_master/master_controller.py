@@ -810,11 +810,14 @@ class FeedingMasterController:
             'D1': 'S-CV-D1','D2': 'S-CV-D2','D3': 'S-CV-D3','D4': 'S-CV-D4','D5': 'S-CV-D5',
             'D6': 'S-CV-D6','D7': 'S-CV-D7','D8': 'S-CV-D8','D9': 'S-CV-D9','D13': 'S-CV-D13',
         }
+        # 从桥接的belt_states构造转速(非零=运行中)
+        belt_states = self._sensor_states.get('belt_states', {})
         conv_sensors = {}
-        for cid, conv in self.conveyors.items():
-            sid = speed_map.get(cid)
-            if sid:
-                conv_sensors[sid] = int(conv.current_speed * 100) if conv.is_running else 0
+        for cid, sid in speed_map.items():
+            if belt_states.get(cid, False):
+                conv_sensors[sid] = 100  # 运行中
+            else:
+                conv_sensors[sid] = 0
         # 小车: {"Cart1": {"position": int, "left_limit": bool, ...}, ...}
         carts = {}
         for cart_id in ['Cart1', 'Cart2', 'Cart3']:
