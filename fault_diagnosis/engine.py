@@ -389,6 +389,7 @@ class DiagnosisEngine:
             upstream = self._get_upstream_sensors(route, sid, snapshot)
             downstream = self._get_downstream_sensors(route, sid, snapshot)
             is_last = self._is_last_sensor(route, sid)
+            key = f"{sid}:stuck_low_mid_feeding"
 
             # 卡低：上游和/或下游都true，本传感器false
             if not sensor.state:
@@ -400,7 +401,6 @@ class DiagnosisEngine:
                 # 中间传感器: 上游&&下游都true
                 middle_ok = (up_ok and down_ok)
                 if middle_ok or first_ok or last_ok:
-                    key = f"{sid}:stuck_low_mid_feeding"
                     was = self._proximity_fault_start.get(key, 0)
                     if was == 0:
                         self._proximity_fault_start[key] = ts
@@ -408,18 +408,17 @@ class DiagnosisEngine:
                     else:
                         elapsed = ts - was
                         logger.info(f"卡低计时 {sid}: {elapsed:.1f}s/8s")
-                    if ts - start >= FEEDING_MIDDLE_STUCK_LOW_DURATION:
+                    if ts - was >= FEEDING_MIDDLE_STUCK_LOW_DURATION:
                         results.append(DiagnosisResult(
                             sensor_id=sid,
                             fault_type="stuck_low",
                             confidence=0.90,
-                            description=f"接近开关{sid}故障(卡低): 上/下游均点亮但本传感器未点亮持续{ts-start:.0f}s",
+                            description=f"接近开关{sid}故障(卡低): 上/下游均点亮但本传感器未点亮持续{ts-was:.0f}s",
                             category="proximity",
                         ))
                 elif not is_last and not (not upstream and len(downstream) > 0):
-                    self._proximity_fault_start.pop(f"{sid}:stuck_low_mid_feeding", None)
+                    self._proximity_fault_start.pop(key, None)
                 elif is_last and up_ok:
-                    feeding_start = self._route_state_since.get(route.route_id, ts)
                     upstream_lit_dur = min(
                         self._true_duration_since(s.sensor_id, feeding_start, ts)
                         for s in upstream
@@ -435,7 +434,7 @@ class DiagnosisEngine:
 
             # 卡高：上游和下游都false，本传感器true
             if sensor.state:
-                self._proximity_fault_start.pop(f"{sid}:stuck_low_mid_feeding", None)
+                self._proximity_fault_start.pop(key, None)
                 up_off = len(upstream) > 0 and all(not s.state for s in upstream)
                 down_off = len(downstream) > 0 and all(not s.state for s in downstream)
                 if up_off and down_off:
