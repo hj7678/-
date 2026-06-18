@@ -356,6 +356,11 @@ class DiagnosisEngine:
         """正常上料阶段：开关必须true；接近开关按上下游判断；皮带全部运行"""
         results = []
         ts = snapshot.timestamp
+        debug_states = []
+        for sid in route.proximity_sensor_ids[:3]:
+            s = snapshot.proximity_sensors.get(sid)
+            debug_states.append((sid, s.state if s else 'MISSING'))
+        logger.info(f"DEBUG FEEDING {route.route_id}: {debug_states}")
 
         for cid in route.conveyor_ids:
             conv = snapshot.conveyors.get(cid)
