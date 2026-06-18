@@ -429,6 +429,7 @@ class DiagnosisEngine:
                 elif not is_last and not (not upstream and len(downstream) > 0):
                     self._proximity_fault_start.pop(key, None)
                 elif is_last and up_ok:
+                    feeding_start = self._route_state_since.get(route.route_id, ts)
                     upstream_lit_dur = min(
                         self._true_duration_since(s.sensor_id, feeding_start, ts)
                         for s in upstream
@@ -557,88 +558,44 @@ class DiagnosisEngine:
     # ------------------------------------------------------------------
 
     def _check_waiting_stage(self, route, snapshot: SystemSnapshot) -> List[DiagnosisResult]:
-        """上料完成阶段：接近开关全false，开关全false，称重稳定，非终点皮带运行/终点皮带停止"""
         results = []
+        ts = snapshot.timestamp
 
         if route.conveyor_ids:
             end_cid = route.conveyor_ids[-1]
             for cid in route.conveyor_ids:
                 conv = snapshot.conveyors.get(cid)
-                if not conv:
-                    continue
+                if not conv: continue
                 if cid == end_cid:
                     if conv.is_running:
                         key = f"{cid}:waiting_stop"
-                        start = self._conveyor_fault_start.get(key, ts)
-                        self._conveyor_fault_start[key] = start
-                        if ts - start >= DEFAULT_FAULT_DURATION:
-                            results.append(DiagnosisResult(
-                                sensor_id=f"{cid}_state",
-                                fault_type="conveyor_should_stop",
-                                confidence=0.85,
-                                description=f"皮带{cid}异常: waiting阶段终点皮带应停止但为运行(持续{ts-start:.0f}s)",
-                                category="conveyor",
-                            ))
-                    else:
-                        self._conveyor_fault_start.pop(f"{cid}:waiting_stop", None)
+                        if key not in self._conveyor_fault_start: self._conveyor_fault_start[key] = ts
+                        if ts - self._conveyor_fault_start[key] >= DEFAULT_FAULT_DURATION:
+                            results.append(DiagnosisResult(sensor_id=f"{cid}_state", fault_type="conveyor_should_stop", confidence=0.85, description=f"皮带{cid} 终点应停止但运行", category="conveyor"))
+                    else: self._conveyor_fault_start.pop(f"{cid}:waiting_stop", None)
                 else:
                     if not conv.is_running:
                         key = f"{cid}:waiting_run"
-                        start = self._conveyor_fault_start.get(key, ts)
-                        self._conveyor_fault_start[key] = start
-                        if ts - start >= DEFAULT_FAULT_DURATION:
-                            results.append(DiagnosisResult(
-                                sensor_id=f"{cid}_state",
-                                fault_type="conveyor_should_run",
-                                confidence=0.85,
-                                description=f"皮带{cid}异常: waiting阶段非终点皮带应运行但为停止(持续{ts-start:.0f}s)",
-                                category="conveyor",
-                            ))
-                    else:
-                        self._conveyor_fault_start.pop(f"{cid}:waiting_run", None)
-
-        # for sid in route.proximity_sensor_ids:
-        #     sensor = snapshot.proximity_sensors.get(sid)
-        #     if sensor and sensor.state:
-        #         results.append(DiagnosisResult(
-        #             sensor_id=sid,
-        #             fault_type="stuck_high",
-        #             confidence=0.85,
-        #             description=f"接近开关{sid}故障(卡高): 上料完成阶段本应为false",
-        #             category="proximity",
-        #         ))
+                        if key not in self._conveyor_fault_start: self._conveyor_fault_start[key] = ts
+                        if ts - self._conveyor_fault_start[key] >= DEFAULT_FAULT_DURATION:
+                            results.append(DiagnosisResult(sensor_id=f"{cid}_state", fault_type="conveyor_should_run", confidence=0.85, description=f"皮带{cid} 非终点应运行但停止", category="conveyor"))
+                    else: self._conveyor_fault_start.pop(f"{cid}:waiting_run", None)
 
         for hid in route.hopper_ids:
             hopper = snapshot.hoppers.get(hid)
-            if not hopper:
-                continue
+            if not hopper: continue
             if hopper.switch_open:
                 key = f"{hid}:waiting_open"
-                start = self._hopper_switch_fault_start.get(key, ts)
-                self._hopper_switch_fault_start[key] = start
-                if ts - start >= DEFAULT_FAULT_DURATION:
-                    results.append(DiagnosisResult(
-                        sensor_id=hid,
-                        fault_type="hopper_switch_stuck_open",
-                        confidence=0.85,
-                        description=f"{hid}开关故障(卡开): waiting阶段应为false(持续{ts-start:.0f}s)",
-                        category="hopper_switch",
-                    ))
-            else:
-                self._hopper_switch_fault_start.pop(f"{hid}:waiting_open", None)
+                if key not in self._hopper_switch_fault_start: self._hopper_switch_fault_start[key] = ts
+                if ts - self._hopper_switch_fault_start[key] >= DEFAULT_FAULT_DURATION:
+                    results.append(DiagnosisResult(sensor_id=hid, fault_type="hopper_switch_stuck_open", confidence=0.85, description=f"{hid} 卡开", category="hopper_switch"))
+            else: self._hopper_switch_fault_start.pop(f"{hid}:waiting_open", None)
             vol = self._weight_volatility(hid, 3.0)
             if vol > WAITING_WEIGHT_VOLATILITY_THRESHOLD:
-                results.append(DiagnosisResult(
-                    sensor_id=hid,
-                    fault_type="weight_volatile",
-                    confidence=0.75,
-                    description=f"{hid}称重故障: 上料完成阶段称重波动{vol:.3f}t",
-                    category="hopper_weight",
-                ))
+                results.append(DiagnosisResult(sensor_id=hid, fault_type="weight_volatile", confidence=0.75, description=f"{hid} 称重波动{vol:.3f}t", category="hopper_weight"))
 
         return results
 
-    # ------------------------------------------------------------------
     # 阶段5：节能待机
     # ------------------------------------------------------------------
 
