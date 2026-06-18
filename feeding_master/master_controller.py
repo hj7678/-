@@ -129,6 +129,7 @@ class FeedingMasterController:
         self.scheduler.update_cart_state(self._cart_positions, self._cart_divert)
         self.scheduler._laser_states = data.get('laser_sensor_states', {})
         self.scheduler._maintenance_bins = set(data.get('maintenance_bins', []))
+        self._d7_feed_override = data.get('d7_feed_override', '')
         # 同步调度开关: UI点击"调度服务"后FM才开始请求调度
         self.scheduler.set_active(data.get('scheduling_active', False))
 
@@ -568,6 +569,10 @@ class FeedingMasterController:
         for feed_point, route_id in available:
             # feed3 优先级供 P2/P3，P4 不使用 feed3
             if feed_point == 'feed3' and prefix not in ('P2', 'P3'):
+                continue
+            # D7: 用户选择了指定上料点, 只选该上料点的路线
+            d7_override = getattr(self, '_d7_feed_override', '')
+            if belt_id == 'D7' and d7_override and feed_point != d7_override:
                 continue
             # silo_out 无需激光检测（默认有料）
             has_material = (feed_point == 'silo_out' or laser.get(feed_point, True))
