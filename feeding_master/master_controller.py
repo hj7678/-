@@ -763,17 +763,20 @@ class FeedingMasterController:
 
     def _diag_loop(self):
         import socket as _sk, json as _json
+        sock = None
         while self._running:
             try:
-                sock = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
-                sock.settimeout(3)
-                sock.connect(('127.0.0.1', 8890))
+                if sock is None:
+                    sock = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
+                    sock.settimeout(3)
+                    sock.connect(('127.0.0.1', 8890))
+                    sock.settimeout(None)
                 # 发送状态快照
                 snap = self._build_diag_snapshot()
                 sock.sendall((_json.dumps(snap, ensure_ascii=False) + "\n").encode("utf-8"))
                 # 接收诊断结果
                 buf = b""
-                sock.settimeout(5)
+                sock.settimeout(2)
                 while b"\n" not in buf:
                     chunk = sock.recv(4096)
                     if not chunk: break
@@ -782,10 +785,12 @@ class FeedingMasterController:
                     resp = _json.loads(buf.decode("utf-8").strip())
                     if resp.get("ok"):
                         self._diag_results = resp.get("results", [])
-                sock.close()
             except Exception:
-                pass
-            time.sleep(0.5)  # 500ms间隔
+                if sock:
+                    try: sock.close()
+                    except: pass
+                    sock = None
+            time.sleep(0.5)
 
     def _build_diag_snapshot(self) -> dict:
         """构建诊断快照 (匹配 TcpDataAdapter 格式)"""
