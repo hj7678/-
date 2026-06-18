@@ -614,10 +614,13 @@ class FeedingMasterController:
                 timeouts[sid] = self._HOPPER_BELT_TIMEOUTS.get((route_id, sid), 30.0)
 
             if is_active:
-                timers.pop(sid, None)
+                if sid in timers:
+                    del timers[sid]
             else:
                 if sid not in timers:
                     timers[sid] = self._total_runtime
+                else:
+                    pass  # 计时中
 
         ctx.sensor_clear_timers = timers
         return timers, timeouts
