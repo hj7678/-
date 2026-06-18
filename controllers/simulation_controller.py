@@ -2849,8 +2849,26 @@ class SimulationController(QObject):
         return self.fault_diagnosis.get_faulty_sensor_ids()
 
     def set_diagnosis_results(self, results: list):
-        """FM推送的故障诊断结果"""
-        self.diagnosis_result = [(r.get('sensor_id', ''), r.get('description', '')) for r in results]
+        """FM推送的故障诊断结果（简化描述）"""
+        self.diagnosis_result = []
+        for r in results:
+            sid = r.get('sensor_id', '')
+            # 简化: 只保留故障类型, 不输出原因
+            ft = r.get('fault_type', '')
+            cat = r.get('category', '')
+            category_cn = {'proximity': '接近开关', 'hopper_switch': '斗开关',
+                           'hopper_weight': '称重', 'cart': '小车',
+                           'conveyor': '皮带', 'cross_sensor': '综合'}.get(cat, cat)
+            fault_cn = {'stuck_low': '卡低', 'stuck_high': '卡高',
+                        'hopper_switch_stuck_closed': '卡关', 'hopper_switch_stuck_open': '卡开',
+                        'conveyor_should_run': '应运行但停止', 'conveyor_should_stop': '应停止但运行',
+                        'limit_mutual_exclusion': '极限互斥', 'divert_mutual_exclusion': '分料互斥',
+                        'weight_volatile': '称重波动', 'switch_weight_conflict': '开关称重矛盾',
+                        'speed_zero_while_running': '转速为零', 'speed_nonzero_while_stopped': '转速异常',
+                        'speed_volatile': '转速波动', 'route_all_sensors_false': '传感器全灭',
+                        }.get(ft, ft)
+            desc = f"[{category_cn}] {sid}: {fault_cn}"
+            self.diagnosis_result.append((sid, desc))
         self.mark_dirty()
 
     def get_diagnosis_result(self) -> List[Tuple[str, str]]:
