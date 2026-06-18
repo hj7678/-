@@ -941,6 +941,7 @@ class MainWindow(QMainWindow):
             self.logger.info(msg)
         elif new_state == 'standby':
             self.operation_log.add_log(f"> {route_name} 节能待机", "#8B949E")
+            self.logger.info(f"> {route_name} 节能待机")
         elif new_state == 'moving_to_target':
             self.operation_log.add_log(f"> {route_name} 小车驶向 {target}", "#3498DB")
         # 当进入等待状态时触发下一轮调度
