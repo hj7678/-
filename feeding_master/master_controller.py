@@ -834,16 +834,18 @@ class FeedingMasterController:
         carts = {}
         for cart_id in ['Cart1', 'Cart2', 'Cart3']:
             pos = self._cart_positions.get(cart_id, 1)
+            default_div = self._cart_divert.get(cart_id, (True, False))
             carts[cart_id] = {
                 "position": pos, "left_limit": pos==1, "right_limit": pos==7,
-                "left_divert": self._cart_divert.get(cart_id, (True,False))[0],
-                "right_divert": self._cart_divert.get(cart_id, (False,True))[1],
+                "left_divert": default_div[0],
+                "right_divert": default_div[1],
             }
         pos4 = self._cart_positions.get('Cart4', 1)
+        default_div = self._cart_divert.get('Cart4', (True, False))
         carts['Cart4'] = {
             "position": pos4, "left_limit": pos4==1, "right_limit": pos4==6,
-            "left_divert": self._cart_divert.get('Cart4', (True,False))[0],
-            "right_divert": self._cart_divert.get('Cart4', (False,True))[1],
+            "left_divert": default_div[0],
+            "right_divert": default_div[1],
         }
         # 路线状态
         route_states = {}
