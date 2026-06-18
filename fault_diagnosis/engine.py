@@ -13,6 +13,9 @@
 from collections import deque
 from typing import Dict, List
 
+import logging
+logger = logging.getLogger(__name__)
+
 from fault_diagnosis.types import (
     RouteState,
     SystemSnapshot,
@@ -400,6 +403,9 @@ class DiagnosisEngine:
                     key = f"{sid}:stuck_low_mid_feeding"
                     start = self._proximity_fault_start.get(key, ts)
                     self._proximity_fault_start[key] = start
+                    elapsed = (ts - start) / 1000
+                    if elapsed > 0 and int(elapsed) % 5 == 0 and int(elapsed * 10) % 50 == 0:
+                        logger.info(f"卡低计时 {sid}: {elapsed:.0f}s/30s up={len(upstream)} down={len(downstream)} first_ok={first_ok}")
                     if ts - start >= FEEDING_MIDDLE_STUCK_LOW_DURATION:
                         results.append(DiagnosisResult(
                             sensor_id=sid,
