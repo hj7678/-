@@ -690,6 +690,18 @@ class MainWindow(QMainWindow):
 
     def _on_belt_auto_mode_toggled(self, belt_id: str, enabled: bool):
         """单条皮带自动模式切换"""
+        if self.controller._use_feeding_master:
+            if enabled and self.controller._feeding_bridge is not None:
+                if belt_id == 'D7':
+                    fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
+                    item, ok = QInputDialog.getItem(self, "选择D7上料点",
+                        "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
+                    if ok:
+                        self.controller._d7_feed_override = item.split()[0]
+                self.controller._feeding_bridge._fm._send(
+                    {"type": "belt_active", "belt_id": belt_id, "active": True})
+                self._update_status_bar(f"{belt_id} 自动调度已启动")
+            return
         if enabled and belt_id == 'D7':
             # D7皮带：弹窗让用户选择上料点
             fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
