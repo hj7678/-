@@ -903,6 +903,10 @@ class DiagnosisEngine:
             is_endpoint = cid in belt_endpoints and any(
                 snapshot.routes.get(rid) and snapshot.routes[rid].state in active_states
                 for rid in belt_endpoints.get(cid, set()))
+            # 小车移动: 终点皮带故意停止, 不检查
+            is_endpoint_moving = is_endpoint and any(
+                snapshot.routes.get(rid) and snapshot.routes[rid].state == RouteState.MOVING_TO_TARGET
+                for rid in belt_endpoints.get(cid, set()))
             # 顺序策略终点: CLEARING期间终点皮带故意停止, 跳过检查
             sequential_endpoint = False
             if is_endpoint:
@@ -922,7 +926,7 @@ class DiagnosisEngine:
                             description=f"皮带{cid} 应运行但停止", category="conveyor"))
                 else: self._conveyor_fault_start.pop(f"{cid}:should_run", None)
             elif any_active and is_endpoint:
-                if sequential_endpoint:
+                if is_endpoint_moving or sequential_endpoint:
                     # 顺序策略: 终点皮带清空期被故意停止, 不检查
                     self._conveyor_fault_start.pop(f"{cid}:endpoint_run", None)
                     self._conveyor_fault_start.pop(f"{cid}:endpoint_stop", None)
@@ -968,7 +972,9 @@ class DiagnosisEngine:
             if not route or route.state != RouteState.FEEDING:
                 continue
 
-            # 规则1：活跃路线 FEEDING 但所有接近开关均为 false 超过 2s
+            # 规则1：FEEDING路线所有传感器false + 皮带运行 → 异常
+            if route.state != RouteState.FEEDING:
+                continue
             all_false = True
             for sid in route.proximity_sensor_ids:
                 sensor = snapshot.proximity_sensors.get(sid)
