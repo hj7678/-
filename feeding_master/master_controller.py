@@ -513,6 +513,12 @@ class FeedingMasterController:
         """激活一条路线, 若cart已在目标位则直接FEEDING跳过MOVE"""
         ok = self.route_manager.start_route(route_id, target_bin)
         if ok:
+            # start_route不处理S格式(Cart4), 补设正确目标
+            ctx = self.route_manager.get_route_context(route_id)
+            if ctx and ctx.assigned_cart == 'Cart4' and target_bin.startswith('S'):
+                t = compute_cart4_target_position(target_bin)
+                if t is not None:
+                    ctx.cart_target_position = t
             ctx = self.route_manager.get_route_context(route_id)
             if ctx:
                 ctx.clearing_strategy = 'reverse'
