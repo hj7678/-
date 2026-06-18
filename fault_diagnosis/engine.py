@@ -879,61 +879,66 @@ class DiagnosisEngine:
     def _diagnose_conveyors(self, snapshot: SystemSnapshot) -> List[DiagnosisResult]:
         results = []
         ts = snapshot.timestamp
-
-        for cid, conveyor in snapshot.conveyors.items():
-            # 规则1：皮带运行但转速为0，需持续10秒
-            key_zero = f"{cid}:speed_zero"
-            if conveyor.is_running and conveyor.speed == 0:
-                start = self._conveyor_fault_start.get(key_zero, ts)
-                self._conveyor_fault_start[key_zero] = start
-                if ts - start >= CONVEYOR_FAULT_DURATION:
-                    results.append(DiagnosisResult(
-                        sensor_id=f"{cid}_speed",
-                        fault_type="speed_zero_while_running",
-                        confidence=0.90,
-                        description=f"转速传感器{cid}故障: 皮带运行但转速为0",
-                        category="conveyor",
-                    ))
+        active_states = (RouteState.MOVING_TO_TARGET, RouteState.FEEDING,
+                         RouteState.CLEARING, RouteState.WAITING)
+        belt_routes = {}
+        belt_endpoints = {}
+        for rid, route in snapshot.routes.items():
+            convs = route.conveyor_ids
+            if not convs: continue
+            for cid in convs:
+                belt_routes.setdefault(cid, set()).add(rid)
+            belt_endpoints.setdefault(convs[-1], set()).add(rid)
+        for cid, conv in snapshot.conveyors.items():
+            using = belt_routes.get(cid, set())
+            any_active = False
+            any_fc = False
+            for rid in using:
+                r = snapshot.routes.get(rid)
+                if r and r.state in active_states:
+                    any_active = True
+                    if r.state in (RouteState.FEEDING, RouteState.CLEARING):
+                        any_fc = True
+            is_endpoint = cid in belt_endpoints and any(
+                snapshot.routes.get(rid) and snapshot.routes[rid].state in active_states
+                for rid in belt_endpoints.get(cid, set()))
+            if any_active and not is_endpoint:
+                if not conv.is_running:
+                    key = f"{cid}:should_run"
+                    if key not in self._conveyor_fault_start: self._conveyor_fault_start[key] = ts
+                    if ts - self._conveyor_fault_start[key] >= DEFAULT_FAULT_DURATION:
+                        results.append(DiagnosisResult(sensor_id=f"{cid}_state",
+                            fault_type="conveyor_should_run", confidence=0.85,
+                            description=f"皮带{cid} 应运行但停止", category="conveyor"))
+                else: self._conveyor_fault_start.pop(f"{cid}:should_run", None)
+            elif any_active and is_endpoint:
+                if any_fc:
+                    if not conv.is_running:
+                        key = f"{cid}:endpoint_run"
+                        if key not in self._conveyor_fault_start: self._conveyor_fault_start[key] = ts
+                        if ts - self._conveyor_fault_start[key] >= DEFAULT_FAULT_DURATION:
+                            results.append(DiagnosisResult(sensor_id=f"{cid}_state",
+                                fault_type="conveyor_should_run", confidence=0.85,
+                                description=f"皮带{cid} 终点应运行但停止", category="conveyor"))
+                    else: self._conveyor_fault_start.pop(f"{cid}:endpoint_run", None)
+                else:
+                    if conv.is_running:
+                        key = f"{cid}:endpoint_stop"
+                        if key not in self._conveyor_fault_start: self._conveyor_fault_start[key] = ts
+                        if ts - self._conveyor_fault_start[key] >= DEFAULT_FAULT_DURATION:
+                            results.append(DiagnosisResult(sensor_id=f"{cid}_state",
+                                fault_type="conveyor_should_stop", confidence=0.85,
+                                description=f"皮带{cid} 终点应停止但运行", category="conveyor"))
+                    else: self._conveyor_fault_start.pop(f"{cid}:endpoint_stop", None)
             else:
-                self._conveyor_fault_start.pop(key_zero, None)
-
-            # 规则2：皮带停止但转速非0，需持续10秒
-            key_nonzero = f"{cid}:speed_nonzero"
-            if not conveyor.is_running and conveyor.speed != 0:
-                start = self._conveyor_fault_start.get(key_nonzero, ts)
-                self._conveyor_fault_start[key_nonzero] = start
-                if ts - start >= CONVEYOR_FAULT_DURATION:
-                    results.append(DiagnosisResult(
-                        sensor_id=f"{cid}_speed",
-                        fault_type="speed_nonzero_while_stopped",
-                        confidence=0.90,
-                        description=f"转速传感器{cid}异常: 皮带停止但转速={conveyor.speed}",
-                        category="conveyor",
-                    ))
-            else:
-                self._conveyor_fault_start.pop(key_nonzero, None)
-
-            # 规则3：匀速运行阶段波动 > 30%，需持续10秒
-            key_volatile = f"{cid}:speed_volatile"
-            mean_speed = self._speed_mean(cid, 2.0)
-            is_volatile = (conveyor.is_running and mean_speed > 0
-                           and conveyor.speed != 0
-                           and abs(conveyor.speed - mean_speed) / mean_speed > 0.30)
-            if is_volatile:
-                start = self._conveyor_fault_start.get(key_volatile, ts)
-                self._conveyor_fault_start[key_volatile] = start
-                if ts - start >= CONVEYOR_FAULT_DURATION:
-                    deviation = abs(conveyor.speed - mean_speed) / mean_speed
-                    results.append(DiagnosisResult(
-                        sensor_id=f"{cid}_speed",
-                        fault_type="speed_volatile",
-                        confidence=0.50,
-                        description=f"转速传感器{cid}波动异常: 偏离均值{deviation*100:.0f}%",
-                        category="conveyor",
-                    ))
-            else:
-                self._conveyor_fault_start.pop(key_volatile, None)
-
+                if conv.is_running:
+                    key = f"{cid}:idle_stop"
+                    if key not in self._conveyor_fault_start: self._conveyor_fault_start[key] = ts
+                    if ts - self._conveyor_fault_start[key] >= DEFAULT_FAULT_DURATION:
+                        results.append(DiagnosisResult(sensor_id=f"{cid}_state",
+                            fault_type="conveyor_should_stop", confidence=0.85,
+                            description=f"皮带{cid} 应停止但运行", category="conveyor"))
+                else: self._conveyor_fault_start.pop(f"{cid}:idle_stop", None)
         return results
 
     # ========================================================================
