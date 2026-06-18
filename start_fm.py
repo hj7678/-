@@ -18,27 +18,23 @@ def main():
     print("=" * 50)
     print(" FM 接管模式 — 一键启动")
     print("=" * 50)
-    processes = []
     for name, module in SERVICES:
-        title = f"FM-{name}"
-        print(f"\n>>> 启动: {name} ({module})")
-        proc = subprocess.Popen(
-            [sys.executable, "-m", module],
-            creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0,
-        )
-        processes.append((name, proc))
+        print(f"\n>>> 启动: {name}")
+        if os.name == 'nt':
+            subprocess.Popen(
+                f'start "{name}" cmd /k "title {name} && py -m {module}"',
+                shell=True,
+            )
+        else:
+            subprocess.Popen(
+                [sys.executable, "-m", module],
+            )
         if name != "Upper HMI":
-            time.sleep(2)  # 等服务就绪
+            time.sleep(2)
     print("\n" + "=" * 50)
     print(" 全部已启动! 关闭此窗口不影响服务.")
     print("=" * 50)
-    try:
-        for name, proc in processes:
-            proc.wait()
-    except KeyboardInterrupt:
-        print("\n正在关闭所有服务...")
-        for name, proc in processes:
-            proc.terminate()
+    input("按 Enter 退出此窗口...")
 
 if __name__ == "__main__":
     main()
