@@ -64,6 +64,7 @@ class SimulationController(QObject):
     route_started = pyqtSignal(str)
     route_stopped = pyqtSignal(str)
     route_state_changed = pyqtSignal(str, str, str)  # route_id, old_state, new_state
+    schedule_updated = pyqtSignal()  # 调度序列更新
 
     def __init__(self):
         super().__init__()
@@ -1116,6 +1117,13 @@ class SimulationController(QObject):
             return 'reverse'
 
         next_bin = sequence[0]
+        # 对齐：若序列首项与当前正在执行的料仓相同，跳过取下一个
+        if next_bin == ctx.target_bin:
+            sequence.pop(0)
+            if not sequence:
+                self._scheduled_sequence.pop(belt_id, None)
+                return 'reverse'
+            next_bin = sequence[0]
 
         cur_col = ctx.target_bin.split('-')[0]
         next_col = next_bin.split('-')[0]
@@ -1847,6 +1855,8 @@ class SimulationController(QObject):
             self._scheduled_sequence.pop(belt_id, None)
             print(f"[调度] {belt_id} 启动失败，清除缓存等待下次触发", flush=True)
             belt_log(belt_id).info(f"[调度] {belt_id} 启动失败，清除缓存等待下次触发")
+
+        self.schedule_updated.emit()
 
     def _start_scheduled_route(self, belt_id: str, first_bin: str) -> bool:
         """启动调度结果中指定的路线，返回是否成功启动"""

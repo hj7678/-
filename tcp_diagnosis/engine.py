@@ -408,6 +408,12 @@ class DiagnosisEngine:
 
         for cid in route.conveyor_ids:
             conv = snapshot.conveyors.get(cid)
+            # 顺序清空策略：终点皮带可能被故意停止（清空后还未重新启动），跳过检查
+            strategy = getattr(route, 'clearing_strategy', 'reverse')
+            end_cid = route.conveyor_ids[-1] if route.conveyor_ids else None
+            if strategy == 'sequential' and cid == end_cid:
+                self._conveyor_fault_start.pop(f"{cid}:feeding_should_run", None)
+                continue
             if conv and not conv.is_running:
                 key = f"{cid}:feeding_should_run"
                 start = self._conveyor_fault_start.get(key, ts)
@@ -1006,9 +1012,13 @@ class DiagnosisEngine:
                     all_false = False
                     break
             if all_false and route.proximity_sensor_ids:
+                # 顺序清空策略：终点皮带可能被故意停止，此时非终点皮带运行是正常的，跳过跨传感器检查
+                strategy = getattr(route, 'clearing_strategy', 'reverse')
+                end_cid = route.conveyor_ids[-1] if route.conveyor_ids else None
                 running = any(
                     snapshot.conveyors.get(cid) and snapshot.conveyors[cid].is_running
                     for cid in route.conveyor_ids
+                    if not (strategy == 'sequential' and cid == end_cid)
                 )
                 if running:
                     key = f"{route_id}:all_sensors_false"
@@ -1064,6 +1074,13 @@ class DiagnosisEngine:
             first_sid = route.proximity_sensor_ids[0]
             sensor = snapshot.proximity_sensors.get(first_sid)
             if not sensor:
+                continue
+
+            # 起始皮带未运行则不诊断（物料尚未到达传感器位置）
+            first_cid = route.conveyor_ids[0] if route.conveyor_ids else ''
+            first_conv = snapshot.conveyors.get(first_cid) if first_cid else None
+            if first_conv and not first_conv.is_running:
+                self._feeding_blockage_start.pop(f"{route_id}:{route.feed_point or route_id}", None)
                 continue
 
             feed_point = route.feed_point or route_id

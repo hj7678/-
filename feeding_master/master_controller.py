@@ -341,8 +341,13 @@ class FeedingMasterController:
                 if next_state.value in ('waiting', 'standby'):
                     self.route_manager._release_resources(route_id)
                     belt_id = CART_TO_BELT.get(cart_id, '')
+                    completed_bin = ctx.target_bin
                     self.scheduler.mark_completed(belt_id)
+                    # 对齐序列：如果序列首项是刚完成的料仓，跳过它
                     nxt = self.scheduler.get_next_bin(belt_id)
+                    if nxt and nxt == completed_bin:
+                        self.scheduler.pop_next_bin(belt_id)
+                        nxt = self.scheduler.get_next_bin(belt_id)
                     if nxt:
                         self.scheduler.pop_next_bin(belt_id)
                         self._pending_auto_continue = (belt_id, nxt)
@@ -462,32 +467,40 @@ class FeedingMasterController:
 
         # 4. 推送控制指令 (含路线状态+调度序列用于HMI显示)
         deactivated = getattr(self, '_deactivated_routes', set())
+        # 始终构建路线状态和调度序列信息（即使无指令也推送，保证HMI实时更新）
+        route_info = {}
+        for rid in self._active_routes:
+            ctx = self.route_manager.get_route_context(rid)
+            if ctx:
+                route_info[rid] = {
+                    'state': ctx.state.value,
+                    'target_bin': ctx.target_bin or '',
+                    'cart_target': ctx.cart_target_position,
+                    'cart_moving': ctx.cart_moving,
+                }
+        for rid in deactivated:
+            ctx = self.route_manager.get_route_context(rid)
+            route_info[rid] = {'state': ctx.state.value if ctx else 'standby'}
+            ctx = self.route_manager.get_route_context(rid)
+            if ctx:
+                route_info[rid] = {
+                    'state': ctx.state.value,
+                    'target_bin': ctx.target_bin or '',
+                    'cart_target': ctx.cart_target_position,
+                    'cart_moving': ctx.cart_moving,
+                }
+        sched_info = {
+            'executing_bin': dict(self.scheduler._executing_bin),
+            'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
+        }
+        # 从活跃路线补充 executing_bin（覆盖调度器可能遗漏的更新，如提前移动跳过WAITING）
+        for rid in self._active_routes:
+            ctx = self.route_manager.get_route_context(rid)
+            if ctx and ctx.target_bin and ctx.state in (RouteState.FEEDING, RouteState.CLEARING, RouteState.MOVING_TO_TARGET):
+                belt_id = CART_TO_BELT.get(ctx.assigned_cart, '')
+                if belt_id:
+                    sched_info['executing_bin'][belt_id] = ctx.target_bin
         if commands or deactivated:
-            route_info = {}
-            for rid in self._active_routes:
-                ctx = self.route_manager.get_route_context(rid)
-                if ctx:
-                    route_info[rid] = {
-                        'state': ctx.state.value,
-                        'target_bin': ctx.target_bin or '',
-                        'cart_target': ctx.cart_target_position,
-                        'cart_moving': ctx.cart_moving,
-                    }
-            for rid in deactivated:
-                ctx = self.route_manager.get_route_context(rid)
-                route_info[rid] = {'state': ctx.state.value if ctx else 'standby'}
-                ctx = self.route_manager.get_route_context(rid)
-                if ctx:
-                    route_info[rid] = {
-                        'state': ctx.state.value,
-                        'target_bin': ctx.target_bin or '',
-                        'cart_target': ctx.cart_target_position,
-                        'cart_moving': ctx.cart_moving,
-                    }
-            sched_info = {
-                'executing_bin': dict(self.scheduler._executing_bin),
-                'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
-            }
             if self._diag_results:
                 self._last_diag = list(self._diag_results)
                 self._last_diag_time = self._total_runtime
@@ -497,10 +510,11 @@ class FeedingMasterController:
                 if hasattr(self, '_last_diag') and hasattr(self, '_last_diag_time'):
                     if self._total_runtime - self._last_diag_time > 3.0:
                         self._last_diag = None
-            diag = getattr(self, '_last_diag', None)
-            self.server.send_commands(commands, route_info, sched_info, diag)
-            if hasattr(self, '_deactivated_routes'):
-                self._deactivated_routes.clear()
+        diag = getattr(self, '_last_diag', None)
+        # 始终推送（即使无指令，也发送路线状态+调度序列保证HMI实时更新）
+        self.server.send_commands(commands, route_info, sched_info, diag)
+        if hasattr(self, '_deactivated_routes'):
+            self._deactivated_routes.clear()
 
         # 5. 延迟自动续料: 等上一轮的关闭斗指令先执行, 下一tick再开新路线
         pending = getattr(self, '_pending_auto_continue', None)
@@ -761,15 +775,25 @@ class FeedingMasterController:
         nxt = self.scheduler.get_next_bin(belt_id)
         if not nxt:
             return 'reverse'
+        # 对齐：若序列首项与当前正在执行的料仓相同，跳过取下一个
+        if nxt == ctx.target_bin:
+            self.scheduler.pop_next_bin(belt_id)
+            nxt = self.scheduler.get_next_bin(belt_id)
+            if not nxt:
+                return 'reverse'
         cur_col = ctx.target_bin.split('-')[0]
         next_col = nxt.split('-')[0]
         if cur_col != next_col:
             return 'column_switch'
         cur_row = int(ctx.target_bin.split('-')[1])
         next_row = int(nxt.split('-')[1])
-        if next_row < cur_row and cur_row >= 4:
+        if next_row < cur_row:
             if ctx.assigned_hoppers:
+                # 产线1/2（row 1-2）作为下一目标，且当前料仓产线位置≤3时，用反序代替顺序清空
+                if next_row <= 2 and cur_row <= 3:
+                    return 'reverse'
                 return 'sequential'
+            return 'reverse'
         return 'reverse'
 
     def _start_diag_client(self):

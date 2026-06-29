@@ -405,6 +405,7 @@ class MainWindow(QMainWindow):
         self.controller.route_started.connect(self._on_route_started)
         self.controller.route_stopped.connect(self._on_route_stopped)
         self.controller.route_state_changed.connect(self._on_route_state_changed)
+        self.controller.schedule_updated.connect(self._update_schedule_display)
 
         # 仿真视图信号 - 画布点击选择上料路线
         self.simulation_view.bin_clicked.connect(self._on_bin_clicked)
@@ -444,10 +445,10 @@ class MainWindow(QMainWindow):
 
         # 轮询 TCP 诊断/调度客户端连接状态，更新 UI
         self._poll_tcp_status()
-        # 每5秒更新一次调度缓存显示
+        # 每1秒更新一次调度缓存显示
         if not hasattr(self, '_last_schedule_display'):
             self._last_schedule_display = 0.0
-        if self.controller.total_runtime - self._last_schedule_display > 5.0:
+        if self.controller.total_runtime - self._last_schedule_display > 1.0:
             self._last_schedule_display = self.controller.total_runtime
             self._update_schedule_display()
 
