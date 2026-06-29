@@ -118,3 +118,5 @@ class FeedingMasterClient:
 
         if msg.get("type") == "command" and self._on_commands:
             self._on_commands(msg)
+        elif msg.get("type") == "ack" and hasattr(self, '_on_ack'):
+            self._on_ack(msg.get("ack_id"), msg.get("action", ""))

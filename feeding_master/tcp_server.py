@@ -186,6 +186,10 @@ class FeedingMasterServer:
             self._on_manual_stop(msg.get("route_id", ""))
         elif msg_type == "emergency_stop" and self._on_emergency_stop:
             self._on_emergency_stop()
+            # 发送 ACK 确认急停已执行
+            ack_id = msg.get("ack_id")
+            if ack_id is not None:
+                self._send({"type": "ack", "ack_id": ack_id, "action": "emergency_stop"})
         elif msg_type == "belt_active" and self._on_belt_active:
             self._on_belt_active(msg.get("belt_id", ""), msg.get("active", False))
         elif msg_type == "heartbeat":

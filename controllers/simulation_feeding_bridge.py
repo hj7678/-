@@ -35,8 +35,11 @@ class SimulationFeedingBridge(QObject):
         self._enabled = False
         self._stock_thread: Optional[threading.Thread] = None
         self._last_push = 0.0  # 上次推送时间戳
+        self._ack_id = 0
 
         self._fm.on_commands(self._on_commands)
+        self._fm._on_ack = self._on_ack
+        self._pending_ack = None  # 等待 ACK 的 ack_id
 
     def set_enabled(self, enabled: bool):
         self._enabled = enabled
@@ -85,6 +88,19 @@ class SimulationFeedingBridge(QObject):
     def send_manual_stop(self, route_id: str):
         """手动停止: 通知FM停用路线"""
         self._fm._send({"type": "manual_stop", "route_id": route_id})
+
+    def send_emergency_stop(self):
+        """急停: 带 ACK 确认"""
+        self._ack_id += 1
+        self._pending_ack = self._ack_id
+        self._fm._send({"type": "emergency_stop", "ack_id": self._ack_id})
+        return self._ack_id
+
+    def _on_ack(self, ack_id: int, action: str):
+        """收到 FM 的 ACK 确认"""
+        if ack_id == self._pending_ack:
+            self._pending_ack = None
+            print(f"[桥接] FM ACK: {action} (ack_id={ack_id})", flush=True)
 
     def tick(self):
         """每帧: 推送料位→Stock, 推送传感器→FeedingMaster"""

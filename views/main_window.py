@@ -741,8 +741,8 @@ class MainWindow(QMainWindow):
             self._update_status_bar("自动模式: 请先关闭调度服务再急停")
             return
         if self.controller._feeding_bridge is not None:
-            self.controller._feeding_bridge._fm._send({"type": "emergency_stop"})
-            self._update_status_bar("FM急停已发送")
+            self.controller._feeding_bridge.send_emergency_stop()
+            self._update_status_bar("FM急停已发送(等待ACK)")
         self.operation_log.add_log("!!! 急停 !!!", "#E74C3C")
         self.logger.info("急停触发")
 
