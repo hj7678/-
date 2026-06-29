@@ -31,6 +31,7 @@ class FeedingMasterServer:
         self.port = port
         self._server: Optional[socket.socket] = None
         self._running = False
+        self._seq = 0  # 消息序列号
 
         # 连接的 Upper Computer
         self._upper_socket: Optional[socket.socket] = None
@@ -64,8 +65,10 @@ class FeedingMasterServer:
 
     def send_commands(self, commands: list, route_info: dict = None, sched_info: dict = None, diag: list = None):
         """推送控制指令给 Upper Computer"""
+        self._seq += 1
         payload = {
             "type": "command",
+            "seq": self._seq,
             "commands": commands,
         }
         if route_info:

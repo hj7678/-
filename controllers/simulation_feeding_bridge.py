@@ -64,8 +64,9 @@ class SimulationFeedingBridge(QObject):
                     levels = self._stock.get_all_levels()
                     if levels:
                         self.stock_updated.emit(levels)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Stock 暂时不可用，静默等待下次重试
+                    time.sleep(5.0)  # 连接失败时延长等待避免频繁重试
                 time.sleep(1.0)
         self._stock_thread = threading.Thread(target=_poll, daemon=True)
         self._stock_thread.start()
@@ -183,6 +184,13 @@ class SimulationFeedingBridge(QObject):
             commands = msg.get('commands', [])
             route_states = msg.get('route_states', {})
             schedule = msg.get('schedule', {})
+            # 消息序列号检测丢包
+            seq = msg.get('seq')
+            if seq is not None:
+                last_seq = getattr(self, '_last_seq', 0)
+                if last_seq > 0 and seq > last_seq + 1:
+                    print(f"[桥接] ⚠ 检测到丢包: seq {last_seq}→{seq} (跳过 {seq - last_seq - 1} 条)", flush=True)
+                self._last_seq = seq
         # 路线状态同步推迟到主线程 apply_commands 中处理
         self._pending_route_states = route_states
         # 调度序列同步到仿真 (HMI显示用)
