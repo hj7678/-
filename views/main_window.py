@@ -597,69 +597,41 @@ class MainWindow(QMainWindow):
             self.top_fm_btn.setText("FM 在线" if fm_online else "FM 离线")
 
     def _on_fm_takeover_toggled(self, enabled: bool):
-        # FM 始终接管，不再支持切换。仅更新 UI 指示器。
-        self.controller.set_use_feeding_master(enabled)
-        self._update_status_bar(f"FM接管: {'开' if enabled else '关(监控)'}")
+        # FM 始终接管，不再支持切换
+        pass
 
     def _on_auto_mode_toggled(self, enabled: bool):
         """全部皮带自动模式切换"""
-        if self.controller._use_feeding_master:
-            if enabled:
-                # D7需要选择上料点
+        if enabled:
+            # D7需要选择上料点
+            fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
+            item, ok = QInputDialog.getItem(self, "选择D7上料点",
+                "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
+            if ok:
+                self.controller._d7_feed_override = item.split()[0]
+            if self.controller._feeding_bridge is not None:
+                for bid in ['D6', 'D7', 'D8', 'D9']:
+                    self.controller._feeding_bridge._fm._send(
+                        {"type": "belt_active", "belt_id": bid, "active": True})
+            if hasattr(self, 'top_sched_btn'):
+                self.top_sched_btn.setChecked(True)
+            if hasattr(self, '_top_belt_btns'):
+                for btn in self._top_belt_btns.values():
+                    btn.setChecked(True)
+            self._update_status_bar("全部皮带自动调度已启动")
+
+    def _on_belt_auto_mode_toggled(self, belt_id: str, enabled: bool):
+        """单条皮带自动模式切换"""
+        if enabled and self.controller._feeding_bridge is not None:
+            if belt_id == 'D7':
                 fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
                 item, ok = QInputDialog.getItem(self, "选择D7上料点",
                     "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
                 if ok:
                     self.controller._d7_feed_override = item.split()[0]
-                if self.controller._feeding_bridge is not None:
-                    for bid in ['D6', 'D7', 'D8', 'D9']:
-                        self.controller._feeding_bridge._fm._send(
-                            {"type": "belt_active", "belt_id": bid, "active": True})
-                if hasattr(self, 'top_sched_btn'):
-                    self.top_sched_btn.setChecked(True)
-                if hasattr(self, '_top_belt_btns'):
-                    for btn in self._top_belt_btns.values():
-                        btn.setChecked(True)
-                self._update_status_bar("全部皮带自动调度已启动")
-            return
-        self.controller.set_auto_mode(enabled)
-        # 同步顶栏按钮
-        if hasattr(self, 'top_auto_btn'):
-            self.top_auto_btn.setChecked(enabled)
-        if hasattr(self, '_top_belt_btns'):
-            for btn in self._top_belt_btns.values():
-                btn.setChecked(enabled)
-        self._update_status_bar(f"自动模式: {'开' if enabled else '关'}")
-
-    def _on_belt_auto_mode_toggled(self, belt_id: str, enabled: bool):
-        """单条皮带自动模式切换"""
-        if self.controller._use_feeding_master:
-            if enabled and self.controller._feeding_bridge is not None:
-                if belt_id == 'D7':
-                    fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
-                    item, ok = QInputDialog.getItem(self, "选择D7上料点",
-                        "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
-                    if ok:
-                        self.controller._d7_feed_override = item.split()[0]
-                self.controller._feeding_bridge._fm._send(
-                    {"type": "belt_active", "belt_id": belt_id, "active": True})
-                self._update_status_bar(f"{belt_id} 自动调度已启动")
-            return
-        if enabled and belt_id == 'D7':
-            # D7皮带：弹窗让用户选择上料点
-            fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
-            item, ok = QInputDialog.getItem(self, f"选择{belt_id}上料点",
-                f"请选择{belt_id}皮带自动上料使用的上料点:", fps, 0, False)
-            if ok:
-                fp_id = item.split()[0]
-                self.controller._d7_feed_override = fp_id
-                self._update_status_bar(f"{belt_id} 自动模式: {fp_id}")
-            else:
-                return  # 用户取消，不启用自动模式
-        self.controller.set_belt_auto_mode(belt_id, enabled)
-        if hasattr(self, '_top_belt_btns') and belt_id in self._top_belt_btns:
-            self._top_belt_btns[belt_id].setChecked(enabled)
-        self._update_status_bar(f"{belt_id} 自动模式: {'开' if enabled else '关'}")
+            self.controller._feeding_bridge._fm._send(
+                {"type": "belt_active", "belt_id": belt_id, "active": True})
+            self._update_status_bar(f"{belt_id} 自动调度已启动")
 
     def _on_bin_levels_uniform(self, percent: float):
         """统一设置料位"""
@@ -686,9 +658,8 @@ class MainWindow(QMainWindow):
             self.controller.stop_udp_sender()
 
     def _on_diagnosis_mode_changed(self, mode: str):
-        if self.controller._use_feeding_master:
-            return  # FM接管: 诊断结果由FM推送, 不切换
-        self.controller.set_diagnosis_mode(mode)
+        # FM 为唯一控制大脑，诊断结果由 FM 推送
+        pass
 
     def _on_diagnosis_tcp_toggled(self, enabled: bool):
         if enabled:
@@ -762,33 +733,16 @@ class MainWindow(QMainWindow):
             self.operation_log.add_log("系统: IO模式切换 → 仿真", "#2ECC71")
 
     def _on_self_test_clicked(self):
-        """自检按钮"""
-        if self.controller._use_feeding_master:
-            self._update_status_bar("FM接管模式暂不支持自检")
-            return
-        self._update_status_bar("正在执行系统自检...")
-        result = self.controller.do_self_test()
-        if result.passed:
-            self._update_status_bar("自检通过")
-            self.operation_log.add_log("系统自检: 通过", "#2ECC71")
-        else:
-            self._update_status_bar(f"自检失败: {len(result.errors)}项错误")
-            for e in result.errors:
-                self.operation_log.add_log(f"自检错误: {e}", "#E74C3C")
+        self._update_status_bar("FM接管模式暂不支持自检")
 
     def _on_emergency_stop_clicked(self):
         """急停按钮：立即切断所有输出"""
-        if self.controller._use_feeding_master:
-            if self.controller._auto_feeding_active:
-                self._update_status_bar("自动模式: 请先关闭调度服务再急停")
-                return
-            if self.controller._feeding_bridge is not None:
-                self.controller._feeding_bridge._fm._send({"type": "emergency_stop"})
-                self._update_status_bar("FM急停已发送")
+        if self.controller._auto_feeding_active:
+            self._update_status_bar("自动模式: 请先关闭调度服务再急停")
             return
-        if hasattr(self.controller, 'lifecycle'):
-            self.controller.lifecycle.emergency_stop(self.controller)
-            self._update_status_bar("急停！所有输出已切断")
+        if self.controller._feeding_bridge is not None:
+            self.controller._feeding_bridge._fm._send({"type": "emergency_stop"})
+            self._update_status_bar("FM急停已发送")
         self.operation_log.add_log("!!! 急停 !!!", "#E74C3C")
         self.logger.info("急停触发")
 
@@ -880,12 +834,6 @@ class MainWindow(QMainWindow):
         # 当进入等待状态时触发下一轮调度
         if new_state == 'waiting':
             self._update_schedule_display()
-            if self.controller._auto_feeding_active and not self.controller._use_feeding_master:
-                for belt_id, r in list(self.controller._executing_route.items()):
-                    if r == route_id:
-                        self._log_belt(route_id, "路线完成，触发下一轮", "#4A90D9")
-                        self.controller._on_auto_feed_route_completed(route_id)
-                        break
         # 进入待机时也更新显示
         if new_state == 'standby':
             self._update_schedule_display()
@@ -910,70 +858,12 @@ class MainWindow(QMainWindow):
 
     def _on_feed_point_selected(self, feed_point: str, route_id: str, dest_bin: str, silo_bin: str = ''):
         """处理上料点选择"""
-        if self.controller._use_feeding_master:
-            if self.controller._auto_feeding_active:
-                self._update_status_bar("自动模式: 请先关闭调度服务再手动上料")
-                return
-            if self.controller._feeding_bridge is not None:
-                self.controller._feeding_bridge.send_manual_start(dest_bin, route_id)
-                self._update_status_bar(f"FM手动上料: {config.FEED_ROUTES[route_id]['name']} → {dest_bin}")
+        if self.controller._auto_feeding_active:
+            self._update_status_bar("自动模式: 请先关闭调度服务再手动上料")
             return
-        from controllers.route_state_manager import RouteState
-
-        ctx = self.controller.route_state_manager.get_route_context(route_id)
-
-        # 小车繁忙检查：不允许小车处于移动或补料状态时被其他路线共用
-        cart_id = self.controller.route_state_manager.ROUTE_CARTS.get(route_id)
-        if cart_id:
-            busy_route = self.controller.route_state_manager.get_cart_busy_route(cart_id, exclude_route=route_id)
-            if busy_route:
-                busy_ctx = self.controller.route_state_manager.get_route_context(busy_route)
-                busy_state_name = busy_ctx.state.value if busy_ctx else 'unknown'
-                QMessageBox.warning(
-                    self,
-                    "小车被占用",
-                    f"小车 {cart_id} 正被路线 {busy_route} 使用（状态: {busy_state_name}），"
-                    f"无法启动路线 {route_id}。"
-                )
-                return
-
-        # 路线⑧⑨：先设置起点S仓
-        if silo_bin:
-            self.controller.set_route_silo_bin(route_id, silo_bin)
-
-        # 设置终点小仓
-        self.controller.set_route_target_bin(route_id, dest_bin)
-
-        if ctx and ctx.state == RouteState.WAITING:
-            success = self.controller.resume_route(route_id)
-            if success:
-                # 同步更新控制面板的active_routes和按钮状态
-                self.control_panel.active_routes.add(route_id)
-                if route_id in self.control_panel.route_buttons:
-                    self.control_panel.route_buttons[route_id].setChecked(True)
-                route_name = config.FEED_ROUTES.get(route_id, {}).get('name', route_id)
-                if silo_bin:
-                    self._update_status_bar(f"已恢复 {route_name}，起点: {silo_bin}，终点: {dest_bin}")
-                else:
-                    self._update_status_bar(f"已恢复 {route_name}，目标小仓: {dest_bin}")
-        else:
-            success = self.controller.start_route(route_id)
-            if success:
-                # 同步更新控制面板的active_routes和按钮状态
-                self.control_panel.active_routes.add(route_id)
-                if route_id in self.control_panel.route_buttons:
-                    self.control_panel.route_buttons[route_id].setChecked(True)
-                route_name = config.FEED_ROUTES.get(route_id, {}).get('name', route_id)
-                if silo_bin:
-                    self._update_status_bar(f"已启动 {route_name}，起点: {silo_bin}，终点: {dest_bin}")
-                else:
-                    self._update_status_bar(f"已启动 {route_name}，目标小仓: {dest_bin}")
-            else:
-                QMessageBox.warning(
-                    self,
-                    "启动失败",
-                    f"无法启动路线 {route_id}。"
-                )
+        if self.controller._feeding_bridge is not None:
+            self.controller._feeding_bridge.send_manual_start(dest_bin, route_id)
+            self._update_status_bar(f"FM手动上料: {config.FEED_ROUTES[route_id]['name']} → {dest_bin}")
 
     def _on_hopper_switch_toggled(self, hopper_id: str, new_state: bool):
         """中转斗开关切换处理"""
