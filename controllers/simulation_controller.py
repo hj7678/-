@@ -241,7 +241,7 @@ class SimulationController(QObject):
             self.conveyors[conv_id] = conveyor
 
         for sensor_id, sensor_config in config.SENSORS.items():
-            sensor = Sensor(sensor_id, sensor_config)
+            sensor = Sensor.from_config(sensor_id, sensor_config)
             self.sensors[sensor_id] = sensor
 
         for hp_id, hp_config in config.TRANSFER_HOPPERS.items():

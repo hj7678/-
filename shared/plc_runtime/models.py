@@ -6,6 +6,7 @@ PLC运行时模型 —— 皮带、传感器、中转斗、小仓的数据模型
 """
 import math
 import random
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 MATERIAL_WEIGHT = 0.1       # 每个物料重量（吨）
@@ -86,24 +87,34 @@ class _FallbackSensor:
 _FALLBACK_SENSOR = _FallbackSensor()
 
 
+@dataclass
 class Sensor:
-    """接近开关传感器模型"""
+    """接近开关传感器模型 — PLC 运行时基类"""
+    sensor_id: str = ''
+    name: str = ''
+    position: tuple = (0, 0)
+    conveyor: str = ''
+    distance_from_start: int = 0
+    is_active: bool = False
+    real_state: bool = False
+    trigger_count: int = 0
+    last_trigger_time: int = 0
+    hold_timer: int = 0
 
-    def __init__(self, sensor_id: str, sensor_config: dict):
-        self.sensor_id = sensor_id
-        self.name = sensor_config['name']
+    @classmethod
+    def from_config(cls, sensor_id: str, sensor_config: dict) -> 'Sensor':
+        """从配置字典创建传感器"""
         if 'position' in sensor_config:
-            self.position = sensor_config['position']
+            pos = sensor_config['position']
         else:
-            self.position = (sensor_config['x'], sensor_config['y'])
-        self.conveyor = sensor_config['conveyor']
-        self.distance_from_start = sensor_config.get('distance_from_start', 0)
-
-        self.is_active = False
-        self.real_state = False
-        self.trigger_count = 0
-        self.last_trigger_time = 0
-        self.hold_timer = 0
+            pos = (sensor_config['x'], sensor_config['y'])
+        return cls(
+            sensor_id=sensor_id,
+            name=sensor_config['name'],
+            position=pos,
+            conveyor=sensor_config['conveyor'],
+            distance_from_start=sensor_config.get('distance_from_start', 0),
+        )
 
     def trigger(self, time_ms: int):
         if not self.real_state:
