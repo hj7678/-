@@ -19,8 +19,8 @@ import threading
 import time
 from typing import Dict, List, Optional, Set
 
-from controllers.plc_runtime.models import Conveyor, Sensor, TransferHopper
-from controllers.plc_runtime.actuator import (
+from shared.plc_runtime.models import Conveyor, Sensor, TransferHopper
+from shared.plc_runtime.actuator import (
     ActuatorAction,
     compute_route_belt_commands,
     compute_hopper_commands,
@@ -29,10 +29,10 @@ from controllers.plc_runtime.actuator import (
     should_move_cart,
     compute_emergency_stop_commands,
 )
-from controllers.route_state_manager import (
+from shared.route_state_manager import (
     RouteState, RouteStateManager, get_route_state_manager,
 )
-from state_transition_engine import StateTransitionEngine
+from shared.state_transition_engine import StateTransitionEngine
 from feeding_master.tcp_server import FeedingMasterServer
 from feeding_master.stock_client import StockClient
 from feeding_master.schedule_manager import ScheduleManager, CART_TO_BELT, BELT_TO_CART
@@ -707,7 +707,7 @@ class FeedingMasterController:
         self._deactivated_routes.update(deactivated)
         # 急停指令通过commands下发
         cmds = []
-        from controllers.plc_runtime.actuator import compute_emergency_stop_commands
+        from shared.plc_runtime.actuator import compute_emergency_stop_commands
         estop = compute_emergency_stop_commands(
             list(self.conveyors.keys()) if not hasattr(self, 'conveyors') or not self.conveyors
             else self.conveyors,

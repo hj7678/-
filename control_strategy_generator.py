@@ -16,7 +16,7 @@ from typing import Dict, Any, List, Optional, Set
 import random
 
 import config
-from controllers.route_state_manager import RouteState, get_route_state_manager, RouteStateManager
+from shared.route_state_manager import RouteState, get_route_state_manager, RouteStateManager
 from sensor_data_manager import SensorDataManager, get_data_manager
 
 

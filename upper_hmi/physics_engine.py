@@ -15,11 +15,11 @@ from PyQt5.QtCore import QObject, QTimer, QElapsedTimer, pyqtSignal
 import config
 import pos
 from models.material import Material, MaterialFactory, MaterialType
-from controllers.plc_runtime.models import (
+from shared.plc_runtime.models import (
     Conveyor, Sensor, TransferHopper, SmallBin,
     _FallbackSensor, _FALLBACK_SENSOR,
 )
-from controllers.route_state_manager import (
+from shared.route_state_manager import (
     RouteState, RouteStateManager, get_route_state_manager,
 )
 from controllers.simulation_feeding_bridge import SimulationFeedingBridge

@@ -230,7 +230,7 @@ class SimulationFeedingBridge(QObject):
         rs = getattr(self, '_pending_route_states', {})
         if rs:
             self._pending_route_states = {}
-            from controllers.route_state_manager import RouteState
+            from shared.route_state_manager import RouteState
             for rid, info in rs.items():
                 ctx = ctrl.route_state_manager.get_route_context(rid)
                 if not ctx: continue

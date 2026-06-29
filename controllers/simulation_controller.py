@@ -34,7 +34,7 @@ from models.material import Material, MaterialFactory, MaterialType
 from sensor_fault_diagnosis import SensorFaultDiagnosis, FaultMode
 from sensor_data_manager import SensorDataManager, get_data_manager
 from sensor_data_generator import SensorDataGenerator, get_data_generator
-from controllers.route_state_manager import RouteState, get_route_state_manager, RouteStateManager
+from shared.route_state_manager import RouteState, get_route_state_manager, RouteStateManager
 from control_strategy_generator import ControlStrategyGenerator, get_control_strategy_generator
 from tcp_data_sender import TcpDataSender
 from udp_binary_sender import UdpBinarySender
@@ -43,10 +43,10 @@ from controllers.fault_diagnosis_adapter import FaultDiagnosisAdapter
 from controllers.tcp_diagnosis_client import TcpDiagnosisClient
 from controllers.tcp_scheduling_client import TcpSchedulingClient
 from scheduling.bin_config import BELT_BINS
-from state_transition_engine import StateTransitionEngine
+from shared.state_transition_engine import StateTransitionEngine
 from scheduling.config import SILO_MAX_CAP
 from belt_logger import belt_log, sys_log
-from controllers.plc_runtime.models import (
+from shared.plc_runtime.models import (
     Conveyor, Sensor, TransferHopper, SmallBin,
     _FallbackSensor, _FALLBACK_SENSOR,
 )

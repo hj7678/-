@@ -8,18 +8,18 @@ PLC运行时模块 — 下位机逻辑的 Python 等价实现
   plc_runtime.py     — 主扫描循环 scan(inputs) → outputs
 
 使用方式：
-  from controllers.plc_runtime import PlcRuntime, PlcInputs, PlcOutputs
+  from shared.plc_runtime import PlcRuntime, PlcInputs, PlcOutputs
 
   runtime = PlcRuntime()
   runtime.register_belts({...})
   inputs = PlcInputs(...)
   outputs = runtime.scan(inputs)
 """
-from controllers.plc_runtime.models import (
+from shared.plc_runtime.models import (
     Conveyor, Sensor, TransferHopper, SmallBin,
     _FallbackSensor, _FALLBACK_SENSOR,
 )
-from controllers.plc_runtime.actuator import (
+from shared.plc_runtime.actuator import (
     ActuatorAction,
     compute_route_belt_commands,
     compute_hopper_commands,
@@ -27,14 +27,14 @@ from controllers.plc_runtime.actuator import (
     compute_emergency_stop_commands,
     check_resource_availability,
 )
-from controllers.plc_runtime.material_tracker import (
+from shared.plc_runtime.material_tracker import (
     BeltMaterial,
     BeltState,
     tick_materials,
     add_material_to_belt,
     check_proximity_sensor,
 )
-from controllers.plc_runtime.plc_runtime import (
+from shared.plc_runtime.plc_runtime import (
     PlcRuntime,
     PlcInputs,
     PlcOutputs,

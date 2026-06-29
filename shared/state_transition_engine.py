@@ -82,7 +82,7 @@ class StateTransitionEngine:
         Returns:
             (next_state, actions) — actions包含建议操作如 'close_hoppers', 'stop_endpoint'
         """
-        from controllers.route_state_manager import RouteState  # 懒加载避免循环引用
+        from shared.route_state_manager import RouteState  # 懒加载避免循环引用
         actions = {}
         route = self._routes.get(route_id)
         if not route:
@@ -168,7 +168,7 @@ class StateTransitionEngine:
                                 current_time: float = 0.0,
                                 cooldown: float = 120.0) -> Tuple[bool, str]:
         """判定是否需要触发调度请求"""
-        from controllers.route_state_manager import RouteState  # 懒加载避免循环引用
+        from shared.route_state_manager import RouteState  # 懒加载避免循环引用
         for bin_id, stock in bin_stocks.items():
             if stock < 11.0:
                 return True, f"emergency:{bin_id}={stock:.1f}t"
