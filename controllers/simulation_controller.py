@@ -149,7 +149,9 @@ class SimulationController(QObject):
         self._tcp_scheduling_client = None
         # FeedingMaster 桥接 (仿真 → 上料主控)
         self._feeding_bridge = None
-        self._use_feeding_master = False  # True=FM接管决策, False=仿真自己决策
+        self._use_feeding_master = True   # FM 为唯一控制大脑，始终接管决策
+        # FM 断开时进入安全模式（全停），FM 重连后自动恢复
+        self._fm_safe_mode = False
         # Stock Management 拉回的料位 (用于 HMI 显示，不影响 small_bins 仿真逻辑)
         self.display_levels: Dict[str, float] = {}
         # 诊断模式："local" / "tcp"
@@ -1073,18 +1075,8 @@ class SimulationController(QObject):
                 print(f"[清理] materials: {old_count} → {len(self.materials)} (移除{old_count - len(self.materials)}个)", flush=True)
                 belt_log('system').info(f"[清理] materials: {old_count} → {len(self.materials)} (移除{old_count - len(self.materials)}个)")
 
-        # FeedingMaster接管模式: 跳过仿真自身决策
-        if not self._use_feeding_master:
-            # 检查料位是否达到阈值，触发清空状态
-            self._check_level_thresholds()
-            # 更新清空传感器计时器
-            self._update_clearing_sensor_timers()
-            # FM接管: 清空/调度/策略全由FM管理, 仿真不干预
-            if not self._use_feeding_master:
-                self._check_clearing_completion()
-                self._check_auto_feed_idle()
-                self._check_pending_stop_routes()
-                self._apply_clearing_strategy_actions()
+        # FM 为唯一控制大脑，仿真自身决策逻辑已移除
+        # 仅保留传感器数据生成和 UI 脏标记
 
         # 生成传感器数据并写入JSON文件（每秒一次）
         if self.enable_sensor_data_generation:
@@ -1761,35 +1753,12 @@ class SimulationController(QObject):
         if not commands:
             return
 
-        if self._use_feeding_master:
-            # 接管模式: 执行FM指令替代仿真决策
-            self._feeding_bridge.apply_commands(commands)
-        else:
-            # 监控模式: 仅打印对比
-            now = self.total_runtime
-            last = getattr(self, '_last_fm_cmd_print', 0)
-            if now - last < 2.0:
-                return
-            self._last_fm_cmd_print = now
-            carts = [c for c in commands if c.get('device') == 'cart']
-            belts = [c for c in commands if c.get('device') == 'belt']
-            hoppers = [c for c in commands if c.get('device') == 'hopper']
-            parts = []
-            if belts:
-                actions = set(c['action'] for c in belts)
-                parts.append(f"皮带{len(belts)}条({','.join(sorted(actions))})")
-            if hoppers:
-                actions = set(c['action'] for c in hoppers)
-                parts.append(f"斗{len(hoppers)}个({','.join(sorted(actions))})")
-            if carts:
-                parts.append(f"小车{carts[0]['id']}→{carts[0].get('target','?')}")
-            if parts:
-                print(f"[桥接-FM] 收到指令: {', '.join(parts)} [未执行]", flush=True)
+        # FM 为唯一控制大脑，始终执行 FM 指令
+        self._feeding_bridge.apply_commands(commands)
 
     def set_use_feeding_master(self, enabled: bool):
-        """切换决策模式: True=FeedingMaster接管, False=仿真自己决策"""
-        self._use_feeding_master = enabled
-        mode = "FM接管" if enabled else "仿真自决"
+        """切换决策模式: 始终为 FM 接管（保留接口兼容）"""
+        self._use_feeding_master = True
         print(f"[模式] 决策模式切换为: {mode}", flush=True)
 
     def _on_display_levels_updated(self, levels: list):
@@ -1947,32 +1916,8 @@ class SimulationController(QObject):
         return 'S1'
 
     def _on_auto_feed_route_completed(self, route_id: str):
-        if self._use_feeding_master:
-            return  # FM接管模式: 由FeedingMaster负责自动续料
-        for belt_id, r in list(self._executing_route.items()):
-            if r == route_id:
-                del self._executing_route[belt_id]
-                del self._executing_bin[belt_id]
-
-                # 从缓存序列中取出下一个料仓执行
-                seq = self._scheduled_sequence.get(belt_id, [])
-                if seq:
-                    next_bin = seq.pop(0)
-                    if not seq:
-                        self._scheduled_sequence.pop(belt_id, None)
-                    print(f"[调度] {belt_id} 使用缓存序列 -> {next_bin}，剩余{seq}", flush=True)
-                    belt_log(belt_id).info(f"[调度] {belt_id} 使用缓存序列 -> {next_bin}，剩余{seq}")
-                    if not self._start_scheduled_route(belt_id, next_bin):
-                        self._scheduled_sequence.pop(belt_id, None)
-                        print(f"[调度] {belt_id} 启动{next_bin}失败，重新请求调度", flush=True)
-                        belt_log(belt_id).info(f"[调度] {belt_id} 启动{next_bin}失败，重新请求调度")
-                        self._request_immediate_scheduling(belt_id)
-                else:
-                    self._scheduled_sequence.pop(belt_id, None)
-                    print(f"[调度] {belt_id} 序列耗尽，请求调度 (force)", flush=True)
-                    belt_log(belt_id).info(f"[调度] {belt_id} 序列耗尽，请求调度 (force)")
-                    self._request_immediate_scheduling(belt_id, force=True)
-                break
+        # FM 为唯一控制大脑，自动续料由 FM 管理
+        return
 
     def _check_auto_feed_idle(self):
         """自动上料空闲检测：皮带无执行路线且无缓存序列时，检查料仓是否需要触发调度
@@ -2054,10 +1999,8 @@ class SimulationController(QObject):
         return True
 
     def _on_engine_schedule_request(self, belt_id: str):
-        """状态引擎调度回调（解耦：引擎不直调调度服务）"""
-        if self._use_feeding_master:
-            return  # FM接管模式: 由FeedingMaster的scheduler.tick负责
-        self._request_immediate_scheduling(belt_id)
+        # FM 为唯一控制大脑，调度由 FM 的 scheduler.tick 负责
+        return
 
     def _request_immediate_scheduling(self, belt_id: str, force: bool = False):
         if self._tcp_scheduling_client is None:
@@ -3249,31 +3192,11 @@ class SimulationController(QObject):
             print(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}", flush=True)
             belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[CartArrival] {cart_id} route={route_id} state={ctx.state.value} cart_moving={ctx.cart_moving}")
 
-            if self._use_feeding_master:
-                # FM接管: 只通知cart到达, FM通过cart_pos判断并推动状态
-                ctx.cart_moving = False
-                if cart_id == 'Cart4':
-                    self.cart4_is_moving = False
-                continue
-            if ctx.state != RouteState.MOVING_TO_TARGET:
-                print(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET", flush=True)
-                belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: state={ctx.state.value} != MOVING_TO_TARGET")
-                continue
-            cart_is_moving = self.cart4_is_moving if cart_id == 'Cart4' else ctx.cart_moving
-            if not cart_is_moving:
-                print(f"[CartArrival] {cart_id} 跳过: cart_is_moving=False", flush=True)
-                belt_log(({'Cart1':'D7','Cart2':'D8','Cart3':'D9','Cart4':'D6'}.get(cart_id,'system'))).info(f"[CartArrival] {cart_id} 跳过: cart_is_moving=False")
-                continue
-
-            if route_id in self._pending_stop_after_cart_arrival:
-                self._pending_stop_after_cart_arrival.discard(route_id)
-                self._complete_stop_route(route_id)
-                continue
-
-            # 小车到达目标位置，切换到FEEDING状态
-            print(f"[到达] {route_id} cart={cart_id} -> FEEDING, 启动皮带...", flush=True)
-            belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} cart={cart_id} -> FEEDING, 启动皮带...")
-            self.route_state_manager._transition(ctx, RouteState.FEEDING)
+            # FM 为唯一控制大脑，仅通知 cart 到达，FM 通过 cart_pos 判断并推动状态
+            ctx.cart_moving = False
+            if cart_id == 'Cart4':
+                self.cart4_is_moving = False
+            continue
             ctx.cart_moving = False
             ctx.feeding_start_time = self.total_runtime
             ctx.clearing_strategy = self._resolve_clearing_strategy(route_id)
@@ -3314,12 +3237,12 @@ class SimulationController(QObject):
             current_pos = self.cart_positions.get(cart_id, 1)
 
             # FM接管: cart在目标位 → 设cart_moving=False通知FM
-            if self._use_feeding_master and current_pos == target_pos:
+            # FM 为唯一控制大脑：小车到达目标位置时通知 FM，由 FM 推动状态
+            if current_pos == target_pos:
                 for route_id in list(self.active_routes):
                     ctx = self.route_state_manager.get_route_context(route_id)
                     if ctx and ctx.assigned_cart == cart_id:
                         ctx.cart_moving = False
-                # 同步cart移动状态
                 if cart_id == 'Cart1': self._cart1_is_moving = False
                 elif cart_id == 'Cart2': self._cart2_is_moving = False
                 elif cart_id == 'Cart3': self._cart3_is_moving = False
@@ -3334,8 +3257,7 @@ class SimulationController(QObject):
                     break
 
             if needs_moving and current_pos == target_pos:
-                if not self._use_feeding_master:
-                    self._check_virtual_cart_arrival(cart_id)
+                pass  # FM 模式：上方已处理
             elif current_pos != target_pos and needs_moving:
                 # 模拟小车每18秒（移动一位）更新一次位置
                 if not hasattr(self, '_cart_move_timers'):

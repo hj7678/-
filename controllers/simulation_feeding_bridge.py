@@ -99,9 +99,9 @@ class SimulationFeedingBridge(QObject):
 
         ctrl = self._ctrl
 
-        # 限频: FM接管时100ms, 监控时500ms
+        # 限频: FM 接管时 100ms
         now = time.time()
-        interval = 0.1 if self._ctrl._use_feeding_master else 0.5
+        interval = 0.1
         if now - self._last_push < interval:
             return
         self._last_push = now

@@ -135,11 +135,12 @@ class MainWindow(QMainWindow):
         self.top_bridge_btn.setStyleSheet(self.top_sched_btn.styleSheet())
         top_bar_layout.addWidget(self.top_bridge_btn)
 
-        self.top_fm_btn = QPushButton("FM接管")
-        self.top_fm_btn.setCheckable(True)
-        self.top_fm_btn.setFixedSize(56, 32)
-        self.top_fm_btn.setToolTip("FeedingMaster 接管决策: ON=FM控制仿真, OFF=仿真自决(监控模式)")
+        self.top_fm_btn = QPushButton("FM 在线")
+        self.top_fm_btn.setCheckable(False)
+        self.top_fm_btn.setFixedSize(62, 32)
+        self.top_fm_btn.setToolTip("FeedingMaster 连接状态: 在线=FM控制, 离线=安全模式")
         self.top_fm_btn.setStyleSheet(self.top_sched_btn.styleSheet())
+        self.top_fm_btn.setEnabled(False)  # 状态指示器，不可点击
         top_bar_layout.addWidget(self.top_fm_btn)
 
         self.top_auto_btn = QPushButton("全部自动")
@@ -508,37 +509,13 @@ class MainWindow(QMainWindow):
     def _on_route_toggled(self, route_id: str, enable: bool):
         """路线切换"""
         route_name = config.FEED_ROUTES[route_id]['name']
-        if self.controller._use_feeding_master:
-            if enable:
-                return
-            else:
-                if self.controller._feeding_bridge is not None:
-                    self.controller._feeding_bridge.send_manual_stop(route_id)
-                    self._update_status_bar(f"FM手动停止: {route_name}")
-                return
+        # FM 为唯一控制大脑，停止通过 FM 桥接发送
         if enable:
-            # 先检查路线是否可用（路线⑧⑨的 feed_point 是 silo_out，不做激光传感器检查）
-            if not self.controller.is_route_available(route_id):
-                # 上料点无料，路线不可用
-                self._update_status_bar(f"{route_name} 启动失败：上料点无原料！")
-                # 取消按钮选中状态
-                self.control_panel.route_buttons[route_id].setChecked(False)
-                return
-
-            success = self.controller.start_route(route_id)
-            if success:
-                # 路线⑧⑨显示起点仓+终点仓，其他路线显示终点仓
-                silo_bin = self.controller.route_silo_bin.get(route_id)
-                dest_bin = self.controller.route_to_bin.get(route_id)
-                if silo_bin and dest_bin:
-                    self._update_status_bar(f"{route_name} 已启动，起点: {silo_bin}，终点: {dest_bin}")
-                elif dest_bin:
-                    self._update_status_bar(f"{route_name} 已启动 -> 目标仓: {dest_bin}")
-                else:
-                    self._update_status_bar(f"{route_name} 已启动")
-        else:
-            self.controller.stop_route(route_id)
-            self._update_status_bar(f"{route_name} 已停止")
+            return
+        if self.controller._feeding_bridge is not None:
+            self.controller._feeding_bridge.send_manual_stop(route_id)
+            self._update_status_bar(f"FM手动停止: {route_name}")
+        return
 
     def _on_route_bin_selected(self, route_id: str, bin_id: str):
         """路线小仓选择"""
@@ -598,33 +575,9 @@ class MainWindow(QMainWindow):
 
     def _on_scheduling_tcp_toggled(self, enabled: bool):
         """调度服务连接开关"""
-        if self.controller._use_feeding_master:
-            # FM接管: 只切换_auto_feeding_active, FM的scheduler自动响应
-            self.controller._auto_feeding_active = enabled
-            self._update_status_bar(f"调度服务: {'开(FM)' if enabled else '关'}")
-            return
-        if enabled:
-            # D7皮带：弹窗让用户选择上料点
-            fps = ['feed1_1 (上料点1-1)', 'feed1_2 (上料点1-2)', 'feed2_1 (上料点2-1)']
-            item, ok = QInputDialog.getItem(self, "选择D7上料点",
-                "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
-            if ok:
-                fp_id = item.split()[0]
-                self.controller._d7_feed_override = fp_id
-            self.controller.start_tcp_scheduling()
-            # 同步顶栏：启动调度时自动开启所有皮带
-            if hasattr(self, 'top_auto_btn'):
-                self.top_auto_btn.setChecked(True)
-            if hasattr(self, '_top_belt_btns'):
-                for btn in self._top_belt_btns.values():
-                    btn.setChecked(True)
-        else:
-            self.controller.stop_tcp_scheduling()
-            if hasattr(self, 'top_auto_btn'):
-                self.top_auto_btn.setChecked(False)
-            if hasattr(self, '_top_belt_btns'):
-                for btn in self._top_belt_btns.values():
-                    btn.setChecked(False)
+        # FM 为唯一控制大脑，切换自动上料状态，FM 的 scheduler 自动响应
+        self.controller._auto_feeding_active = enabled
+        self._update_status_bar(f"调度服务: {'开(FM)' if enabled else '关'}")
         # 关闭调度时同步关闭桥接
         if not enabled and hasattr(self, 'top_bridge_btn'):
             self.top_bridge_btn.setChecked(False)
@@ -633,29 +586,22 @@ class MainWindow(QMainWindow):
 
     def _on_bridge_toggled(self, enabled: bool):
         """桥接模式开关 — 连接/断开 FeedingMaster 上料主控"""
-        if self.controller._use_feeding_master:
-            if not enabled:
-                # FM接管时不允许关闭桥接
-                if hasattr(self, 'top_bridge_btn'):
-                    self.top_bridge_btn.setChecked(True)
+        # FM 断开时桥接始终可关闭，但 FM 在线时不允许断开
+        if not enabled:
+            if hasattr(self, 'top_bridge_btn'):
+                self.top_bridge_btn.setChecked(True)
             return
         if enabled:
             self.controller.start_feeding_bridge()
         else:
             self.controller.stop_feeding_bridge()
-            # 关闭桥接时同步关闭FM接管
-            if hasattr(self, 'top_fm_btn'):
-                self.top_fm_btn.setChecked(False)
-            self.controller.set_use_feeding_master(False)
         self._update_status_bar(f"桥接模式: {'开' if enabled else '关'}")
+        # FM 在线状态：更新指示器
+        if hasattr(self, 'top_fm_btn'):
+            self.top_fm_btn.setText("FM 在线" if self.controller._feeding_bridge and self.controller._feeding_bridge._fm.is_connected() else "FM 离线")
 
     def _on_fm_takeover_toggled(self, enabled: bool):
-        """FM接管开关 — FeedingMaster 接管仿真决策"""
-        if not enabled and self.controller._use_feeding_master:
-            # FM接管时不允许关闭
-            if hasattr(self, 'top_fm_btn'):
-                self.top_fm_btn.setChecked(True)
-            return
+        # FM 始终接管，不再支持切换。仅更新 UI 指示器。
         self.controller.set_use_feeding_master(enabled)
         self._update_status_bar(f"FM接管: {'开' if enabled else '关(监控)'}")
 
@@ -778,7 +724,7 @@ class MainWindow(QMainWindow):
 
     def _on_top_stop_clicked(self):
         """顶栏停止按钮 - 停止任意运行中的路线（含自动模式启动的）"""
-        if self.controller._use_feeding_master and self.controller._feeding_bridge is not None:
+        if self.controller._feeding_bridge is not None:
             active = [rid for rid in self.controller.active_routes
                       if self.controller.route_state_manager.get_route_state(rid) != 'standby']
             if not active:
@@ -793,28 +739,6 @@ class MainWindow(QMainWindow):
                 if ok and item:
                     self.controller._feeding_bridge.send_manual_stop(item.split()[0])
             return
-        active = [rid for rid in self.controller.active_routes
-                  if self.controller.route_state_manager.get_route_state(rid) != 'standby']
-        if not active:
-            self._update_status_bar("当前没有运行中的路线")
-            return
-        if len(active) == 1:
-            rid = active[0]
-            rname = config.FEED_ROUTES.get(rid, {}).get('name', rid)
-            self.controller.stop_route(rid)
-            self._update_status_bar(f"已停止 {rname}")
-            self.operation_log.add_log(f"! 停止 {rname}", "#E74C3C")
-            self.logger.info(f"停止 {rname}")
-        else:
-            # 多条路线时弹出选择框
-            items = [f"{rid} {config.FEED_ROUTES.get(rid,{}).get('name',rid)}" for rid in active]
-            item, ok = QInputDialog.getItem(self, "停止路线", "选择要停止的路线:", items, 0, False)
-            if ok and item:
-                rid = item.split()[0]
-                self.controller.stop_route(rid)
-                self._update_status_bar(f"已停止 {item}")
-                self.operation_log.add_log(f"! 停止 {item}", "#E74C3C")
-                self.logger.info(f"停止 {item}")
 
     def _on_plc_mode_toggled(self, checked: bool):
         """切换 IO 模式：仿真 ↔ PLC"""
