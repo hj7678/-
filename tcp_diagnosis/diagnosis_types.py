@@ -60,6 +60,9 @@ class RouteSnapshot:
     hopper_ids: List[str]
     proximity_sensor_ids: List[str]
     clearing_strategy: str = 'reverse'
+    feed_point: str = ''                     # 上料点ID
+    cart_target_position: int = 0            # 小车目标位置（格号）
+    early_moved_from_clearing: bool = False  # 顺序清空共享状态：小车已提前移动，清空+移动同步进行
 
 
 @dataclass

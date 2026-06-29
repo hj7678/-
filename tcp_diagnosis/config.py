@@ -43,40 +43,48 @@ FEED_ROUTES = {
         'conveyors': ['E1', 'E4', 'E8', 'E10', 'D7'],
         'hoppers': [None, 'hopper1', 'hopper3', 'hopper4', None],
         'proximity_sensors': ['S-E1', 'S-E4', 'S-E8', 'S-E10', 'S-D7'],
+        'feed_point': 'feed1_1',
     },
     'route2': {
         'conveyors': ['E2', 'E4', 'E8', 'E10', 'D7'],
         'hoppers': [None, 'hopper1', 'hopper3', 'hopper4', None],
         'proximity_sensors': ['S-E2', 'S-E4', 'S-E8', 'S-E10', 'S-D7'],
+        'feed_point': 'feed1_2',
     },
     'route3': {
         'conveyors': ['E5', 'E8', 'E10', 'D7'],
         'hoppers': ['hopper1', 'hopper3', 'hopper4', None],
         'proximity_sensors': ['S-E5', 'S-E8', 'S-E10', 'S-D7'],
+        'feed_point': 'feed2_1',
     },
     'route4': {
         'conveyors': ['E6', 'E7', 'E9', 'D9'],
         'hoppers': [None, 'hopper2', 'hopper6', None],
         'proximity_sensors': ['S-E6', 'S-E7', 'S-E9', 'S-D9'],
+        'feed_point': 'feed2_2',
     },
     'route5': {
         'conveyors': ['E6', 'E7', 'E9', 'D5', 'D6'],
         'hoppers': [None, 'hopper2', 'hopper6', 'hopper7', None],
         'proximity_sensors': ['S-E6', 'S-E7', 'S-E9', 'S-D5', 'S-D6'],
+        'feed_point': 'feed2_2',
     },
     'route6': {
         'conveyors': ['D13', 'D2', 'D4', 'D8'],
         'hoppers': ['hopper5'],
         'proximity_sensors': ['S-D13', 'S-D2', 'S-D2-2', 'S-D4', 'S-D8'],
+        'feed_point': 'feed3',
     },
     'route7': {
         'conveyors': ['D1', 'D3', 'D9'],
         'hoppers': [],
         'proximity_sensors': ['S-D1', 'S-D3', 'S-D9'],
+        'feed_point': 'silo_out',
     },
     'route8': {
         'conveyors': ['D2', 'D4', 'D8'],
         'hoppers': ['hopper5'],
         'proximity_sensors': ['S-D2', 'S-D2-2', 'S-D4', 'S-D8'],
+        'feed_point': 'silo_out',
     },
 }

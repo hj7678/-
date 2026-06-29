@@ -313,7 +313,6 @@ class FeedingMasterController:
 
                 if next_state.value == 'feeding':
                     parts.append(f"→ {target_bin} (料位{level:.0f}%)")
-                    # 列出将启动的皮带
                     convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
                     parts.append(f"皮带: {','.join(convs)}")
                     if ctx.assigned_hoppers:
@@ -418,8 +417,13 @@ class FeedingMasterController:
                 if target is not None:
                     ctx.cart_target_position = target  # 同步: FM知道真实目标
                 if target is not None and should_move_cart(cart_pos, target):
-                    cmd = {'device': 'cart', 'id': cart_id, 'action': 'move', 'target': target, 'route_id': route_id}
+                    left_div, right_div = self._compute_cart_divert(cart_id, target_bin)
+                    cmd = {'device': 'cart', 'id': cart_id, 'action': 'move',
+                           'target': target, 'route_id': route_id,
+                           'left_divert': left_div, 'right_divert': right_div}
                     commands.append(cmd)
+                    # 同步更新FM自身的分料状态缓存，避免送到调度请求时使用旧值
+                    self._cart_divert[cart_id] = (left_div, right_div)
                     new_cmds[f"cart:{cart_id}"] = f"→{target}"
 
         # 指令变化时输出
@@ -877,3 +881,26 @@ class FeedingMasterController:
 
     def get_active_routes(self) -> Set[str]:
         return set(self._active_routes)
+
+    @staticmethod
+    def _compute_cart_divert(cart_id: str, target_bin: str) -> tuple:
+        """根据小车ID和目标料仓计算分料方向"""
+        if cart_id == 'Cart1':
+            return (True, False)
+        elif cart_id == 'Cart2':
+            if target_bin.startswith('P2'):
+                return (True, False)
+            elif target_bin.startswith('P3'):
+                return (False, True)
+            return (True, False)
+        elif cart_id == 'Cart3':
+            return (False, True)
+        elif cart_id == 'Cart4':
+            if target_bin.startswith('S'):
+                try:
+                    num = int(target_bin[1:])
+                    return (True, False) if 1 <= num <= 6 else (False, True)
+                except ValueError:
+                    pass
+            return (True, False)
+        return (False, False)

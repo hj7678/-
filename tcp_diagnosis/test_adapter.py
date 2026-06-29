@@ -6,8 +6,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fault_diagnosis.types import RouteState, SystemSnapshot
-from fault_diagnosis.engine import DiagnosisEngine
+from tcp_diagnosis.diagnosis_types import RouteState, SystemSnapshot
+from tcp_diagnosis.engine import DiagnosisEngine
 from tcp_diagnosis.adapter import TcpDataAdapter
 from tcp_diagnosis.server import TcpDiagnosisServer
 

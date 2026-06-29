@@ -11,7 +11,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fault_diagnosis.engine import DiagnosisEngine
+from tcp_diagnosis.engine import DiagnosisEngine
 from tcp_diagnosis.adapter import TcpDataAdapter
 from tcp_diagnosis.config import TCP_HOST, TCP_PORT
 
@@ -29,6 +29,8 @@ _CATEGORY_CN = {
     "cart": "小车传感器",
     "conveyor": "皮带转速",
     "cross_sensor": "跨传感器",
+    "feeding_anomaly": "上料异常",
+    "cart_movement": "小车移动",
 }
 
 

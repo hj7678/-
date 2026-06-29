@@ -83,6 +83,8 @@ class DiagnosisWorker(QObject):
             "cart_sensors": data.get("cart_sensors", {}),
             "feed_signals": data.get("feed_signals", {}),
             "route_states": data.get("route_states", {}),
+            "clearing_strategies": data.get("clearing_strategies", {}),
+            "early_moved_routes": data.get("early_moved_routes", {}),
         }
         try:
             json_str = json.dumps(payload, ensure_ascii=False)
@@ -103,7 +105,7 @@ class DiagnosisWorker(QObject):
                 raw_results = response.get("diagnosis_results", [])
                 results = []
                 for r in raw_results:
-                    from fault_diagnosis.types import DiagnosisResult
+                    from tcp_diagnosis.diagnosis_types import DiagnosisResult
                     results.append(DiagnosisResult(
                         sensor_id=r.get("sensor_id", ""),
                         fault_type=r.get("fault_type", ""),

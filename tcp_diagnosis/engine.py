@@ -16,13 +16,14 @@ from typing import Dict, List
 import logging
 logger = logging.getLogger(__name__)
 
-from fault_diagnosis.types import (
+from tcp_diagnosis.diagnosis_types import (
     RouteState,
     SystemSnapshot,
     DiagnosisResult,
 )
 
 REPORT_COOLDOWN = 1.0  # 实时推送, 不做冷却
+FAULT_CONFIRMATION_DURATION = 3.0  # 故障确认时长: 故障需持续该时间后才上报UI/下位机
 CONVEYOR_FAULT_DURATION = 10.0
 HOPPER_SWITCH_STUCK_OPEN_DURATION = 30
 CLEARING_FAULT_DURATION = 60.0    # clearing阶段故障需持续60s才判定
@@ -38,6 +39,12 @@ CLEARING_PROXIMITY_MAX_LIT_S = 50.0         # clearing: 接近开关最大点亮
 
 WAITING_WEIGHT_VOLATILITY_THRESHOLD = 3  # waiting: 称重波动阈值(t)
 
+# 上料异常诊断常量
+FEEDING_BLOCKAGE_DURATION = 3.0          # 上料点堵料判定时间(s)
+HOPPER_BLOCKAGE_DURATION = 3.0           # 中转斗堵料判定时间(s)
+CART_MOVE_GRID_TIME = 18.0               # 小车每格移动时间(s)
+CART_MOVE_TOLERANCE = 0.2                # 小车移动容错比例(20%)
+
 
 class DiagnosisEngine:
     """独立诊断引擎——零仿真依赖"""
@@ -47,12 +54,18 @@ class DiagnosisEngine:
         self._weight_history: Dict[str, deque] = {}       # hopper_id → deque of (ts, weight), maxlen=120
         self._speed_history: Dict[str, deque] = {}        # conveyor_id → deque of (ts, speed), maxlen=120
         self._report_tracker: Dict[str, float] = {}       # key → last_reported_ts
+        self._fault_first_seen: Dict[str, float] = {}   # key → first_seen_ts (用于确认延迟)
         self._conveyor_fault_start: Dict[str, float] = {}  # "cid:fault_type" → first_observed_ts
         self._hopper_switch_fault_start: Dict[str, float] = {}  # "hid:fault_type" → first_observed_ts
         self._proximity_fault_start: Dict[str, float] = {}  # "sid:fault_type" → first_observed_ts
         self._route_state: Dict[str, RouteState] = {}
         self._route_state_since: Dict[str, float] = {}
         self._route_configs: Dict[str, dict] = {}  # route_id → {conveyor_ids, hopper_ids, proximity_sensor_ids}
+        # 上料异常诊断追踪
+        self._feeding_blockage_start: Dict[str, float] = {}  # "route_id:feed_point" → first_observed_ts
+        self._hopper_blockage_start: Dict[str, float] = {}   # "route_id:hopper_id" → first_observed_ts
+        self._cart_move_start: Dict[str, float] = {}         # route_id → move_start_ts
+        self._cart_move_initial_pos: Dict[str, int] = {}     # route_id → move_start_position
 
     def diagnose(self, snapshot: SystemSnapshot) -> List[DiagnosisResult]:
         self._record_snapshot(snapshot)
@@ -62,6 +75,10 @@ class DiagnosisEngine:
         results.extend(self._diagnose_carts(snapshot))
         results.extend(self._diagnose_conveyors(snapshot))
         results.extend(self._diagnose_cross_sensor(snapshot))
+        # 上料异常诊断
+        results.extend(self._diagnose_feeding_blockage(snapshot))
+        results.extend(self._diagnose_hopper_blockage(snapshot))
+        results.extend(self._diagnose_cart_movement(snapshot))
         return self._dedup_and_sort(results, snapshot.timestamp)
 
     # ========================================================================
@@ -84,14 +101,35 @@ class DiagnosisEngine:
             self._speed_history[cid].append((ts, c.speed))
 
     def _dedup_and_sort(self, results: List[DiagnosisResult], now: float) -> List[DiagnosisResult]:
+        """去重排序，增加故障确认延迟: 故障需持续 CONFIRMATION_DURATION 秒后才上报"""
+        active_keys = set()
         filtered = []
         for r in results:
             key = f"{r.sensor_id}:{r.fault_type}"
+            active_keys.add(key)
+
+            # 记录首次检测时间
+            if key not in self._fault_first_seen:
+                self._fault_first_seen[key] = now
+
+            first_seen = self._fault_first_seen[key]
+
+            # 故障确认延迟: 必须持续存在超过 CONFIRMATION_DURATION 才上报
+            if now - first_seen < FAULT_CONFIRMATION_DURATION:
+                continue
+
+            # 冷却去重
             last = self._report_tracker.get(key, -999.0)
             if now - last < REPORT_COOLDOWN:
                 continue
             self._report_tracker[key] = now
             filtered.append(r)
+
+        # 清理已消失的故障
+        for key in list(self._fault_first_seen.keys()):
+            if key not in active_keys:
+                self._fault_first_seen.pop(key, None)
+
         filtered.sort(key=lambda r: -r.confidence)
         return filtered
 
@@ -231,6 +269,15 @@ class DiagnosisEngine:
                     self._proximity_fault_start.pop(f"{sid}:stuck_high_tail_feeding", None)
                     self._proximity_fault_start.pop(f"{sid}:stuck_high_in_standby", None)
                     self._proximity_fault_start.pop(f"{sid}:stuck_high_moving", None)
+                # 清理上料异常追踪
+                for key in list(self._feeding_blockage_start.keys()):
+                    if key.startswith(route_id):
+                        self._feeding_blockage_start.pop(key, None)
+                for key in list(self._hopper_blockage_start.keys()):
+                    if key.startswith(route_id):
+                        self._hopper_blockage_start.pop(key, None)
+                self._cart_move_start.pop(route_id, None)
+                self._cart_move_initial_pos.pop(route_id, None)
                 del self._route_state[route_id]
                 self._route_state_since.pop(route_id, None)
 
@@ -486,12 +533,22 @@ class DiagnosisEngine:
     # ------------------------------------------------------------------
 
     def _check_clearing_stage(self, route, snapshot: SystemSnapshot) -> List[DiagnosisResult]:
-        """清空余料阶段诊断（持续60s才判定故障，顺序策略终点皮带除外，换列策略中转斗除外）"""
+        """清空余料阶段诊断（持续60s才判定故障，顺序策略终点皮带除外，换列策略中转斗除外）
+        
+        顺序清空共享状态（early_moved_from_clearing=True）：
+        - 清空余料 + 小车移动同步进行，状态取两者并集条件
+        - 中转斗开关：MOVING_TO_TARGET不检查 → 共享状态也不检查（并集：只要一方允许即OK）
+        - 接近开关：MOVING_TO_TARGET不检查 → 共享状态也不检查（并集：只要一方允许即OK）
+        - 皮带：两状态规则一致（非终点运行、终点停止），保持不变
+        """
         results = []
         ts = snapshot.timestamp
         strategy = getattr(route, 'clearing_strategy', 'reverse')
         end_cid = route.conveyor_ids[-1] if route.conveyor_ids else None
+        in_shared = (strategy == 'sequential' and
+                     getattr(route, 'early_moved_from_clearing', False))
 
+        # 皮带检查：两状态规则一致，无论是否共享状态都执行
         for cid in route.conveyor_ids:
             conv = snapshot.conveyors.get(cid)
             # 顺序策略：终点皮带被故意停止，跳过检查
@@ -513,8 +570,12 @@ class DiagnosisEngine:
             else:
                 self._conveyor_fault_start.pop(f"{cid}:stopped_in_clearing", None)
 
-        # 换列策略：中转斗故意保持开启，跳过检查
-        if strategy == 'column_switch':
+        # 共享状态：中转斗开关取并集 → MOVING_TO_TARGET不检查，共享状态也不检查
+        if in_shared:
+            for hid in route.hopper_ids:
+                self._hopper_switch_fault_start.pop(f"{hid}:switch_open_in_clearing", None)
+        elif strategy == 'column_switch':
+            # 换列策略：中转斗故意保持开启，跳过检查
             for hid in route.hopper_ids:
                 self._hopper_switch_fault_start.pop(f"{hid}:switch_open_in_clearing", None)
         else:
@@ -537,19 +598,24 @@ class DiagnosisEngine:
                 else:
                     self._hopper_switch_fault_start.pop(f"{hid}:switch_open_in_clearing", None)
 
-        for sid in route.proximity_sensor_ids:
-            sensor = snapshot.proximity_sensors.get(sid)
-            if sensor and sensor.state:
-                clearing_start = self._route_state_since.get(route.route_id, ts)
-                lit_dur = self._true_duration_since(sid, clearing_start, ts) / 1000.0
-                if lit_dur > CLEARING_PROXIMITY_MAX_LIT_S:
-                    results.append(DiagnosisResult(
-                        sensor_id=sid,
-                        fault_type="stuck_high",
-                        confidence=0.85,
-                        description=f"接近开关{sid}故障(卡高): 清空阶段点亮{lit_dur:.1f}s超过{CLEARING_PROXIMITY_MAX_LIT_S}s",
-                        category="proximity",
-                    ))
+        # 共享状态：接近开关取并集 → MOVING_TO_TARGET不检查，共享状态也不检查
+        if in_shared:
+            for sid in route.proximity_sensor_ids:
+                self._proximity_fault_start.pop(f"{sid}:stuck_high_moving", None)
+        else:
+            for sid in route.proximity_sensor_ids:
+                sensor = snapshot.proximity_sensors.get(sid)
+                if sensor and sensor.state:
+                    clearing_start = self._route_state_since.get(route.route_id, ts)
+                    lit_dur = self._true_duration_since(sid, clearing_start, ts) / 1000.0
+                    if lit_dur > CLEARING_PROXIMITY_MAX_LIT_S:
+                        results.append(DiagnosisResult(
+                            sensor_id=sid,
+                            fault_type="stuck_high",
+                            confidence=0.85,
+                            description=f"接近开关{sid}故障(卡高): 清空阶段点亮{lit_dur:.1f}s超过{CLEARING_PROXIMITY_MAX_LIT_S}s",
+                            category="proximity",
+                        ))
 
         return results
 
@@ -979,6 +1045,192 @@ class DiagnosisEngine:
         return results
 
     # ========================================================================
+    # G. 上料点出料口堵料诊断
+    # ========================================================================
+
+    def _diagnose_feeding_blockage(self, snapshot: SystemSnapshot) -> List[DiagnosisResult]:
+        """上料点出料口堵料：FEEDING状态下，路线起始皮带上的接近开关不点亮超过3S"""
+        results = []
+        ts = snapshot.timestamp
+
+        for route_id in snapshot.active_route_ids:
+            route = snapshot.routes.get(route_id)
+            if not route or route.state != RouteState.FEEDING:
+                continue
+            if not route.proximity_sensor_ids:
+                continue
+
+            # 起始传感器 = 路线上第一个接近开关（对应起始皮带）
+            first_sid = route.proximity_sensor_ids[0]
+            sensor = snapshot.proximity_sensors.get(first_sid)
+            if not sensor:
+                continue
+
+            feed_point = route.feed_point or route_id
+            key = f"{route_id}:{feed_point}"
+
+            if sensor.state:
+                # 传感器点亮，堵料解除
+                self._feeding_blockage_start.pop(key, None)
+                continue
+
+            # 传感器未点亮，开始计时
+            start = self._feeding_blockage_start.get(key, ts)
+            self._feeding_blockage_start[key] = start
+            if ts - start >= FEEDING_BLOCKAGE_DURATION:
+                results.append(DiagnosisResult(
+                    sensor_id=first_sid,
+                    fault_type="feeding_outlet_blocked",
+                    confidence=0.88,
+                    description=f"上料点{feed_point}出料口堵料: 路线{route_id}处于FEEDING但起始皮带{route.conveyor_ids[0] if route.conveyor_ids else '?'}传感器{first_sid}未点亮(持续{ts-start:.0f}s)",
+                    category="feeding_anomaly",
+                    related_sensors=[first_sid],
+                ))
+
+        # 清理不在活跃路线中的追踪记录
+        active_set = set(snapshot.active_route_ids)
+        for key in list(self._feeding_blockage_start.keys()):
+            rid = key.split(':')[0]
+            if rid not in active_set:
+                self._feeding_blockage_start.pop(key, None)
+
+        return results
+
+    # ========================================================================
+    # H. 中转斗堵料诊断
+    # ========================================================================
+
+    def _diagnose_hopper_blockage(self, snapshot: SystemSnapshot) -> List[DiagnosisResult]:
+        """中转斗堵料：FEEDING状态下，中转斗开关为开但称重值持续增大超过3S"""
+        results = []
+        ts = snapshot.timestamp
+
+        for route_id in snapshot.active_route_ids:
+            route = snapshot.routes.get(route_id)
+            if not route or route.state != RouteState.FEEDING:
+                continue
+
+            for hid in route.hopper_ids:
+                hopper = snapshot.hoppers.get(hid)
+                if not hopper:
+                    continue
+
+                key = f"{route_id}:{hid}"
+
+                # 只有开关为开时才检查堵料
+                if not hopper.switch_open:
+                    self._hopper_blockage_start.pop(key, None)
+                    continue
+
+                trend = self._weight_trend(hid, 3.0)
+                if trend <= 0:
+                    # 称重不再增加，堵料解除
+                    self._hopper_blockage_start.pop(key, None)
+                    continue
+
+                # 开关开 + 称重持续增加 → 开始计时
+                start = self._hopper_blockage_start.get(key, ts)
+                self._hopper_blockage_start[key] = start
+                if ts - start >= HOPPER_BLOCKAGE_DURATION:
+                    results.append(DiagnosisResult(
+                        sensor_id=hid,
+                        fault_type="hopper_blocked",
+                        confidence=0.85,
+                        description=f"{hid}堵料: 路线{route_id}处于FEEDING但开关开且称重持续增加({trend:.2f}t/s)超过{ts-start:.0f}s",
+                        category="feeding_anomaly",
+                    ))
+
+        # 清理不在活跃路线中的追踪记录
+        active_set = set(snapshot.active_route_ids)
+        for key in list(self._hopper_blockage_start.keys()):
+            rid = key.split(':')[0]
+            if rid not in active_set:
+                self._hopper_blockage_start.pop(key, None)
+
+        return results
+
+    # ========================================================================
+    # I. 小车移动故障诊断
+    # ========================================================================
+
+    def _diagnose_cart_movement(self, snapshot: SystemSnapshot) -> List[DiagnosisResult]:
+        """小车移动故障：MOVING_TO_TARGET阶段，小车在规定时间内未到达目标位置"""
+        results = []
+        ts = snapshot.timestamp
+
+        # 路线→小车映射
+        cart_map = {
+            'route1': 'Cart1', 'route2': 'Cart1', 'route3': 'Cart1',
+            'route4': 'Cart3', 'route5': 'Cart4',
+            'route6': 'Cart2', 'route7': 'Cart3', 'route8': 'Cart2',
+        }
+
+        for route_id in snapshot.active_route_ids:
+            route = snapshot.routes.get(route_id)
+            if not route:
+                continue
+
+            if route.state == RouteState.MOVING_TO_TARGET:
+                # 记录小车移动开始时刻和初始位置
+                if route_id not in self._cart_move_start:
+                    self._cart_move_start[route_id] = ts
+                    cart_id = cart_map.get(route_id)
+                    if cart_id:
+                        cart = snapshot.carts.get(cart_id)
+                        self._cart_move_initial_pos[route_id] = cart.position if cart else 0
+                    else:
+                        self._cart_move_initial_pos[route_id] = 0
+
+                cart_id = cart_map.get(route_id)
+                if not cart_id:
+                    continue
+                cart = snapshot.carts.get(cart_id)
+                if not cart:
+                    continue
+
+                target_pos = route.cart_target_position
+                if target_pos <= 0:
+                    continue
+
+                # 已经到达目标位置，解除故障追踪
+                if cart.position == target_pos:
+                    self._cart_move_start.pop(route_id, None)
+                    self._cart_move_initial_pos.pop(route_id, None)
+                    continue
+
+                # 计算预期到达时间
+                initial_pos = self._cart_move_initial_pos.get(route_id, cart.position)
+                grids = abs(target_pos - initial_pos)
+                if grids == 0:
+                    grids = 1  # 至少移动1格
+                expected_time = grids * CART_MOVE_GRID_TIME * (1 + CART_MOVE_TOLERANCE)
+
+                move_start = self._cart_move_start[route_id]
+                elapsed = ts - move_start
+
+                if elapsed >= expected_time:
+                    results.append(DiagnosisResult(
+                        sensor_id=route_id,
+                        fault_type="cart_move_failure",
+                        confidence=0.90,
+                        description=f"小车移动故障: 路线{route_id}目标格位{target_pos}，移动{grids}格，预期{expected_time:.1f}s内到达，已耗时{elapsed:.1f}s仍未到达(当前位置{cart.position})",
+                        category="cart_movement",
+                    ))
+            else:
+                # 不在MOVING_TO_TARGET阶段，清理追踪
+                self._cart_move_start.pop(route_id, None)
+                self._cart_move_initial_pos.pop(route_id, None)
+
+        # 清理不在活跃路线中的追踪记录
+        active_set = set(snapshot.active_route_ids)
+        for rid in list(self._cart_move_start.keys()):
+            if rid not in active_set:
+                self._cart_move_start.pop(rid, None)
+                self._cart_move_initial_pos.pop(rid, None)
+
+        return results
+
+    # ========================================================================
     # 公共：清空历史
     # ========================================================================
 
@@ -987,9 +1239,14 @@ class DiagnosisEngine:
         self._weight_history.clear()
         self._speed_history.clear()
         self._report_tracker.clear()
+        self._fault_first_seen.clear()
         self._conveyor_fault_start.clear()
         self._hopper_switch_fault_start.clear()
         self._proximity_fault_start.clear()
         self._route_state.clear()
         self._route_state_since.clear()
         self._route_configs.clear()
+        self._feeding_blockage_start.clear()
+        self._hopper_blockage_start.clear()
+        self._cart_move_start.clear()
+        self._cart_move_initial_pos.clear()

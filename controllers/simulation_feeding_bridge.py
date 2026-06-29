@@ -277,6 +277,14 @@ class SimulationFeedingBridge(QObject):
                             if ctx:
                                 ctx.cart_moving = True
                                 ctx.cart_target_position = target
+                    # 同步分料方向：FM命令中携带的分料状态
+                    left_div = cmd.get("left_divert")
+                    right_div = cmd.get("right_divert")
+                    if left_div is not None and right_div is not None:
+                        ctrl.cart_divert[dev_id] = (left_div, right_div)
+                        # 同步写入传感器数据管理器，确保TCP诊断服务也能看到
+                        ctrl.sensor_data_manager.write_cart_left_divert(dev_id, left_div)
+                        ctrl.sensor_data_manager.write_cart_right_divert(dev_id, right_div)
         ctrl.mark_dirty()  # 通知UI刷新
 
 

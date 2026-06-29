@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fault_diagnosis.types import (
+from tcp_diagnosis.diagnosis_types import (
     RouteState,
     ProximitySensorSnapshot,
     HopperSnapshot,
@@ -53,6 +53,7 @@ class TcpDataAdapter:
         active_route_ids = self._infer_active_routes(data.get('feed_signals', {}), route_states_raw)
 
         routes: Dict[str, RouteSnapshot] = {}
+        early_moved = data.get('early_moved_routes', {})
         for route_id, route_cfg in FEED_ROUTES.items():
             state = self._resolve_route_state(
                 route_id, route_cfg, route_states_raw,
@@ -65,6 +66,9 @@ class TcpDataAdapter:
                 conveyor_ids=list(route_cfg['conveyors']),
                 hopper_ids=[h for h in route_cfg.get('hoppers', []) if h],
                 proximity_sensor_ids=list(route_cfg.get('proximity_sensors', [])),
+                feed_point=route_cfg.get('feed_point', ''),
+                cart_target_position=route_cfg.get('cart_target_position', 0),
+                early_moved_from_clearing=early_moved.get(route_id, False),
             )
 
         proximity_sensors: Dict[str, ProximitySensorSnapshot] = {}

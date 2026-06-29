@@ -7,7 +7,7 @@ the diagnosis engine's standard input format (SystemSnapshot), enabling zero-cou
 
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import config
-from fault_diagnosis.types import (
+from tcp_diagnosis.diagnosis_types import (
     RouteState,
     ProximitySensorSnapshot,
     HopperSnapshot,
@@ -17,7 +17,7 @@ from fault_diagnosis.types import (
     SystemSnapshot,
     DiagnosisResult,
 )
-from fault_diagnosis.engine import DiagnosisEngine
+from tcp_diagnosis.engine import DiagnosisEngine
 
 if TYPE_CHECKING:
     from controllers.simulation_controller import Sensor, TransferHopper, Conveyor
@@ -68,6 +68,9 @@ class FaultDiagnosisAdapter:
                         prox_ids.append(sid)
 
             strategy = getattr(ctx, 'clearing_strategy', 'reverse')
+            feed_point = route_cfg.get('feed_point', '')
+            cart_target = getattr(ctx, 'cart_target_position', 0) if ctx else 0
+            early_moved = getattr(ctx, 'early_moved_from_clearing', False) if ctx else False
             routes[route_id] = RouteSnapshot(
                 route_id=route_id,
                 state=state,
@@ -75,6 +78,9 @@ class FaultDiagnosisAdapter:
                 hopper_ids=[h for h in route_cfg.get('hoppers', []) if h],
                 proximity_sensor_ids=prox_ids,
                 clearing_strategy=strategy,
+                feed_point=feed_point,
+                cart_target_position=cart_target,
+                early_moved_from_clearing=early_moved,
             )
 
         proximity_sensors: Dict[str, ProximitySensorSnapshot] = {}

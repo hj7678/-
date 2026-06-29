@@ -38,7 +38,7 @@ from controllers.route_state_manager import RouteState, get_route_state_manager,
 from control_strategy_generator import ControlStrategyGenerator, get_control_strategy_generator
 from tcp_data_sender import TcpDataSender
 from udp_binary_sender import UdpBinarySender
-from fault_diagnosis import DiagnosisEngine
+from tcp_diagnosis import DiagnosisEngine
 from controllers.fault_diagnosis_adapter import FaultDiagnosisAdapter
 from controllers.tcp_diagnosis_client import TcpDiagnosisClient
 from controllers.tcp_scheduling_client import TcpSchedulingClient
@@ -1126,8 +1126,11 @@ class SimulationController(QObject):
         cur_row = int(ctx.target_bin.split('-')[1])
         next_row = int(next_bin.split('-')[1])
 
-        if next_row < cur_row and cur_row >= 4:
+        if next_row < cur_row:
             if ctx.assigned_hoppers:
+                # 产线1/2（row 1-2）作为下一目标，且当前料仓产线位置≤3时，用反序代替顺序清空
+                if next_row <= 2 and cur_row <= 3:
+                    return 'reverse'
                 return 'sequential'
             return 'reverse'
         return 'reverse'
@@ -1485,6 +1488,14 @@ class SimulationController(QObject):
 
     def _update_tcp_data(self):
         """收集传感器数据并更新 TCP 发送器缓冲区"""
+        clearing_strategies = {}
+        early_moved_routes = {}
+        for route_id in config.FEED_ROUTES:
+            ctx = self.route_state_manager.get_route_context(route_id)
+            if ctx:
+                clearing_strategies[route_id] = ctx.clearing_strategy
+                if ctx.early_moved_from_clearing:
+                    early_moved_routes[route_id] = True
         data = {
             "sensors": self.sensor_data_manager.read_all_sensors(),
             "hoppers": self.sensor_data_manager.read_all_hopper_data(),
@@ -1492,6 +1503,8 @@ class SimulationController(QObject):
             "cart_sensors": self.sensor_data_manager.read_cart_sensors(),
             "feed_signals": self.sensor_data_manager.read_feed_signals(),
             "route_states": self.route_state_manager.get_all_route_states(),
+            "clearing_strategies": clearing_strategies,
+            "early_moved_routes": early_moved_routes,
         }
         self.tcp_sender.update_data(data)
 
