@@ -273,17 +273,19 @@ class FeedingMasterController:
                             ctx.target_bin = nxt
                             ctx.cart_moving = True
                             ctx.early_moved_from_clearing = True
+                            # 同步调度器追踪（顺序清空提前移动跳过了 WAITING→mark_completed→activate_route 路径）
+                            self.scheduler.mark_executing(belt_id, route_id, nxt)
                             print(f"[FM] {route_id} 顺序清空3s → 提前移小车 {cart_id}→{next_pos} ({nxt})", flush=True)
                         except (ValueError, IndexError):
                             pass
 
-            # 顺序策略: 小车提前到达 → 直接进入FEEDING
+            # 顺序策略: 小车提前到达 → 不再直接FEEDING，等传感器清空完成
+            # 状态引擎会根据 sensor_clear_timers 判定 CLEARING→WAITING，
+            # 然后通过 WAITING→auto_continue→activate_route 进入下一轮FEEDING
             if (ctx.state == RouteState.CLEARING and getattr(ctx, 'early_moved_from_clearing', False)
                     and not ctx.cart_moving and cart_pos == cart_target):
-                self.route_manager.set_route_state(route_id, RouteState.FEEDING)
-                ctx.early_moved_from_clearing = False
-                print(f"[FM] {route_id}: clearing → feeding | 小车 {cart_id} 到达 {cart_pos} (提前移动完成)", flush=True)
-                # 继续使用当前 state (已是FEEDING)
+                print(f"[FM] {route_id}: 小车 {cart_id} 到达 {cart_pos} (提前移动完成，等待清空)", flush=True)
+                # 不跳转状态，继续让状态引擎评估清空进度
 
             # 状态引擎判定
             belt_id_for_engine = CART_TO_BELT.get(cart_id, '')
