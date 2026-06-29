@@ -1,70 +1,15 @@
 """
-Stock Management 客户端 — 持久连接
+Stock Management 客户端 — Upper Computer 侧
 
-获取料位数据用于 HMI 显示。
+扩展共享基类，添加 HMI 专用方法（料位设置、消耗控制等）。
 """
-import json
-import socket
-import sys
-import threading
-from typing import Optional, List, Dict
+from typing import Dict, List
 
-STOCK_HOST = '127.0.0.1'
-STOCK_PORT = 8895
+from shared.stock_client import BaseStockClient
 
 
-class StockClient:
-    """持久连接的 Stock Management 客户端"""
-
-    def __init__(self, host: str = STOCK_HOST, port: int = STOCK_PORT):
-        self.host = host
-        self.port = port
-        self._sock: Optional[socket.socket] = None
-        self._lock = threading.Lock()
-
-    def connect(self) -> bool:
-        with self._lock:
-            if self._sock:
-                return True
-            try:
-                self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._sock.settimeout(3)
-                self._sock.connect((self.host, self.port))
-                self._sock.settimeout(10)
-                return True
-            except Exception as e:
-                print(f"[Upper] Stock 连接失败: {e}", file=sys.stderr)
-                self._sock = None
-                return False
-
-    def disconnect(self):
-        with self._lock:
-            sock = self._sock
-            self._sock = None
-        if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
-
-    def _request(self, payload: dict) -> Optional[dict]:
-        with self._lock:
-            sock = self._sock
-        if sock is None:
-            return None
-        try:
-            sock.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
-            buf = b""
-            while b"\n" not in buf:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    self.disconnect()
-                    return None
-                buf += chunk
-            return json.loads(buf.decode("utf-8").strip())
-        except Exception:
-            self.disconnect()
-            return None
+class StockClient(BaseStockClient):
+    """Upper Computer Stock Client — 扩展基类，添加写入方法"""
 
     def set_level(self, bin_id: str, level_tons: float):
         if not self._sock:
@@ -78,13 +23,11 @@ class StockClient:
         self._request({"action": "set_levels_batch", "data": data})
 
     def set_consumption_rate(self, bin_id: str, rate: float):
-        """设置消耗速率"""
         if not self._sock:
             self.connect()
         self._request({"action": "set_consumption", "bin_id": bin_id, "rate": rate})
 
     def set_consumption_rates_batch(self, rates: Dict[str, float]):
-        """批量设置消耗速率"""
         if not self._sock:
             self.connect()
         self._request({"action": "set_consumption_batch", "rates": rates})
@@ -103,11 +46,3 @@ class StockClient:
         if not self._sock:
             self.connect()
         self._request({"action": "stop_consumption"})
-
-    def get_all_levels(self) -> List[dict]:
-        if not self._sock:
-            self.connect()
-        resp = self._request({"action": "get_all"})
-        if resp and resp.get("ok"):
-            return resp.get("data", [])
-        return []

@@ -219,7 +219,8 @@ class SimulationFeedingBridge(QObject):
                         ctrl.active_routes.add(rid)
                     elif new_s:
                         ctrl.active_routes.discard(rid)
-                except: pass
+                except Exception as e:
+                    print(f"[桥接-状态] {rid} 同步失败: {e}", flush=True)
                 if isinstance(info, dict):
                     if info.get('target_bin'): ctx.target_bin = info['target_bin']; ctrl.route_to_bin[rid] = info['target_bin']
                     if info.get('cart_target'): ctx.cart_target_position = info['cart_target']
