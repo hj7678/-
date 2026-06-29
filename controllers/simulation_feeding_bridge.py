@@ -202,7 +202,7 @@ class SimulationFeedingBridge(QObject):
 
     def apply_commands(self, commands: List[dict]):
         ctrl = self._ctrl
-        # FM状态同步到仿真 (FM是权威)
+        # FM状态同步到仿真 (FM是权威，直接更新RouteContext字段)
         rs = getattr(self, '_pending_route_states', {})
         if rs:
             self._pending_route_states = {}
@@ -211,20 +211,35 @@ class SimulationFeedingBridge(QObject):
                 ctx = ctrl.route_state_manager.get_route_context(rid)
                 if not ctx: continue
                 try:
-                    new_s = RouteState(info.get('state', '')) if isinstance(info, dict) else None
-                    if new_s and new_s != ctx.state:
-                        print(f"[桥接-状态] {rid}: {ctx.state.value}→{new_s.value}", flush=True)
-                        ctrl.route_state_manager._transition(ctx, new_s)
-                    if new_s and new_s not in (RouteState.IDLE, RouteState.STANDBY):
-                        ctrl.active_routes.add(rid)
-                    elif new_s:
-                        ctrl.active_routes.discard(rid)
+                    if isinstance(info, dict):
+                        # 直接用 FM 数据更新 RouteContext，不再通过状态机
+                        new_s = RouteState(info.get('state', '')) if info.get('state') else None
+                        if new_s is not None:
+                            ctx.state = new_s
+                        if info.get('target_bin'):
+                            ctx.target_bin = info['target_bin']
+                            ctrl.route_to_bin[rid] = info['target_bin']
+                        if info.get('cart_target') is not None:
+                            ctx.cart_target_position = info['cart_target']
+                        ctx.cart_moving = info.get('cart_moving', False)
+                        if info.get('clearing_strategy'):
+                            ctx.clearing_strategy = info['clearing_strategy']
+                        ctx.early_moved_from_clearing = info.get('early_moved', False)
+                        if info.get('assigned_cart'):
+                            ctx.assigned_cart = info['assigned_cart']
+                        if info.get('assigned_hoppers'):
+                            ctx.assigned_hoppers = info['assigned_hoppers']
+                        if info.get('feeding_start_time'):
+                            ctx.feeding_start_time = info['feeding_start_time']
+                        if info.get('clearing_start_time'):
+                            ctx.clearing_start_time = info['clearing_start_time']
+                        # 活跃路线管理
+                        if new_s and new_s not in (RouteState.IDLE, RouteState.STANDBY):
+                            ctrl.active_routes.add(rid)
+                        elif new_s:
+                            ctrl.active_routes.discard(rid)
                 except Exception as e:
                     print(f"[桥接-状态] {rid} 同步失败: {e}", flush=True)
-                if isinstance(info, dict):
-                    if info.get('target_bin'): ctx.target_bin = info['target_bin']; ctrl.route_to_bin[rid] = info['target_bin']
-                    if info.get('cart_target'): ctx.cart_target_position = info['cart_target']
-                    ctx.cart_moving = info.get('cart_moving', False)
         for cmd in commands:
             device = cmd.get("device", "")
             dev_id = cmd.get("id", "")

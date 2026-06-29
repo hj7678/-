@@ -477,10 +477,14 @@ class FeedingMasterController:
                     'target_bin': ctx.target_bin or '',
                     'cart_target': ctx.cart_target_position,
                     'cart_moving': ctx.cart_moving,
+                    'clearing_strategy': getattr(ctx, 'clearing_strategy', 'reverse'),
+                    'early_moved': getattr(ctx, 'early_moved_from_clearing', False),
+                    'assigned_cart': ctx.assigned_cart or '',
+                    'assigned_hoppers': list(ctx.assigned_hoppers) if ctx.assigned_hoppers else [],
+                    'feeding_start_time': getattr(ctx, 'feeding_start_time', 0.0),
+                    'clearing_start_time': getattr(ctx, 'clearing_start_time', 0.0),
                 }
         for rid in deactivated:
-            ctx = self.route_manager.get_route_context(rid)
-            route_info[rid] = {'state': ctx.state.value if ctx else 'standby'}
             ctx = self.route_manager.get_route_context(rid)
             if ctx:
                 route_info[rid] = {
@@ -488,7 +492,15 @@ class FeedingMasterController:
                     'target_bin': ctx.target_bin or '',
                     'cart_target': ctx.cart_target_position,
                     'cart_moving': ctx.cart_moving,
+                    'clearing_strategy': getattr(ctx, 'clearing_strategy', 'reverse'),
+                    'early_moved': getattr(ctx, 'early_moved_from_clearing', False),
+                    'assigned_cart': ctx.assigned_cart or '',
+                    'assigned_hoppers': list(ctx.assigned_hoppers) if ctx.assigned_hoppers else [],
+                    'feeding_start_time': getattr(ctx, 'feeding_start_time', 0.0),
+                    'clearing_start_time': getattr(ctx, 'clearing_start_time', 0.0),
                 }
+            else:
+                route_info[rid] = {'state': 'standby', 'target_bin': '', 'cart_target': 0, 'cart_moving': False}
         sched_info = {
             'executing_bin': dict(self.scheduler._executing_bin),
             'sequences': {k: list(v) for k, v in self.scheduler._sequences.items()},
