@@ -586,11 +586,6 @@ class MainWindow(QMainWindow):
 
     def _on_bridge_toggled(self, enabled: bool):
         """桥接模式开关 — 连接/断开 FeedingMaster 上料主控"""
-        # FM 断开时桥接始终可关闭，但 FM 在线时不允许断开
-        if not enabled:
-            if hasattr(self, 'top_bridge_btn'):
-                self.top_bridge_btn.setChecked(True)
-            return
         if enabled:
             self.controller.start_feeding_bridge()
         else:
@@ -598,7 +593,8 @@ class MainWindow(QMainWindow):
         self._update_status_bar(f"桥接模式: {'开' if enabled else '关'}")
         # FM 在线状态：更新指示器
         if hasattr(self, 'top_fm_btn'):
-            self.top_fm_btn.setText("FM 在线" if self.controller._feeding_bridge and self.controller._feeding_bridge._fm.is_connected() else "FM 离线")
+            fm_online = self.controller._feeding_bridge and self.controller._feeding_bridge._fm.is_connected() if self.controller._feeding_bridge else False
+            self.top_fm_btn.setText("FM 在线" if fm_online else "FM 离线")
 
     def _on_fm_takeover_toggled(self, enabled: bool):
         # FM 始终接管，不再支持切换。仅更新 UI 指示器。

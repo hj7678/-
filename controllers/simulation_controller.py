@@ -1759,7 +1759,6 @@ class SimulationController(QObject):
     def set_use_feeding_master(self, enabled: bool):
         """切换决策模式: 始终为 FM 接管（保留接口兼容）"""
         self._use_feeding_master = True
-        print(f"[模式] 决策模式切换为: {mode}", flush=True)
 
     def _on_display_levels_updated(self, levels: list):
         """Stock Management 料位 → display_levels (仅 HMI 显示，不影响仿真逻辑)"""
