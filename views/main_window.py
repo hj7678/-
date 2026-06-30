@@ -467,13 +467,19 @@ class MainWindow(QMainWindow):
         """更新系统总览：显示4条皮带当前激活的路线（起点→终点）"""
         if not hasattr(self, 'operation_log'):
             return
-        belt_to_route = {'D6': 'route5', 'D7': 'route3', 'D8': 'route6', 'D9': 'route4'}
+        # 所有路线→皮带映射
+        belt_to_routes = {'D6': ['route5'], 'D7': ['route1', 'route2', 'route3'],
+                          'D8': ['route6', 'route8'], 'D9': ['route4', 'route7']}
         parts = []
-        for belt_id, route_id in belt_to_route.items():
-            ctx = self.controller.route_state_manager.get_route_context(route_id)
-            if ctx and ctx.state.value not in ('idle',):
-                route_name = config.FEED_ROUTES.get(route_id, {}).get('name', route_id)
-                # 上料点
+        for belt_id, route_ids in belt_to_routes.items():
+            active = None
+            for route_id in route_ids:
+                ctx = self.controller.route_state_manager.get_route_context(route_id)
+                if ctx and ctx.state.value not in ('idle',):
+                    active = (route_id, ctx)
+                    break
+            if active:
+                route_id, ctx = active
                 feed_point = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
                 silo_bin = self.controller.route_silo_bin.get(route_id, '')
                 target = self.controller.route_to_bin.get(route_id, ctx.target_bin or '')
