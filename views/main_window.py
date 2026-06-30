@@ -473,12 +473,14 @@ class MainWindow(QMainWindow):
             ctx = self.controller.route_state_manager.get_route_context(route_id)
             if ctx and ctx.state.value not in ('idle',):
                 route_name = config.FEED_ROUTES.get(route_id, {}).get('name', route_id)
+                # 上料点
+                feed_point = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
                 silo_bin = self.controller.route_silo_bin.get(route_id, '')
                 target = self.controller.route_to_bin.get(route_id, ctx.target_bin or '')
                 if silo_bin:
-                    parts.append(f"[{belt_id}] {route_name}: {silo_bin}→{target}")
+                    parts.append(f"[{belt_id}] {feed_point}→{silo_bin}→{target}")
                 elif target:
-                    parts.append(f"[{belt_id}] {route_name}: →{target}")
+                    parts.append(f"[{belt_id}] {feed_point}→{target}")
         if parts:
             self.operation_log.set_system_overview(' | '.join(parts))
         else:
