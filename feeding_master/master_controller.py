@@ -301,14 +301,18 @@ class FeedingMasterController:
 
             # 顺序清空共享状态保护：小车移动期间保持 CLEARING，不跳转
             if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
-                    and getattr(ctx, 'early_moved_from_clearing', False) and ctx.cart_moving):
-                next_state = RouteState.CLEARING
-
-            # 顺序策略: 小车提前到达 → 结束共享状态，进入 FEEDING
-            if (ctx.state == RouteState.CLEARING and getattr(ctx, 'early_moved_from_clearing', False)
-                    and not ctx.cart_moving and cart_pos == cart_target):
-                next_state = RouteState.FEEDING
-                ctx.early_moved_from_clearing = False
+                    and getattr(ctx, 'early_moved_from_clearing', False)):
+                if ctx.cart_moving:
+                    # 小车移动中 → 强制保持 CLEARING
+                    next_state = RouteState.CLEARING
+                elif cart_pos == cart_target:
+                    # 小车到达目标 → 结束共享状态，进入 FEEDING
+                    next_state = RouteState.FEEDING
+                    ctx.early_moved_from_clearing = False
+                    print(f"[FM] {route_id}: 小车 {cart_id} 到达 {cart_pos}，结束顺序清空共享状态", flush=True)
+                else:
+                    # 异常：cart_moving=False 但 cart 未到达 → 保持 CLEARING
+                    next_state = RouteState.CLEARING
                 ctx.clearing_strategy = 'reverse'  # 重置策略，下一轮重新判定
 
             # 状态变更 → 详细日志
