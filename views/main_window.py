@@ -264,6 +264,14 @@ class MainWindow(QMainWindow):
         for belt_id in ['D6', 'D7', 'D8', 'D9']:
             self.operation_log.set_belt_status(belt_id, '待机', '#8B949E')
         self.operation_log.set_system_overview('暂无激活路线')
+        # InfluxDB 时序数据写入（独立守护线程，与桥接解耦）
+        try:
+            from config_loader import get_config_loader
+            loader = get_config_loader()
+            raw_config = getattr(loader, '_overrides', {})
+            self.controller.start_influx_writer(raw_config)
+        except Exception:
+            pass  # 无 config.json 时静默跳过
 
         main_layout.addWidget(center_widget, 1)
 

@@ -66,5 +66,16 @@
     "route1:S-E4": 34.4,
     "route1:S-E8": 24.7,
     "route1:S-E10": 15.3
+  },
+
+  "influxdb": {
+    "_comment": "InfluxDB v2 时序数据库配置。enabled=false 则不写入。",
+    "enabled": false,
+    "host": "localhost",
+    "port": 8086,
+    "token": "",
+    "org": "sany",
+    "bucket": "sensor_data",
+    "interval_sec": 0.5
   }
 }

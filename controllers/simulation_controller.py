@@ -46,6 +46,7 @@ from scheduling.bin_config import BELT_BINS
 from shared.state_transition_engine import StateTransitionEngine
 from scheduling.config import SILO_MAX_CAP
 from belt_logger import belt_log, sys_log
+from shared.influxdb_writer import InfluxDBWriter
 from shared.plc_runtime.models import (
     Conveyor, Sensor, TransferHopper, SmallBin,
     _FallbackSensor, _FALLBACK_SENSOR,
@@ -150,6 +151,8 @@ class SimulationController(QObject):
         # FeedingMaster 桥接 (仿真 → 上料主控)
         self._feeding_bridge = None
         self._use_feeding_master = True   # FM 为唯一控制大脑，始终接管决策
+        # InfluxDB 时序数据写入（独立守护线程，与桥接解耦）
+        self._influx_writer: Optional[InfluxDBWriter] = None
         # FM 断开时进入安全模式（全停），FM 重连后自动恢复
         self._fm_safe_mode = False
         # Stock Management 拉回的料位 (用于 HMI 显示，不影响 small_bins 仿真逻辑)
@@ -1747,6 +1750,25 @@ class SimulationController(QObject):
         if self._feeding_bridge is not None:
             self._feeding_bridge.stop()
         print("[桥接] FeedingMaster 桥接已停止", flush=True)
+
+    def start_influx_writer(self, config: dict = None):
+        """启动 InfluxDB 时序数据写入（独立守护线程）"""
+        if self._influx_writer is not None:
+            return
+        from shared.influxdb_writer import InfluxDBWriter
+        if config:
+            self._influx_writer = InfluxDBWriter.from_config(self, config)
+        else:
+            self._influx_writer = InfluxDBWriter(self, interval_sec=0)
+        if self._influx_writer.enabled:
+            self._influx_writer.start()
+            print("[InfluxDB] 时序数据写入已启动", flush=True)
+
+    def stop_influx_writer(self):
+        if self._influx_writer is not None:
+            self._influx_writer.stop()
+            self._influx_writer = None
+            print("[InfluxDB] 时序数据写入已停止", flush=True)
 
     def _on_feeding_commands(self, commands: list):
         """收到 FeedingMaster 控制指令"""
