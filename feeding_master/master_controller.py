@@ -320,6 +320,17 @@ class FeedingMasterController:
                         parts.append(f"斗开: {','.join(ctx.assigned_hoppers)}")
                     if strategy != 'reverse':
                         parts.append(f"策略: {strategy}")
+                    # 启动上料点
+                    fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
+                    if fp:
+                        commands.append({'device': 'feed_point', 'id': fp, 'action': 'start'})
+                        new_cmds[f"feed_point:{fp}"] = 'start'
+                elif old.value == 'feeding':
+                    # 离开 FEEDING → 停止上料点
+                    fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
+                    if fp:
+                        commands.append({'device': 'feed_point', 'id': fp, 'action': 'stop'})
+                        new_cmds[f"feed_point:{fp}"] = 'stop'
                 elif next_state.value == 'clearing':
                     threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
                     parts.append(f"料位{level:.0f}%≥{threshold}% 策略={strategy}")

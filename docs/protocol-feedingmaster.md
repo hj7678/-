@@ -325,7 +325,16 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 **小车** (`device: "cart"`): `action`: `"move"`。附加字段：`target`（目标位置 int），`route_id`（关联路线 string）。ID: `Cart1`, `Cart2`, `Cart3`, `Cart4`。
 
-> 注：上料点 (`feed_point`) 指令在协议中预留但 FM 当前不直接发送，上料点的启停由 HMI 基于路线状态自行控制。
+**上料点** (`device: "feed_point"`): `action`: `"start"` | `"stop"`。FM 在进入 FEEDING 时发送 `start`，离开 FEEDING 时发送 `stop`。
+
+| ID | 对应上料点 | 路线 |
+|-----|---------|------|
+| feed1_1 | 上料点1-1 | route1 |
+| feed1_2 | 上料点1-2 | route2 |
+| feed2_1 | 上料点2-1 | route3 |
+| feed2_2 | 上料点2-2 | route4/route5 |
+| feed3 | 上料点3 | route6 |
+| silo_out | 高位储料仓 | route7/route8 |
 
 #### 2.1.2 `route_states` — 路线状态
 
