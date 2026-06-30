@@ -40,6 +40,9 @@ class SimulationFeedingBridge(QObject):
         self._fm.on_commands(self._on_commands)
         self._fm._on_ack = self._on_ack
         self._pending_ack = None  # 等待 ACK 的 ack_id
+        # 小车移动模拟：{cart_id: (target_pos, start_time)}
+        self._cart_moves: Dict[str, tuple] = {}
+        self._cart_move_duration = 18.0  # 每格 18s
 
     def set_enabled(self, enabled: bool):
         self._enabled = enabled
@@ -106,6 +109,17 @@ class SimulationFeedingBridge(QObject):
         """每帧: 推送料位→Stock, 推送传感器→FeedingMaster"""
         if not self._enabled:
             return
+        # 小车移动模拟：检查并更新位置
+        ctrl = self._ctrl
+        now = time.time()
+        for cart_id, (target, start_time) in list(self._cart_moves.items()):
+            if now - start_time >= self._cart_move_duration:
+                # 移动完成，更新位置
+                ctrl.cart_positions[cart_id] = target
+                if cart_id == 'Cart1': ctrl._cart1_is_moving = False
+                elif cart_id == 'Cart2': ctrl._cart2_is_moving = False
+                elif cart_id == 'Cart3': ctrl._cart3_is_moving = False
+                del self._cart_moves[cart_id]
 
         # 自动重连 (每3秒尝试一次, 避免阻塞tick)
         now = time.time()
@@ -307,10 +321,18 @@ class SimulationFeedingBridge(QObject):
                             else:
                                 ctrl.cart4_is_moving = False
                         else:
-                            ctrl.cart_target_positions[dev_id] = target
-                            if dev_id == 'Cart1': ctrl._cart1_is_moving = (ctrl.cart_positions.get('Cart1', 1) != target)
-                            if dev_id == 'Cart2': ctrl._cart2_is_moving = (ctrl.cart_positions.get('Cart2', 1) != target)
-                            if dev_id == 'Cart3': ctrl._cart3_is_moving = (ctrl.cart_positions.get('Cart3', 1) != target)
+                            # 记录小车移动，模拟 18s 移动时间
+                            current_pos = ctrl.cart_positions.get(dev_id, 1)
+                            if current_pos != target:
+                                self._cart_moves[dev_id] = (target, time.time())
+                                if dev_id == 'Cart1': ctrl._cart1_is_moving = True
+                                if dev_id == 'Cart2': ctrl._cart2_is_moving = True
+                                if dev_id == 'Cart3': ctrl._cart3_is_moving = True
+                            else:
+                                # 已在目标位置，无需移动
+                                if dev_id == 'Cart1': ctrl._cart1_is_moving = False
+                                if dev_id == 'Cart2': ctrl._cart2_is_moving = False
+                                if dev_id == 'Cart3': ctrl._cart3_is_moving = False
                         route_id = cmd.get("route_id")
                         if route_id:
                             ctx = ctrl.route_state_manager.get_route_context(route_id)

@@ -234,6 +234,9 @@ class FeedingMasterController:
             cart_pos = self._cart_positions.get(cart_id, 1) if cart_id else 1
             if cart_id:
                 ctx.cart_moving = self._cart_moving.get(cart_id, False)
+            # 调试：MOVING_TO_TARGET 时输出小车实际位置
+            if ctx.state == RouteState.MOVING_TO_TARGET and cart_id:
+                print(f"[FM-debug] {route_id} MOVING_TO_TARGET: {cart_id} pos={cart_pos} target={cart_target} moving={ctx.cart_moving} sensor_moving={self._cart_moving.get(cart_id, False)}", flush=True)
             target_bin = ctx.target_bin or ''
 
             level = 0.0
