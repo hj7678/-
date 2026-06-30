@@ -258,11 +258,12 @@ class MainWindow(QMainWindow):
 
         # 皮带日志 → UI桥接
         enable_ui_bridge()
-        for belt_id in ['system', 'D6', 'D7', 'D8', 'D9']:
-            if belt_id == 'system':
-                attach_ui('system', lambda _, msg: self.operation_log.add_log(msg, '#C0C8D0'))
-            else:
-                attach_ui(belt_id, lambda _, msg, b=belt_id: self.operation_log.add_belt_log(b, msg, '#C0C8D0'))
+        # 仅系统日志保留 UI 桥接，皮带日志仅通过状态行显示
+        attach_ui('system', lambda _, msg: self.operation_log.add_log(msg, '#C0C8D0'))
+        # 初始化各皮带状态行和系统总览
+        for belt_id in ['D6', 'D7', 'D8', 'D9']:
+            self.operation_log.set_belt_status(belt_id, '待机', '#8B949E')
+        self.operation_log.set_system_overview('暂无激活路线')
 
         main_layout.addWidget(center_widget, 1)
 
@@ -461,6 +462,27 @@ class MainWindow(QMainWindow):
         belt_id = belt_map.get(route_id, '')
         if belt_id and hasattr(self, 'operation_log'):
             self.operation_log.add_belt_log(belt_id, msg, color)
+
+    def _update_system_overview(self):
+        """更新系统总览：显示4条皮带当前激活的路线（起点→终点）"""
+        if not hasattr(self, 'operation_log'):
+            return
+        belt_to_route = {'D6': 'route5', 'D7': 'route3', 'D8': 'route6', 'D9': 'route4'}
+        parts = []
+        for belt_id, route_id in belt_to_route.items():
+            ctx = self.controller.route_state_manager.get_route_context(route_id)
+            if ctx and ctx.state.value not in ('idle',):
+                route_name = config.FEED_ROUTES.get(route_id, {}).get('name', route_id)
+                silo_bin = self.controller.route_silo_bin.get(route_id, '')
+                target = self.controller.route_to_bin.get(route_id, ctx.target_bin or '')
+                if silo_bin:
+                    parts.append(f"[{belt_id}] {route_name}: {silo_bin}→{target}")
+                elif target:
+                    parts.append(f"[{belt_id}] {route_name}: →{target}")
+        if parts:
+            self.operation_log.set_system_overview(' | '.join(parts))
+        else:
+            self.operation_log.set_system_overview('暂无激活路线')
 
     def _update_schedule_display(self):
         """更新调度缓存序列显示（状态面板实时 + 运行日志仅变化时）"""
@@ -783,58 +805,31 @@ class MainWindow(QMainWindow):
         self.control_panel.update_route_button(route_id, False)
 
     def _on_route_state_changed(self, route_id: str, old_state: str, new_state: str):
-        """路线状态变化"""
-        route_name = config.FEED_ROUTES.get(route_id, {}).get('name', route_id)
+        """路线状态变化 — 精简版：仅更新皮带状态行和系统总览"""
         target = self.controller.route_to_bin.get(route_id, '')
+        belt_map = {'route1':'D7','route2':'D7','route3':'D7',
+                    'route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}
+        belt_id = belt_map.get(route_id, '')
         state_cn = {
             'idle': '空闲', 'feeding': '上料中', 'clearing': '清空中',
             'waiting': '等待', 'standby': '待机', 'moving_to_target': '小车移动',
         }
+        state_colors = {
+            'feeding':'#2ECC71','clearing':'#F39C12','waiting':'#E67E22',
+            'standby':'#8B949E','moving_to_target':'#3498DB','idle':'#555',
+        }
         new_cn = state_cn.get(new_state, new_state)
-        # 更新皮带状态摘要行
-        belt_map = {'route1':'D7','route2':'D7','route3':'D7',
-                    'route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}
-        belt_id = belt_map.get(route_id, '')
-        state_colors = {'feeding':'#2ECC71','clearing':'#F39C12','waiting':'#E67E22',
-                        'standby':'#8B949E','moving_to_target':'#3498DB','idle':'#555'}
+
+        # 1. 更新各皮带状态行（仅状态切换时更新一次）
         if belt_id and hasattr(self, 'operation_log'):
-            status = f"{route_name} → {target}: {new_cn}" if target else f"{route_name}: {new_cn}"
-            self.operation_log.set_belt_status(belt_id, status, state_colors.get(new_state, '#4A90D9'))
-        # 分皮带日志
-        if target:
-            self._log_belt(route_id, f"{route_name} → {target}: {new_cn}", "#4A90D9")
-        else:
-            self._log_belt(route_id, f"{route_name}: {new_cn}", "#4A90D9")
-        # 系统总日志 + 文件日志
-        if new_state == 'feeding':
-            msg = f"> {route_name} 开始上料 → {target}"
-            self.operation_log.add_log(msg, "#2ECC71")
-            self.logger.info(msg)
-        elif new_state == 'clearing':
-            msg = f"> {route_name} 清空余料中..."
-            self.operation_log.add_log(msg, "#F39C12")
-            self.logger.info(msg)
-        elif new_state == 'waiting':
-            msg = f"> {route_name} → {target} 上料完成"
-            self.operation_log.add_log(msg, "#E67E22")
-            self.logger.info(msg)
-        elif new_state == 'moving_to_target':
-            msg = f"> {route_name} 小车驶向 {target}"
-            self.operation_log.add_log(msg, "#3498DB")
-            self.logger.info(msg)
-        elif new_state == 'standby':
-            msg = f"> {route_name} 节能待机"
-            self.operation_log.add_log(msg, "#8B949E")
-            self.logger.info(msg)
-        elif new_state == 'standby':
-            self.operation_log.add_log(f"> {route_name} 节能待机", "#8B949E")
-            self.logger.info(f"> {route_name} 节能待机")
-        elif new_state == 'moving_to_target':
-            self.operation_log.add_log(f"> {route_name} 小车驶向 {target}", "#3498DB")
-        # 当进入等待状态时触发下一轮调度
-        if new_state == 'waiting':
+            self.operation_log.set_belt_status(belt_id, new_cn, state_colors.get(new_state, '#4A90D9'))
+
+        # 2. 更新系统总览：显示 4 条皮带当前激活的路线信息
+        self._update_system_overview()
+
+        # 3. 当进入等待/待机状态时更新调度显示
+        if new_state in ('waiting', 'standby'):
             self._update_schedule_display()
-        # 进入待机时也更新显示
         if new_state == 'standby':
             self._update_schedule_display()
 

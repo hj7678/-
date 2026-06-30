@@ -149,6 +149,10 @@ class OperationLogPanel(QWidget):
         if belt_id in self._sections:
             self._sections[belt_id].set_status(text, color)
 
+    def set_system_overview(self, text: str):
+        """更新系统总览状态行"""
+        self._sys_log.set_status(text, "#8B949E")
+
     def clear(self):
         for s in self._sections.values():
             s.clear()
