@@ -236,10 +236,10 @@ class SimulationFeedingBridge(QObject):
                 if not ctx: continue
                 try:
                     if isinstance(info, dict):
-                        # 直接用 FM 数据更新 RouteContext，不再通过状态机
+                        # FM 数据更新 RouteContext，通过 _transition 触发状态变更回调
                         new_s = RouteState(info.get('state', '')) if info.get('state') else None
-                        if new_s is not None:
-                            ctx.state = new_s
+                        if new_s is not None and new_s != ctx.state:
+                            ctrl.route_state_manager._transition(ctx, new_s)
                         if info.get('target_bin'):
                             ctx.target_bin = info['target_bin']
                             ctrl.route_to_bin[rid] = info['target_bin']
