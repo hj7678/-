@@ -279,13 +279,13 @@ class FeedingMasterController:
                         except (ValueError, IndexError):
                             pass
 
-            # 顺序策略: 小车提前到达 → 不再直接FEEDING，等传感器清空完成
-            # 状态引擎会根据 sensor_clear_timers 判定 CLEARING→WAITING，
-            # 然后通过 WAITING→auto_continue→activate_route 进入下一轮FEEDING
+            # 顺序策略: 小车提前到达 → 直接进入FEEDING
+            # 顺序清空时终点皮带已停止，小车到达下一料仓后余料已排空完毕
             if (ctx.state == RouteState.CLEARING and getattr(ctx, 'early_moved_from_clearing', False)
                     and not ctx.cart_moving and cart_pos == cart_target):
-                print(f"[FM] {route_id}: 小车 {cart_id} 到达 {cart_pos} (提前移动完成，等待清空)", flush=True)
-                # 不跳转状态，继续让状态引擎评估清空进度
+                self.route_manager.set_route_state(route_id, RouteState.FEEDING)
+                ctx.early_moved_from_clearing = False
+                print(f"[FM] {route_id}: clearing → feeding | 小车 {cart_id} 到达 {cart_pos} (顺序清空提前移动完成)", flush=True)
 
             # 状态引擎判定
             belt_id_for_engine = CART_TO_BELT.get(cart_id, '')
@@ -383,6 +383,7 @@ class FeedingMasterController:
                     is_feeding=(ctx.state == RouteState.FEEDING),
                     is_clearing=(ctx.state == RouteState.CLEARING),
                     cart_at_target=_cat,
+                    clearing_strategy=strategy,
                 )
                 for cid, action in belt_cmds.items():
                     cmd = {'device': 'belt', 'id': cid, 'action': action.value}

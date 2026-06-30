@@ -25,14 +25,16 @@ def compute_route_belt_commands(
     is_feeding: bool,
     is_clearing: bool,
     cart_at_target: bool,
+    clearing_strategy: str = 'reverse',
 ) -> Dict[str, ActuatorAction]:
     """根据路线状态计算每条皮带的启停命令
 
     规则（安全互锁）：
     1. FEEDING + 小车在目标位置 → 全部皮带启动
-    2. CLEARING → 全部皮带运行，终点皮带清空完成后停止
-    3. 小车移动中 → 非终点皮带运行，终点皮带停止
-    4. STANDBY/WAITING → 全部皮带停止
+    2. CLEARING 反序 → 全部皮带运行，终点皮带清空完成后停止
+    3. CLEARING 顺序 → 终点皮带立即停止，其他皮带保持运行
+    4. 小车移动中 → 非终点皮带运行，终点皮带停止
+    5. STANDBY/WAITING → 全部皮带停止
 
     Args:
         route_conveyors: 路线上的皮带ID列表（按物料流向）
@@ -40,6 +42,7 @@ def compute_route_belt_commands(
         is_feeding: 是否在补料状态
         is_clearing: 是否在清空状态
         cart_at_target: 小车是否已到达目标位置
+        clearing_strategy: 清空策略 ('reverse' | 'sequential' | 'column_switch')
 
     Returns:
         {conv_id: ActuatorAction}
@@ -52,10 +55,17 @@ def compute_route_belt_commands(
             commands[cid] = ActuatorAction.START
 
     elif is_clearing:
-        # 清空阶段：终点皮带保持运行（余料排空），其他皮带运行
-        for cid in route_conveyors:
-            commands[cid] = ActuatorAction.START
-        # 注意：终点皮带的停止由 sensor_clear 检测触发，此处不处理
+        if clearing_strategy == 'sequential':
+            # 顺序清空：终点皮带立即停止（料不再进入小车），其他皮带继续运行排空余料
+            for cid in route_conveyors:
+                if cid == final_conveyor:
+                    commands[cid] = ActuatorAction.STOP
+                else:
+                    commands[cid] = ActuatorAction.START
+        else:
+            # 反序/换列清空：全部皮带运行，终点皮带排空余料后停止
+            for cid in route_conveyors:
+                commands[cid] = ActuatorAction.START
 
     elif not cart_at_target:
         # 小车移动中：非终点皮带保持运行，终点皮带停止
