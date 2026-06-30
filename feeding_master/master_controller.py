@@ -279,14 +279,6 @@ class FeedingMasterController:
                         except (ValueError, IndexError):
                             pass
 
-            # 顺序策略: 小车提前到达 → 直接进入FEEDING
-            # 顺序清空时终点皮带已停止，小车到达下一料仓后余料已排空完毕
-            if (ctx.state == RouteState.CLEARING and getattr(ctx, 'early_moved_from_clearing', False)
-                    and not ctx.cart_moving and cart_pos == cart_target):
-                self.route_manager.set_route_state(route_id, RouteState.FEEDING)
-                ctx.early_moved_from_clearing = False
-                print(f"[FM] {route_id}: clearing → feeding | 小车 {cart_id} 到达 {cart_pos} (顺序清空提前移动完成)", flush=True)
-
             # 状态引擎判定
             belt_id_for_engine = CART_TO_BELT.get(cart_id, '')
             self.state_engine._override_threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
@@ -306,6 +298,13 @@ class FeedingMasterController:
                 sensor_clear_timers=sensor_clear_timers or None,
                 sensor_clear_timeouts=sensor_clear_timeouts or None,
             )
+
+            # 顺序策略: 小车提前到达 → 直接进入FEEDING (状态引擎之后，避免被覆盖)
+            # 顺序清空时终点皮带已停止，小车到达下一料仓后余料已排空完毕
+            if (ctx.state == RouteState.CLEARING and getattr(ctx, 'early_moved_from_clearing', False)
+                    and not ctx.cart_moving and cart_pos == cart_target):
+                next_state = RouteState.FEEDING
+                ctx.early_moved_from_clearing = False
 
             # 状态变更 → 详细日志
             if next_state != ctx.state:
