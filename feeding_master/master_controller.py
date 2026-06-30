@@ -299,8 +299,12 @@ class FeedingMasterController:
                 sensor_clear_timeouts=sensor_clear_timeouts or None,
             )
 
-            # 顺序策略: 小车提前到达 → 直接进入FEEDING (状态引擎之后，避免被覆盖)
-            # 顺序清空时终点皮带已停止，小车到达下一料仓后余料已排空完毕
+            # 顺序清空共享状态保护：小车移动期间保持 CLEARING，不跳转
+            if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
+                    and getattr(ctx, 'early_moved_from_clearing', False) and ctx.cart_moving):
+                next_state = RouteState.CLEARING
+
+            # 顺序策略: 小车提前到达 → 结束共享状态，进入 FEEDING
             if (ctx.state == RouteState.CLEARING and getattr(ctx, 'early_moved_from_clearing', False)
                     and not ctx.cart_moving and cart_pos == cart_target):
                 next_state = RouteState.FEEDING
