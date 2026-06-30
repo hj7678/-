@@ -258,7 +258,7 @@ class FeedingMasterController:
             if ctx.state == RouteState.CLEARING:
                 sensor_clear_timers, sensor_clear_timeouts = self._build_clearing_data(ctx, route_id)
 
-            # 顺序策略: 提前移小车
+            # 顺序策略: 提前移小车 → 进入 MOVING_TO_TARGET（非 CLEARING）
             if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
                     and cart_id in ('Cart1', 'Cart2') and not getattr(ctx, 'early_moved_from_clearing', False)):
                 clearing_elapsed = self._total_runtime - getattr(ctx, 'clearing_start_time', 0)
@@ -273,9 +273,10 @@ class FeedingMasterController:
                             ctx.target_bin = nxt
                             ctx.cart_moving = True
                             ctx.early_moved_from_clearing = True
-                            # 同步调度器追踪（顺序清空提前移动跳过了 WAITING→mark_completed→activate_route 路径）
+                            ctx.clearing_strategy = 'reverse'  # 已结束清空，重置策略
                             self.scheduler.mark_executing(belt_id, route_id, nxt)
-                            print(f"[FM] {route_id} 顺序清空3s → 提前移小车 {cart_id}→{next_pos} ({nxt})", flush=True)
+                            self.route_manager.set_route_state(route_id, RouteState.MOVING_TO_TARGET)
+                            print(f"[FM] {route_id} 顺序清空3s → 小车移动 {cart_id}→{next_pos} ({nxt})", flush=True)
                         except (ValueError, IndexError):
                             pass
 
@@ -298,22 +299,6 @@ class FeedingMasterController:
                 sensor_clear_timers=sensor_clear_timers or None,
                 sensor_clear_timeouts=sensor_clear_timeouts or None,
             )
-
-            # 顺序清空共享状态保护：小车移动期间保持 CLEARING，不跳转
-            if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
-                    and getattr(ctx, 'early_moved_from_clearing', False)):
-                if ctx.cart_moving:
-                    # 小车移动中 → 强制保持 CLEARING
-                    next_state = RouteState.CLEARING
-                elif cart_pos == cart_target:
-                    # 小车到达目标 → 结束共享状态，进入 FEEDING
-                    next_state = RouteState.FEEDING
-                    ctx.early_moved_from_clearing = False
-                    print(f"[FM] {route_id}: 小车 {cart_id} 到达 {cart_pos}，结束顺序清空共享状态", flush=True)
-                else:
-                    # 异常：cart_moving=False 但 cart 未到达 → 保持 CLEARING
-                    next_state = RouteState.CLEARING
-                ctx.clearing_strategy = 'reverse'  # 重置策略，下一轮重新判定
 
             # 状态变更 → 详细日志
             if next_state != ctx.state:
