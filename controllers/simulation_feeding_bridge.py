@@ -40,9 +40,9 @@ class SimulationFeedingBridge(QObject):
         self._fm.on_commands(self._on_commands)
         self._fm._on_ack = self._on_ack
         self._pending_ack = None  # 等待 ACK 的 ack_id
-        # 小车移动模拟：{cart_id: (target_pos, start_time)}
+        # 小车移动模拟：{cart_id: (target, start_time, duration)}
         self._cart_moves: Dict[str, tuple] = {}
-        self._cart_move_duration = 18.0  # 每格 18s
+        self._cart_move_per_grid = 18.0  # 每格 18s
 
     def set_enabled(self, enabled: bool):
         self._enabled = enabled
@@ -112,8 +112,8 @@ class SimulationFeedingBridge(QObject):
         # 小车移动模拟：检查并更新位置
         ctrl = self._ctrl
         now = time.time()
-        for cart_id, (target, start_time) in list(self._cart_moves.items()):
-            if now - start_time >= self._cart_move_duration:
+        for cart_id, (target, start_time, duration) in list(self._cart_moves.items()):
+            if now - start_time >= duration:
                 # 移动完成，更新位置
                 ctrl.cart_positions[cart_id] = target
                 if cart_id == 'Cart1': ctrl._cart1_is_moving = False
@@ -321,10 +321,12 @@ class SimulationFeedingBridge(QObject):
                             else:
                                 ctrl.cart4_is_moving = False
                         else:
-                            # 记录小车移动，模拟 18s 移动时间
+                            # 记录小车移动，模拟 (格子数 × 18s) 移动时间
                             current_pos = ctrl.cart_positions.get(dev_id, 1)
                             if current_pos != target:
-                                self._cart_moves[dev_id] = (target, time.time())
+                                grids = abs(target - current_pos)
+                                duration = grids * self._cart_move_per_grid
+                                self._cart_moves[dev_id] = (target, time.time(), duration)
                                 if dev_id == 'Cart1': ctrl._cart1_is_moving = True
                                 if dev_id == 'Cart2': ctrl._cart2_is_moving = True
                                 if dev_id == 'Cart3': ctrl._cart3_is_moving = True
