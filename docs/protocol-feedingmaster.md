@@ -11,6 +11,7 @@
 | 连接模型 | 上位机为客户端。FM 同时只接受一个连接，新连接自动断开旧连接。 |
 | 重连 | 上位机自动重连（每 3s），先启 HMI 后启 FM 也能正常工作 |
 | 通信模式 | 全双工 |
+| 序列号 | FM 下行消息含递增 `seq` 字段，HMI 检测跳跃以发现丢包 |
 
 ---
 
@@ -18,7 +19,7 @@
 
 ### 1.1 sensor_states — 传感器状态推送
 
-频率：100ms（FM接管）/ 500ms（监控）
+频率：100ms（FM 接管模式，始终以固定频率推送）
 
 ```json
 {
@@ -231,10 +232,19 @@ FM 收到后根据路线当前状态分级处理：
 ### 1.4 emergency_stop — 急停
 
 ```json
-{"type": "emergency_stop"}
+{"type": "emergency_stop", "ack_id": 1}
 ```
 
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ack_id` | int | 递增序号，FM 收到后回复 ACK 确认 |
+
 FM 收到后立即停止全部皮带、关闭全部斗、释放所有路线资源。仅在手动模式（调度服务关闭）下可用。
+
+FM 应答：
+```json
+{"type": "ack", "ack_id": 1, "action": "emergency_stop"}
+```
 
 ---
 
@@ -257,27 +267,38 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 ### 2.1 command — 控制指令
 
-频率：50ms
+频率：100ms
 
 ```json
 {
   "type": "command",
+  "seq": 1234,
   "commands": [
     {"device": "belt", "id": "E1", "action": "start"},
     {"device": "belt", "id": "D7", "action": "stop"},
     {"device": "hopper", "id": "hopper1", "action": "open"},
     {"device": "hopper", "id": "hopper3", "action": "close"},
-    {"device": "feed_point", "id": "feed1_1", "action": "start"},
-    {"device": "feed_point", "id": "feed2_1", "action": "stop"},
     {"device": "cart", "id": "Cart1", "action": "move", "target": 3, "route_id": "route1"},
     {"device": "cart", "id": "Cart4", "action": "move", "target": 6, "route_id": "route5"}
   ],
   "route_states": {
-    "route1": {"state": "feeding", "target_bin": "P1-1", "cart_target": 1, "cart_moving": false},
+    "route1": {
+      "state": "feeding",
+      "target_bin": "P1-1",
+      "cart_target": 1,
+      "cart_moving": false,
+      "clearing_strategy": "reverse",
+      "early_moved": false,
+      "assigned_cart": "Cart1",
+      "assigned_hoppers": ["hopper1", "hopper3", "hopper4"],
+      "feeding_start_time": 12.5,
+      "clearing_start_time": 0.0
+    },
     "route2": {"state": "idle"},
     "route3": {"state": "idle"},
     "route4": {"state": "idle"},
-    "route5": {"state": "moving_to_target", "target_bin": "S3", "cart_target": 5, "cart_moving": true},
+    "route5": {"state": "moving_to_target", "target_bin": "S3", "cart_target": 5, "cart_moving": true,
+      "clearing_strategy": "reverse", "early_moved": false, "assigned_cart": "Cart4", "assigned_hoppers": [], "feeding_start_time": 0.0, "clearing_start_time": 0.0},
     "route6": {"state": "idle"},
     "route7": {"state": "idle"},
     "route8": {"state": "idle"}
@@ -290,10 +311,7 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
       "D9": [],
       "D6": []
     }
-  },
-  "diagnosis": [
-    {"sensor_id": "S-E1", "fault_type": "stuck_high", "confidence": 0.95, "description": "...", "category": "proximity"}
-  ]
+  }
 }
 ```
 
@@ -305,20 +323,9 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 **中转斗** (`device: "hopper"`): `action`: `"open"` | `"close"`。ID: `hopper1` ~ `hopper7`。
 
-**上料点** (`device: "feed_point"`): `action`: `"start"` | `"stop"`（或 `"on"` | `"off"`）。
-
-| ID | 对应上料点 | 路线 |
-|-----|---------|------|
-| feed1_1 | 上料点1-1 | route1 |
-| feed1_2 | 上料点1-2 | route2 |
-| feed2_1 | 上料点2-1 | route3 |
-| feed2_2 | 上料点2-2 | route4/route5 |
-| feed3 | 上料点3 | route6 |
-| silo_out | 高位储料仓 | route7/route8 |
-
-FM 在 FEEDING 阶段启动对应上料点，CLEARING 阶段停止。
-
 **小车** (`device: "cart"`): `action`: `"move"`。附加字段：`target`（目标位置 int），`route_id`（关联路线 string）。ID: `Cart1`, `Cart2`, `Cart3`, `Cart4`。
+
+> 注：上料点 (`feed_point`) 指令在协议中预留但 FM 当前不直接发送，上料点的启停由 HMI 基于路线状态自行控制。
 
 #### 2.1.2 `route_states` — 路线状态
 
@@ -330,6 +337,12 @@ FM 在 FEEDING 阶段启动对应上料点，CLEARING 阶段停止。
 | `target_bin` | string | 当前目标料仓 |
 | `cart_target` | int | 小车目标位置 |
 | `cart_moving` | bool | 小车是否移动中 |
+| `clearing_strategy` | string | 清空策略：`reverse` / `sequential` / `column_switch` |
+| `early_moved` | bool | 顺序清空时是否已提前移动小车 |
+| `assigned_cart` | string | 分配的小车 ID |
+| `assigned_hoppers` | string[] | 分配的中转斗 ID 列表 |
+| `feeding_start_time` | float | 进入 FEEDING 状态的时间戳（秒） |
+| `clearing_start_time` | float | 进入 CLEARING 状态的时间戳（秒） |
 
 `state: "idle"` 的路线表示已停用，上位机应从 `active_routes` 中移除该路线。停用的路线只含 `state` 字段。
 
@@ -340,9 +353,9 @@ FM 在 FEEDING 阶段启动对应上料点，CLEARING 阶段停止。
 | `executing_bin` | `{string: string}` | 每条皮带 (D6/D7/D8/D9) 当前执行的料仓，空串=无 |
 | `sequences` | `{string: [string]}` | 每条皮带的调度队列 |
 
-#### 2.1.4 `diagnosis` — 故障诊断结果
+#### 2.1.4 `diagnosis` — 故障诊断结果（可选）
 
-FM → :8890 → 结果通过此字段推送。故障持续则持续推送，消失后 3s 清空。`null` 清空 HMI。
+当 FM 故障诊断模块检测到故障时，通过 `command` 消息的 `diagnosis` 字段推送。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -354,9 +367,7 @@ FM → :8890 → 结果通过此字段推送。故障持续则持续推送，消
 
 HMI 显示格式：`[类别] ID: 故障名`，如 `[接近开关] S-D13: 卡低`。
 
-#### 2.1.5 诊断快照（FM → :8890）
-
-FM 每 500ms 向 :8890 发送状态快照，包含 `sensors` / `hoppers` / `conveyor_sensors` / `cart_sensors` / `route_states` / `clearing_strategies`。
+> 诊断引擎独立运行于 :8890 端口，FM 每 500ms 向其推送状态快照，诊断结果通过 FM → HMI 的 command 消息转发。
 
 ---
 
@@ -400,19 +411,20 @@ FM 每 500ms 向 :8890 发送状态快照，包含 `sensors` / `hoppers` / `conv
   │                                   │
   │── sensor_states (100ms) ────────→│  推送传感器/皮带/小车/斗快照
   │                                   │  FM 处理 → 状态机 → 生成指令
-  │←─ command (50ms) ───────────────│  皮带启停/斗开关/小车移动
-  │   + route_states                  │  路线状态同步
+  │←─ command (100ms, seq=N) ───────│  皮带启停/斗开关/小车移动
+  │   + route_states                  │  路线状态同步（含清空策略/时间戳）
   │   + schedule                      │  调度序列（HMI 显示）
   │                                   │
   │── manual_start ─────────────────→│  用户点击料仓手动上料
   │── manual_stop  ─────────────────→│  用户点击停止按钮
-  │── emergency_stop ───────────────→│  急停按钮
+  │── emergency_stop (ack_id) ──────→│  急停按钮（带 ACK）
+  │←─ ack {ack_id} ─────────────────│  FM 确认已执行
   │── belt_active   ─────────────────→│  用户点击全部自动/单条皮带
   │                                   │
   │  FM ←── :8890 ──→ 诊断引擎         │  状态快照 → 诊断, 结果 ← FM
 ```
 
-## 六、一键启动
+## 五、一键启动
 
 ```bash
 py start_fm.py
@@ -421,7 +433,7 @@ py start_fm.py
 
 ---
 
-## 五、子系统全景
+## 六、子系统全景
 
 ```
 ┌──────────┐  料位写入(8895)   ┌──────────┐  调度请求(8891-94)  ┌──────────┐
