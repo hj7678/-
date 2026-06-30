@@ -309,6 +309,7 @@ class FeedingMasterController:
                     and not ctx.cart_moving and cart_pos == cart_target):
                 next_state = RouteState.FEEDING
                 ctx.early_moved_from_clearing = False
+                ctx.clearing_strategy = 'reverse'  # 重置策略，下一轮重新判定
 
             # 状态变更 → 详细日志
             if next_state != ctx.state:
