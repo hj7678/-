@@ -217,6 +217,8 @@ class FeedingMasterController:
         levels = self.stock.get_all_levels()
         level_map = {b['bin_id']: b for b in levels} if levels else {}
 
+        # 上料点无料自动切换检测
+        self._check_feed_point_switch()
 
         # 追踪指令变化: new_cmds继承prev_cmds, 未被本帧更新的保持原状态
         prev_cmds = getattr(self, '_last_commands', {})
@@ -640,9 +642,102 @@ class FeedingMasterController:
             candidates.append((priority, feed_point, route_id))
 
         if not candidates:
+            # D7: 用户选择的上料点无料，回退到默认 feed1_1
+            if belt_id == 'D7' and d7_override:
+                print(f"[FM] D7 上料点 {d7_override} 无料，回退默认 feed1_1", flush=True)
+                for feed_point, route_id in available:
+                    if feed_point == 'feed1_1':
+                        if laser.get('feed1_1', True):
+                            return route_id
+                return None
             return None
         candidates.sort()
         return candidates[0][2]
+
+    def _check_feed_point_switch(self):
+        """上料点无料时自动切换路线（D7/D8/D9）"""
+        laser = getattr(self.scheduler, '_laser_states', {})
+        d7_override = getattr(self, '_d7_feed_override', '')
+
+        for route_id in list(self._active_routes):
+            ctx = self.route_manager.get_route_context(route_id)
+            if not ctx or ctx.state.value not in ('feeding',):
+                continue
+
+            cart_id = ctx.assigned_cart or ''
+            belt_id = CART_TO_BELT.get(cart_id, '')
+            if belt_id not in ('D7', 'D8', 'D9'):
+                continue
+
+            fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
+            if not fp or fp == 'silo_out':
+                continue  # silo_out 默认有料，无需切换
+
+            # 当前上料点有料 → 跳过
+            if laser.get(fp, True):
+                continue
+
+            # 当前上料点无料 → 寻找替代路线
+            target_bin = ctx.target_bin or ''
+            if not target_bin:
+                continue
+
+            # 停止当前上料点
+            print(f"[FM] {route_id} 上料点 {fp} 无料，自动切换...", flush=True)
+
+            # 针对 D7 特殊处理
+            if belt_id == 'D7':
+                # D7: 默认回退 feed1_1
+                fallback_order = ['feed1_1', 'feed2_1', 'feed1_2']
+                if d7_override:
+                    # 用户选择的上料点无料，按优先级回退
+                    fallback_order = [d7_override] + [f for f in fallback_order if f != d7_override]
+                for f in fallback_order:
+                    if laser.get(f, True):
+                        route_config = config.FEED_ROUTES.get(route_id, {})
+                        convs = route_config.get('conveyors', [])
+                        available = config.BIN_TO_AVAILABLE_ROUTES.get(target_bin, [])
+                        # 找到对应上料点的路线
+                        new_route_id = None
+                        for fp_candidate, rid in available:
+                            if fp_candidate == f:
+                                new_route_id = rid
+                                break
+                        if new_route_id and new_route_id != route_id:
+                            print(f"[FM] {route_id} → {new_route_id} (上料点 {fp}→{f})", flush=True)
+                            self._switch_route(route_id, new_route_id, target_bin)
+                            break
+            else:
+                # D8/D9: 按优先级自动切换
+                prefix = target_bin.split('-')[0]
+                priority_map = config.FEED_POINT_PRIORITY.get(prefix, {})
+                available = config.BIN_TO_AVAILABLE_ROUTES.get(target_bin, [])
+                sorted_fps = sorted(available, key=lambda x: priority_map.get(x[0], 99))
+                for fp_candidate, new_route_id in sorted_fps:
+                    if new_route_id == route_id:
+                        continue
+                    if fp_candidate == 'silo_out' or laser.get(fp_candidate, True):
+                        print(f"[FM] {route_id} → {new_route_id} (上料点 {fp}→{fp_candidate})", flush=True)
+                        self._switch_route(route_id, new_route_id, target_bin)
+                        break
+
+    def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
+        """切换路线：停旧路线，启新路线"""
+        old_ctx = self.route_manager.get_route_context(old_route_id)
+        if not old_ctx:
+            return
+        # 停止旧路线
+        old_ctx.state = RouteState.IDLE
+        self._active_routes.discard(old_route_id)
+        if not hasattr(self, '_deactivated_routes'):
+            self._deactivated_routes = set()
+        self._deactivated_routes.add(old_route_id)
+        # 释放旧路线资源
+        self.route_manager._release_resources(old_route_id)
+        # 激活新路线
+        belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '')
+        self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
+        self.activate_route(new_route_id, target_bin)
 
     # ── 清空检测 ──
 
