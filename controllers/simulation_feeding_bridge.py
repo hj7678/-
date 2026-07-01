@@ -313,6 +313,7 @@ class SimulationFeedingBridge(QObject):
                     ctrl.set_feed_point_active(cmd["id"], False)
 
             elif device == "cart":
+                    print(f"[桥接-debug] 收到 cart 命令: {dev_id} → target={cmd.get('target')} route={cmd.get('route_id')}", flush=True)
                     target = cmd.get("target")
                     if target is not None:
                         if dev_id == 'Cart4':
@@ -322,8 +323,9 @@ class SimulationFeedingBridge(QObject):
                             else:
                                 ctrl.cart4_is_moving = False
                         else:
-                            # 记录小车移动，模拟 (格子数 × 18s) 移动时间
+                            # 记录小车移动，通过 _update_cart_positions 模拟移动
                             current_pos = ctrl.cart_positions.get(dev_id, 1)
+                            ctrl.cart_target_positions[dev_id] = target
                             if current_pos != target:
                                 grids = abs(target - current_pos)
                                 duration = grids * self._cart_move_per_grid
