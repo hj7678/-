@@ -231,6 +231,19 @@ class FeedingMasterController:
         if pending_stop:
             commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
             self._pending_feed_stop = None
+        # 非共用皮带清空：检查传感器，无料则停止
+        pending_clear = getattr(self, '_pending_belt_clear', {})
+        if pending_clear:
+            proximity = self._sensor_states.get('proximity', {})
+            for cid in list(pending_clear.keys()):
+                # 皮带传感器映射: 大部分为 S-{belt_id}, D2 有 S-D2-2
+                sensor_id = 'S-' + cid
+                if sensor_id not in proximity:
+                    sensor_id = ''  # 无接近开关的皮带直接停止
+                if not sensor_id or not proximity.get(sensor_id, False):
+                    commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                    del pending_clear[cid]
+                    print(f"[FM] 非共用皮带 {cid} 清空完成 → 停止", flush=True)
         for route_id in list(self._active_routes):
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
@@ -725,7 +738,7 @@ class FeedingMasterController:
                         break
 
     def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
-        """切换路线：停旧路线，启新路线，停止旧上料点"""
+        """切换路线：停旧路线，启新路线，停止旧上料点，清空非共用皮带"""
         old_ctx = self.route_manager.get_route_context(old_route_id)
         if not old_ctx:
             return
@@ -745,6 +758,13 @@ class FeedingMasterController:
         # 下一帧命令中停止旧上料点
         if old_fp:
             self._pending_feed_stop = old_fp
+        # 非共用皮带：清空后停止
+        old_convs = set(config.FEED_ROUTES.get(old_route_id, {}).get('conveyors', []))
+        new_convs = set(config.FEED_ROUTES.get(new_route_id, {}).get('conveyors', []))
+        for cid in old_convs - new_convs:
+            if not hasattr(self, '_pending_belt_clear'):
+                self._pending_belt_clear = {}
+            self._pending_belt_clear[cid] = self._total_runtime
 
     # ── 清空检测 ──
 
