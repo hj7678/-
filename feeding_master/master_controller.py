@@ -231,19 +231,38 @@ class FeedingMasterController:
         if pending_stop:
             commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
             self._pending_feed_stop = None
-        # 非共用皮带清空：检查传感器，无料则停止
+        # 非共用皮带清空：传感器无料持续30s后停止
         pending_clear = getattr(self, '_pending_belt_clear', {})
         if pending_clear:
             proximity = self._sensor_states.get('proximity', {})
+            BELT_CLEAR_TIMEOUT = 30.0  # 清空超时30s
             for cid in list(pending_clear.keys()):
-                # 皮带传感器映射: 大部分为 S-{belt_id}, D2 有 S-D2-2
+                entry = pending_clear[cid]
+                if isinstance(entry, (int, float)):
+                    # 兼容旧格式: 转换为新格式 (start_time, inactive_since)
+                    entry = (entry, entry)
+                    pending_clear[cid] = entry
+                start_time, inactive_since = entry
                 sensor_id = 'S-' + cid
-                if sensor_id not in proximity:
-                    sensor_id = ''  # 无接近开关的皮带直接停止
-                if not sensor_id or not proximity.get(sensor_id, False):
-                    commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
-                    del pending_clear[cid]
-                    print(f"[FM] 非共用皮带 {cid} 清空完成 → 停止", flush=True)
+                has_sensor = sensor_id in proximity
+                is_active = proximity.get(sensor_id, False) if has_sensor else False
+                elapsed = self._total_runtime - start_time
+
+                if has_sensor and is_active:
+                    # 传感器有料 → 重置无料计时，继续运行
+                    pending_clear[cid] = (start_time, self._total_runtime)
+                elif has_sensor and not is_active:
+                    # 传感器无料 → 检查是否持续30s
+                    if self._total_runtime - inactive_since >= BELT_CLEAR_TIMEOUT:
+                        commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                        del pending_clear[cid]
+                        print(f"[FM] 非共用皮带 {cid} 清空完成 → 停止", flush=True)
+                else:
+                    # 无传感器 → 运行30s后停止
+                    if elapsed >= BELT_CLEAR_TIMEOUT:
+                        commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                        del pending_clear[cid]
+                        print(f"[FM] 非共用皮带 {cid} (无传感器) 30s → 停止", flush=True)
         for route_id in list(self._active_routes):
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
@@ -763,7 +782,7 @@ class FeedingMasterController:
         for cid in old_convs - new_convs:
             if not hasattr(self, '_pending_belt_clear'):
                 self._pending_belt_clear = {}
-            self._pending_belt_clear[cid] = self._total_runtime
+            self._pending_belt_clear[cid] = (self._total_runtime, self._total_runtime)
 
     # ── 清空检测 ──
 
