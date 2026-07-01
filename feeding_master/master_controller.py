@@ -173,6 +173,10 @@ class FeedingMasterController:
                         if divert_ok:
                             self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                             ctx.feeding_start_time = self._total_runtime
+                            # 传感器检测到 cart 到达 → 下一帧发送上料点启动
+                            fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
+                            if fp:
+                                self._pending_feed_start = fp
                             print(f"[FM] {route_id} cart到达→FEEDING pos={cur}", flush=True)
 
         # FM自主管理路线生命周期, 不从仿真同步添加/移除
