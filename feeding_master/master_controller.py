@@ -231,6 +231,10 @@ class FeedingMasterController:
         if pending_stop:
             commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
             self._pending_feed_stop = None
+        pending_start = getattr(self, '_pending_feed_start', None)
+        if pending_start:
+            commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
+            self._pending_feed_start = None
         # 非共用皮带清空：传感器无料持续30s后停止
         pending_clear = getattr(self, '_pending_belt_clear', {})
         if pending_clear:
@@ -827,6 +831,10 @@ class FeedingMasterController:
                 belt_id = CART_TO_BELT.get(ctx.assigned_cart or '', '')
                 self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
             self.activate_route(new_route_id, target_bin)
+            # 下一帧发送新上料点启动指令
+            new_fp = config.FEED_ROUTES.get(new_route_id, {}).get('feed_point', '')
+            if new_fp:
+                self._pending_feed_start = new_fp
             print(f"[FM] {switch_key} 阶段2: 非共用皮带清空完成，激活新路线", flush=True)
 
     # ── 清空检测 ──
