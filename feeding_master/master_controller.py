@@ -174,6 +174,7 @@ class FeedingMasterController:
                             self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                             ctx.feeding_start_time = self._total_runtime
                             ctx.early_moved_from_clearing = False
+                            ctx.clearing_strategy = 'reverse'
                             print(f"[FM] {route_id} cart到达→FEEDING pos={cur}", flush=True)
 
         # FM自主管理路线生命周期, 不从仿真同步添加/移除
@@ -362,6 +363,7 @@ class FeedingMasterController:
                         parts.append(f"策略: {strategy}")
                     # 重置顺序清空标记，确保下一轮能正常触发 early move
                     ctx.early_moved_from_clearing = False
+                    ctx.clearing_strategy = 'reverse'
                     # 启动上料点
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
                     if fp:
