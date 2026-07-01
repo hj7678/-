@@ -173,10 +173,6 @@ class FeedingMasterController:
                         if divert_ok:
                             self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                             ctx.feeding_start_time = self._total_runtime
-                            # 传感器检测到 cart 到达 → 下一帧发送上料点启动
-                            fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-                            if fp:
-                                self._pending_feed_start = fp
                             print(f"[FM] {route_id} cart到达→FEEDING pos={cur}", flush=True)
 
         # FM自主管理路线生命周期, 不从仿真同步添加/移除
@@ -235,11 +231,6 @@ class FeedingMasterController:
         if pending_stop:
             commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
             self._pending_feed_stop = None
-        pending_start = getattr(self, '_pending_feed_start', None)
-        if pending_start:
-            commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
-            print(f"[FM] _pending_feed_start: {pending_start}", flush=True)
-            self._pending_feed_start = None
         # 非共用皮带清空：传感器无料持续30s后停止
         pending_clear = getattr(self, '_pending_belt_clear', {})
         if pending_clear:
@@ -450,6 +441,14 @@ class FeedingMasterController:
                     commands.append(cmd)
                     new_cmds[f"belt:{cid}"] = action.value
 
+                # FEEDING: 确保上料点启动（无延迟，与皮带同帧）
+                if ctx.state == RouteState.FEEDING:
+                    fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
+                    if fp:
+                        cmd = {'device': 'feed_point', 'id': fp, 'action': 'start'}
+                        commands.append(cmd)
+                        new_cmds[f"feed_point:{fp}"] = 'start'
+
                 # MOVING_TO_TARGET: 不改变斗状态 (保持上一轮的开关)
                 if ctx.state != RouteState.MOVING_TO_TARGET:
                     _hs = {}
@@ -646,10 +645,6 @@ class FeedingMasterController:
                     ctx.cart_target_position = tgt  # 修正
                     self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                     ctx.feeding_start_time = self._total_runtime
-                    # 激活时cart已在位→下一帧发送上料点启动
-                    fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-                    if fp:
-                        self._pending_feed_start = fp
                     print(f"[FeedingMaster] 路线 {route_id} → {target_bin} cart已在位→FEEDING", flush=True)
                 else:
                     print(f"[FeedingMaster] 路线 {route_id} → {target_bin} 已激活", flush=True)
