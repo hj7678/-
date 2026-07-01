@@ -798,6 +798,9 @@ class FeedingMasterController:
         old_fp = old_ctx.feed_point or config.FEED_ROUTES.get(old_route_id, {}).get('feed_point', '')
         # 阶段1: 停止旧路线和旧上料点
         old_ctx.state = RouteState.IDLE
+        old_ctx.target_bin = ''  # 清除目标，确保 UI 移除小车
+        old_ctx.cart_target_position = 0
+        old_ctx.cart_moving = False
         self._active_routes.discard(old_route_id)
         if not hasattr(self, '_deactivated_routes'):
             self._deactivated_routes = set()
