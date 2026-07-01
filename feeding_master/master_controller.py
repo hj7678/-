@@ -226,6 +226,11 @@ class FeedingMasterController:
         # 2. 遍历活跃路线，执行状态机
         commands = []
         new_cmds = dict(prev_cmds)  # 继承上帧: 打开的斗仍然是打开
+        # 上料点切换: 停止旧上料点
+        pending_stop = getattr(self, '_pending_feed_stop', None)
+        if pending_stop:
+            commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
+            self._pending_feed_stop = None
         for route_id in list(self._active_routes):
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
@@ -722,10 +727,11 @@ class FeedingMasterController:
                         break
 
     def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
-        """切换路线：停旧路线，启新路线"""
+        """切换路线：停旧路线，启新路线，停止旧上料点"""
         old_ctx = self.route_manager.get_route_context(old_route_id)
         if not old_ctx:
             return
+        old_fp = old_ctx.feed_point or config.FEED_ROUTES.get(old_route_id, {}).get('feed_point', '')
         # 停止旧路线
         old_ctx.state = RouteState.IDLE
         self._active_routes.discard(old_route_id)
@@ -738,6 +744,9 @@ class FeedingMasterController:
         belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '')
         self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
         self.activate_route(new_route_id, target_bin)
+        # 下一帧命令中停止旧上料点
+        if old_fp:
+            self._pending_feed_stop = old_fp
 
     # ── 清空检测 ──
 
