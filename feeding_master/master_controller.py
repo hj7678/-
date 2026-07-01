@@ -570,7 +570,18 @@ class FeedingMasterController:
                     sched_info['executing_bin'][belt_id] = ctx.target_bin
         if commands or deactivated:
             if self._diag_results:
-                self._last_diag = list(self._diag_results)
+                # 过滤: 排除正在清空的非共用皮带的 conveyor_should_run 误报
+                clearing_belts = set(getattr(self, '_pending_belt_clear', {}).keys())
+                filtered = []
+                for r in self._diag_results:
+                    fid = r.get('sensor_id', '') if isinstance(r, dict) else getattr(r, 'sensor_id', '')
+                    ftype = r.get('fault_type', '') if isinstance(r, dict) else getattr(r, 'fault_type', '')
+                    # 皮带ID格式: E1_state, D7_state 等
+                    belt_id = fid.replace('_state', '') if fid.endswith('_state') else ''
+                    if belt_id in clearing_belts and ftype == 'conveyor_should_run':
+                        continue  # 跳过正在清空的皮带误报
+                    filtered.append(r)
+                self._last_diag = filtered
                 self._last_diag_time = self._total_runtime
                 self._diag_results.clear()
             else:
