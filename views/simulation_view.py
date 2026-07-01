@@ -265,12 +265,17 @@ class SimulationView(QWidget):
         # 获取当前目标小仓
         new_targets = set(self.route_to_bin.items())
 
-        # 停止不存在的路线的小车（保留常驻小车 route7/route8）
+        # 停止不存在的路线的小车，但保存给同cart_id的新路线继承
+        orphan_carts = {}  # cart_id → saved cart data
         for route_id in list(getattr(self, 'cart_positions', {}).keys()):
             if route_id not in self.route_to_bin:
                 cart = self.cart_positions.get(route_id, {})
                 if cart.get('_persistent'):
                     continue
+                # 保存 cart 数据供新路线继承
+                cart_id = self._get_cart_for_route(route_id)
+                if cart_id and cart_id not in orphan_carts:
+                    orphan_carts[cart_id] = dict(cart)
                 del self.cart_positions[route_id]
                 if hasattr(self, '_cart_anim_state') and route_id in self._cart_anim_state:
                     del self._cart_anim_state[route_id]
@@ -289,10 +294,13 @@ class SimulationView(QWidget):
             target_grid = self._get_bin_row(target_bin)
 
             if route_id not in self.cart_positions:
-                # 新路线：从控制器中读取小车当前实际位置（而非硬编码位置1）
+                # 新路线：优先继承同一 cart_id 孤儿小车的位置，避免视觉跳跃
                 cart_id = self._get_cart_for_route(route_id)
+                orphan = orphan_carts.get(cart_id) if cart_id else None
                 current_row = 1
-                if hasattr(self, 'controller') and self.controller and cart_id:
+                if orphan:
+                    current_row = self._get_bin_row(orphan.get('target_bin', '')) or 1
+                elif hasattr(self, 'controller') and self.controller and cart_id:
                     current_row = self.controller.cart_positions.get(cart_id, 1)
                 initial_bin = self._row_to_cart_pixel(conveyor_id, current_row)
                 self.cart_positions[route_id] = {

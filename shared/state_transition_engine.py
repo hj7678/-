@@ -113,6 +113,9 @@ class StateTransitionEngine:
             if level >= threshold:
                 actions['close_hoppers'] = (clearing_strategy != 'column_switch')
                 if clearing_strategy == 'sequential':
+                    # cart 已在目标位 (最后一仓/无下一仓) → 回退到反序清空
+                    if cart and cart_sensor and not cart_moving and cart_sensor.get(cart, 1) == cart_target:
+                        return RouteState.CLEARING, actions
                     actions['stop_endpoint'] = True
                     return RouteState.MOVING_TO_TARGET, actions
                 return RouteState.CLEARING, actions
