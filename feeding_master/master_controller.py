@@ -1017,13 +1017,13 @@ class FeedingMasterController:
             return 'reverse'
         nxt = self.scheduler.get_next_bin(belt_id)
         if not nxt:
-            return 'reverse'
+            return 'column_switch' if not self.scheduler.has_sequence(belt_id) else 'reverse'
         # 对齐：若序列首项与当前正在执行的料仓相同，跳过取下一个
         if nxt == ctx.target_bin:
             self.scheduler.pop_next_bin(belt_id)
             nxt = self.scheduler.get_next_bin(belt_id)
             if not nxt:
-                return 'reverse'
+                return 'column_switch' if not self.scheduler.has_sequence(belt_id) else 'reverse'
         cur_col = ctx.target_bin.split('-')[0]
         next_col = nxt.split('-')[0]
         if cur_col != next_col:
