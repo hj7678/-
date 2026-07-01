@@ -948,7 +948,17 @@ class SimulationController(QObject):
         feed_point = route.get('feed_point', '')
         if feed_point and feed_point in self.feed_points:
             if not self.feed_points[feed_point].get('active', True):
+                # 仅首次发现时打印一次
+                key = f"_fp_inactive_logged_{feed_point}"
+                if not getattr(self, key, False):
+                    setattr(self, key, True)
+                    print(f"[仿真] {route_id} 上料点 {feed_point} 未激活，不出料", flush=True)
                 return
+            else:
+                # 有料时清除日志标记
+                key = f"_fp_inactive_logged_{feed_point}"
+                if hasattr(self, key):
+                    delattr(self, key)
 
         # 路线⑧⑨：自动选择发料S仓并扣减料位
         if route_id in ('route7', 'route8'):

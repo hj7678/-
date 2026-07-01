@@ -234,6 +234,7 @@ class FeedingMasterController:
         pending_start = getattr(self, '_pending_feed_start', None)
         if pending_start:
             commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
+            print(f"[FM] _pending_feed_start: {pending_start}", flush=True)
             self._pending_feed_start = None
         # 非共用皮带清空：传感器无料持续30s后停止
         pending_clear = getattr(self, '_pending_belt_clear', {})
@@ -368,12 +369,14 @@ class FeedingMasterController:
                     if fp:
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'start'})
                         new_cmds[f"feed_point:{fp}"] = 'start'
+                        print(f"[FM] {route_id} feed_point start: {fp}", flush=True)
                 elif old.value == 'feeding':
                     # 离开 FEEDING → 停止上料点
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
                     if fp:
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'stop'})
                         new_cmds[f"feed_point:{fp}"] = 'stop'
+                        print(f"[FM] {route_id} feed_point stop: {fp}", flush=True)
                 elif next_state.value == 'clearing':
                     threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
                     parts.append(f"料位{level:.0f}%≥{threshold}% 策略={strategy}")
