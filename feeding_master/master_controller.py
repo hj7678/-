@@ -257,12 +257,14 @@ class FeedingMasterController:
                         commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
                         del pending_clear[cid]
                         print(f"[FM] 非共用皮带 {cid} 清空完成 → 停止", flush=True)
+                        self._try_activate_pending_route()
                 else:
                     # 无传感器 → 运行30s后停止
                     if elapsed >= BELT_CLEAR_TIMEOUT:
                         commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
                         del pending_clear[cid]
                         print(f"[FM] 非共用皮带 {cid} (无传感器) 30s → 停止", flush=True)
+                        self._try_activate_pending_route()
         for route_id in list(self._active_routes):
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
@@ -749,7 +751,7 @@ class FeedingMasterController:
     def _find_switch_target(self, route_id, fp, target_bin, belt_id, available, laser, priority_map, d7_override, current_priority):
         """找到切换目标路线"""
         if belt_id == 'D7':
-            fallback_order = ['feed1_1', 'feed2_1', 'feed1_2']
+            fallback_order = ['feed2_1', 'feed1_1', 'feed1_2']
             if d7_override:
                 fallback_order = [d7_override] + [f for f in fallback_order if f != d7_override]
             for f in fallback_order:
@@ -767,33 +769,65 @@ class FeedingMasterController:
         return None
 
     def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
-        """切换路线：停旧路线，启新路线，停止旧上料点，清空非共用皮带"""
+        """两阶段切换路线:
+        阶段1: 停止旧上料点+旧路线，非共用皮带清空30s
+        阶段2: 非共用皮带清空后，激活新路线+新上料点
+        """
         old_ctx = self.route_manager.get_route_context(old_route_id)
         if not old_ctx:
             return
         old_fp = old_ctx.feed_point or config.FEED_ROUTES.get(old_route_id, {}).get('feed_point', '')
-        # 停止旧路线
+        # 阶段1: 停止旧路线和旧上料点
         old_ctx.state = RouteState.IDLE
         self._active_routes.discard(old_route_id)
         if not hasattr(self, '_deactivated_routes'):
             self._deactivated_routes = set()
         self._deactivated_routes.add(old_route_id)
-        # 释放旧路线资源
         self.route_manager._release_resources(old_route_id)
-        # 激活新路线
-        belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '')
-        self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
-        self.activate_route(new_route_id, target_bin)
-        # 下一帧命令中停止旧上料点
+        # 立即停止旧上料点
         if old_fp:
             self._pending_feed_stop = old_fp
         # 非共用皮带：清空后停止
         old_convs = set(config.FEED_ROUTES.get(old_route_id, {}).get('conveyors', []))
         new_convs = set(config.FEED_ROUTES.get(new_route_id, {}).get('conveyors', []))
-        for cid in old_convs - new_convs:
+        non_shared = old_convs - new_convs
+        if non_shared:
             if not hasattr(self, '_pending_belt_clear'):
                 self._pending_belt_clear = {}
-            self._pending_belt_clear[cid] = (self._total_runtime, self._total_runtime)
+            for cid in non_shared:
+                self._pending_belt_clear[cid] = (self._total_runtime, self._total_runtime)
+            # 阶段2: 记录待激活路线，等非共用皮带清空后执行
+            if not hasattr(self, '_pending_route_activate'):
+                self._pending_route_activate = {}
+            switch_key = f"{old_route_id}→{new_route_id}"
+            self._pending_route_activate[switch_key] = (new_route_id, target_bin, non_shared)
+            print(f"[FM] {old_route_id}→{new_route_id} 阶段1: 停止旧上料点 {old_fp}, 等待 {non_shared} 清空", flush=True)
+        else:
+            # 无共用皮带，直接激活新路线
+            belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '')
+            self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
+            self.activate_route(new_route_id, target_bin)
+            print(f"[FM] {old_route_id}→{new_route_id} 切换完成 (无共用皮带)", flush=True)
+
+    def _try_activate_pending_route(self):
+        """检查所有非共用皮带是否已清空，若清空则激活新路线（阶段2）"""
+        pending_activate = getattr(self, '_pending_route_activate', {})
+        if not pending_activate:
+            return
+        pending_clear = getattr(self, '_pending_belt_clear', {})
+        for switch_key in list(pending_activate.keys()):
+            new_route_id, target_bin, non_shared = pending_activate[switch_key]
+            # 检查非共用皮带是否全部清空
+            if any(cid in pending_clear for cid in non_shared):
+                continue
+            # 全部清空 → 激活新路线
+            del pending_activate[switch_key]
+            ctx = self.route_manager.get_route_context(new_route_id)
+            if ctx:
+                belt_id = CART_TO_BELT.get(ctx.assigned_cart or '', '')
+                self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
+            self.activate_route(new_route_id, target_bin)
+            print(f"[FM] {switch_key} 阶段2: 非共用皮带清空完成，激活新路线", flush=True)
 
     # ── 清空检测 ──
 
