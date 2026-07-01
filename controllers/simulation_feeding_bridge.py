@@ -120,6 +120,7 @@ class SimulationFeedingBridge(QObject):
                 elif cart_id == 'Cart2': ctrl._cart2_is_moving = False
                 elif cart_id == 'Cart3': ctrl._cart3_is_moving = False
                 del self._cart_moves[cart_id]
+                print(f"[桥接] {cart_id} 移动完成 → pos={target} ({duration:.0f}s)", flush=True)
 
         # 自动重连 (每3秒尝试一次, 避免阻塞tick)
         now = time.time()
@@ -327,6 +328,7 @@ class SimulationFeedingBridge(QObject):
                                 grids = abs(target - current_pos)
                                 duration = grids * self._cart_move_per_grid
                                 self._cart_moves[dev_id] = (target, time.time(), duration)
+                                print(f"[桥接] {dev_id} 开始移动: {current_pos}→{target} ({grids}格={duration:.0f}s)", flush=True)
                                 if dev_id == 'Cart1': ctrl._cart1_is_moving = True
                                 if dev_id == 'Cart2': ctrl._cart2_is_moving = True
                                 if dev_id == 'Cart3': ctrl._cart3_is_moving = True
