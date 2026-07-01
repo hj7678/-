@@ -588,6 +588,13 @@ class FeedingMasterController:
                 if self.activate_route(route_id2, nxt):
                     print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
+        # 6. 延迟上料点切换: 等本帧指令执行后再切路线，避免状态冲突
+        pending_switch = getattr(self, '_pending_route_switch', None)
+        if pending_switch:
+            self._pending_route_switch = None
+            old_rid, new_rid, tgt_bin = pending_switch
+            self._switch_route(old_rid, new_rid, tgt_bin)
+
     # ── 外部接口 ──
 
     def activate_route(self, route_id: str, target_bin: str):
@@ -689,7 +696,7 @@ class FeedingMasterController:
         return candidates[0][2]
 
     def _check_feed_point_switch(self):
-        """上料点无料/高优先级恢复时自动切换路线（D7/D8/D9）"""
+        """上料点无料/高优先级恢复时自动切换路线（D7/D8/D9）— 延迟到 tick 末尾执行"""
         laser = getattr(self.scheduler, '_laser_states', {})
         d7_override = getattr(self, '_d7_feed_override', '')
 
@@ -705,7 +712,7 @@ class FeedingMasterController:
 
             fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
             if not fp or fp == 'silo_out':
-                continue  # silo_out 默认有料，无需切换
+                continue
 
             target_bin = ctx.target_bin or ''
             if not target_bin:
@@ -718,10 +725,13 @@ class FeedingMasterController:
 
             # 1. 当前上料点无料 → 寻找替代路线
             if not laser.get(fp, True):
-                self._do_feed_switch(route_id, ctx, fp, target_bin, belt_id, available, laser, priority_map, d7_override, current_priority)
-                continue
+                new_route = self._find_switch_target(route_id, fp, target_bin, belt_id, available, laser, priority_map, d7_override, current_priority)
+                if new_route:
+                    self._pending_route_switch = (route_id, new_route, target_bin)
+                    print(f"[FM] {route_id} 上料点 {fp} 无料，延迟切换 → {new_route}", flush=True)
+                    return  # 一帧只处理一次切换
 
-            # 2. 反向切换: 更高优先级上料点恢复有料 → 切回
+            # 2. 反向切换: 更高优先级上料点恢复有料
             for fp_candidate, new_route_id in available:
                 if new_route_id == route_id:
                     continue
@@ -729,43 +739,32 @@ class FeedingMasterController:
                     continue
                 candidate_priority = priority_map.get(fp_candidate, 99)
                 if candidate_priority < current_priority and laser.get(fp_candidate, True):
-                    # D7 用户选择优先
                     if belt_id == 'D7' and d7_override:
                         if fp_candidate != d7_override and fp != d7_override:
-                            continue  # 用户未选此上料点，不切换
-                    print(f"[FM] {route_id} 上料点 {fp_candidate} 恢复有料，切换 → {new_route_id}", flush=True)
-                    self._switch_route(route_id, new_route_id, target_bin)
-                    break
+                            continue
+                    self._pending_route_switch = (route_id, new_route_id, target_bin)
+                    print(f"[FM] {route_id} 上料点 {fp_candidate} 恢复有料，延迟切换 → {new_route_id}", flush=True)
+                    return
 
-    def _do_feed_switch(self, route_id, ctx, fp, target_bin, belt_id, available, laser, priority_map, d7_override, current_priority):
-        """执行上料点切换"""
-        print(f"[FM] {route_id} 上料点 {fp} 无料，自动切换...", flush=True)
-
+    def _find_switch_target(self, route_id, fp, target_bin, belt_id, available, laser, priority_map, d7_override, current_priority):
+        """找到切换目标路线"""
         if belt_id == 'D7':
             fallback_order = ['feed1_1', 'feed2_1', 'feed1_2']
             if d7_override:
                 fallback_order = [d7_override] + [f for f in fallback_order if f != d7_override]
             for f in fallback_order:
                 if laser.get(f, True):
-                    new_route_id = None
                     for fp_candidate, rid in available:
-                        if fp_candidate == f:
-                            new_route_id = rid
-                            break
-                    if new_route_id and new_route_id != route_id:
-                        print(f"[FM] {route_id} → {new_route_id} (上料点 {fp}→{f})", flush=True)
-                        self._switch_route(route_id, new_route_id, target_bin)
-                        return
+                        if fp_candidate == f and rid != route_id:
+                            return rid
         else:
-            # D8/D9: 按优先级自动切换
             sorted_fps = sorted(available, key=lambda x: priority_map.get(x[0], 99))
-            for fp_candidate, new_route_id in sorted_fps:
-                if new_route_id == route_id:
+            for fp_candidate, rid in sorted_fps:
+                if rid == route_id:
                     continue
                 if fp_candidate == 'silo_out' or laser.get(fp_candidate, True):
-                    print(f"[FM] {route_id} → {new_route_id} (上料点 {fp}→{fp_candidate})", flush=True)
-                    self._switch_route(route_id, new_route_id, target_bin)
-                    return
+                    return rid
+        return None
 
     def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
         """切换路线：停旧路线，启新路线，停止旧上料点，清空非共用皮带"""
