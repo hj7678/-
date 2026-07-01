@@ -272,27 +272,25 @@ class FeedingMasterController:
             if ctx.state == RouteState.CLEARING:
                 sensor_clear_timers, sensor_clear_timeouts = self._build_clearing_data(ctx, route_id)
 
-            # 顺序策略: 提前移小车 → 进入 MOVING_TO_TARGET（非 CLEARING）
+            # 顺序策略: 进入 CLEARING 时立即关闭斗+终点皮带，同时小车开始移动
             if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
                     and cart_id in ('Cart1', 'Cart2') and not getattr(ctx, 'early_moved_from_clearing', False)):
-                clearing_elapsed = self._total_runtime - getattr(ctx, 'clearing_start_time', 0)
-                if clearing_elapsed >= SEQUENTIAL_EARLY_MOVE_DELAY:
-                    belt_id = CART_TO_BELT.get(cart_id, '')
-                    nxt = self.scheduler.get_next_bin(belt_id)
-                    if nxt:
-                        self.scheduler.pop_next_bin(belt_id)
-                        try:
-                            next_pos = int(nxt.split('-')[1])
-                            ctx.cart_target_position = next_pos
-                            ctx.target_bin = nxt
-                            ctx.cart_moving = True
-                            ctx.early_moved_from_clearing = True
-                            ctx.clearing_strategy = 'reverse'  # 已结束清空，重置策略
-                            self.scheduler.mark_executing(belt_id, route_id, nxt)
-                            self.route_manager.set_route_state(route_id, RouteState.MOVING_TO_TARGET)
-                            print(f"[FM] {route_id} 顺序清空3s → 小车移动 {cart_id}→{next_pos} ({nxt})", flush=True)
-                        except (ValueError, IndexError):
-                            pass
+                belt_id = CART_TO_BELT.get(cart_id, '')
+                nxt = self.scheduler.get_next_bin(belt_id)
+                if nxt:
+                    self.scheduler.pop_next_bin(belt_id)
+                    try:
+                        next_pos = int(nxt.split('-')[1])
+                        ctx.cart_target_position = next_pos
+                        ctx.target_bin = nxt
+                        ctx.cart_moving = True
+                        ctx.early_moved_from_clearing = True
+                        ctx.clearing_strategy = 'reverse'
+                        self.scheduler.mark_executing(belt_id, route_id, nxt)
+                        self.route_manager.set_route_state(route_id, RouteState.MOVING_TO_TARGET)
+                        print(f"[FM] {route_id} 顺序清空: 立即移小车 {cart_id}→{next_pos} ({nxt})", flush=True)
+                    except (ValueError, IndexError):
+                        pass
 
             # 状态引擎判定
             belt_id_for_engine = CART_TO_BELT.get(cart_id, '')
