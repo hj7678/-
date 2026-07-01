@@ -797,20 +797,13 @@ class FeedingMasterController:
         return None
 
     def _switch_route_phase1(self, old_route_id: str, new_route_id: str, target_bin: str):
-        """阶段1: 停止旧路线 + 旧上料点，记录非共用皮带清空"""
+        """阶段1: 停止旧上料点，旧路线设IDLE但不移除（小车保留），记录非共用皮带清空"""
         old_ctx = self.route_manager.get_route_context(old_route_id)
         if not old_ctx:
             return
         old_fp = old_ctx.feed_point or config.FEED_ROUTES.get(old_route_id, {}).get('feed_point', '')
+        # 停止旧上料点，旧路线设 IDLE（保持活跃，保留小车）
         old_ctx.state = RouteState.IDLE
-        old_ctx.target_bin = ''
-        old_ctx.cart_target_position = 0
-        old_ctx.cart_moving = False
-        self._active_routes.discard(old_route_id)
-        if not hasattr(self, '_deactivated_routes'):
-            self._deactivated_routes = set()
-        self._deactivated_routes.add(old_route_id)
-        self.route_manager._release_resources(old_route_id)
         if old_fp:
             self._pending_feed_stop = old_fp
         old_convs = set(config.FEED_ROUTES.get(old_route_id, {}).get('conveyors', []))
@@ -824,14 +817,29 @@ class FeedingMasterController:
             if not hasattr(self, '_pending_route_activate'):
                 self._pending_route_activate = {}
             switch_key = f"{old_route_id}→{new_route_id}"
-            self._pending_route_activate[switch_key] = (new_route_id, target_bin, non_shared)
+            self._pending_route_activate[switch_key] = (old_route_id, new_route_id, target_bin, non_shared)
             print(f"[FM] {old_route_id}→{new_route_id} 阶段1: 停止旧上料点 {old_fp}, 等待 {non_shared} 清空", flush=True)
         else:
-            # 无共用皮带，直接激活新路线
-            belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '')
-            self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
-            self.activate_route(new_route_id, target_bin)
+            # 无共用皮带，直接切换
+            self._do_switch(old_route_id, new_route_id, target_bin)
             print(f"[FM] {old_route_id}→{new_route_id} 切换完成 (无共用皮带)", flush=True)
+
+    def _do_switch(self, old_route_id: str, new_route_id: str, target_bin: str):
+        """同时停旧路线+激活新路线"""
+        old_ctx = self.route_manager.get_route_context(old_route_id)
+        if old_ctx:
+            old_ctx.state = RouteState.IDLE
+            old_ctx.target_bin = ''
+            old_ctx.cart_target_position = 0
+            old_ctx.cart_moving = False
+            self._active_routes.discard(old_route_id)
+            if not hasattr(self, '_deactivated_routes'):
+                self._deactivated_routes = set()
+            self._deactivated_routes.add(old_route_id)
+            self.route_manager._release_resources(old_route_id)
+        belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '') if old_ctx else ''
+        self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
+        self.activate_route(new_route_id, target_bin)
 
     def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
         """两阶段切换（兼容旧调用）"""
@@ -844,17 +852,13 @@ class FeedingMasterController:
             return
         pending_clear = getattr(self, '_pending_belt_clear', {})
         for switch_key in list(pending_activate.keys()):
-            new_route_id, target_bin, non_shared = pending_activate[switch_key]
+            old_route_id, new_route_id, target_bin, non_shared = pending_activate[switch_key]
             # 检查非共用皮带是否全部清空
             if any(cid in pending_clear for cid in non_shared):
                 continue
-            # 全部清空 → 激活新路线
+            # 全部清空 → 同时停旧路线+激活新路线
             del pending_activate[switch_key]
-            ctx = self.route_manager.get_route_context(new_route_id)
-            if ctx:
-                belt_id = CART_TO_BELT.get(ctx.assigned_cart or '', '')
-                self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
-            self.activate_route(new_route_id, target_bin)
+            self._do_switch(old_route_id, new_route_id, target_bin)
             print(f"[FM] {switch_key} 阶段2: 非共用皮带清空完成，激活新路线", flush=True)
 
     # ── 清空检测 ──
