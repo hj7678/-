@@ -639,6 +639,10 @@ class FeedingMasterController:
                     ctx.cart_target_position = tgt  # 修正
                     self.route_manager.set_route_state(route_id, RouteState.FEEDING)
                     ctx.feeding_start_time = self._total_runtime
+                    # 激活时cart已在位→下一帧发送上料点启动
+                    fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
+                    if fp:
+                        self._pending_feed_start = fp
                     print(f"[FeedingMaster] 路线 {route_id} → {target_bin} cart已在位→FEEDING", flush=True)
                 else:
                     print(f"[FeedingMaster] 路线 {route_id} → {target_bin} 已激活", flush=True)
@@ -842,10 +846,6 @@ class FeedingMasterController:
                 belt_id = CART_TO_BELT.get(ctx.assigned_cart or '', '')
                 self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
             self.activate_route(new_route_id, target_bin)
-            # 下一帧发送新上料点启动指令
-            new_fp = config.FEED_ROUTES.get(new_route_id, {}).get('feed_point', '')
-            if new_fp:
-                self._pending_feed_start = new_fp
             print(f"[FM] {switch_key} 阶段2: 非共用皮带清空完成，激活新路线", flush=True)
 
     # ── 清空检测 ──
