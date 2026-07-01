@@ -944,6 +944,12 @@ class SimulationController(QObject):
         if ctx.state != RouteState.FEEDING:
             return
 
+        # FM 已停止该上料点 → 不再出料
+        feed_point = route.get('feed_point', '')
+        if feed_point and feed_point in self.feed_points:
+            if not self.feed_points[feed_point].get('active', True):
+                return
+
         # 路线⑧⑨：自动选择发料S仓并扣减料位
         if route_id in ('route7', 'route8'):
             source_bin = self._get_or_select_silo_source(route_id)
