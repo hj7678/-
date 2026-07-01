@@ -285,8 +285,8 @@ class FeedingMasterController:
             if ctx.state == RouteState.CLEARING:
                 sensor_clear_timers, sensor_clear_timeouts = self._build_clearing_data(ctx, route_id)
 
-            # 顺序策略: 进入 CLEARING 时立即关闭斗+终点皮带，同时小车开始移动
-            if (ctx.state == RouteState.CLEARING and strategy == 'sequential'
+            # 顺序策略: 进入 MOVING_TO_TARGET 时立即设置目标+关闭斗+终点皮带
+            if (ctx.state == RouteState.MOVING_TO_TARGET and strategy == 'sequential'
                     and cart_id in ('Cart1', 'Cart2') and not getattr(ctx, 'early_moved_from_clearing', False)):
                 belt_id = CART_TO_BELT.get(cart_id, '')
                 nxt = self.scheduler.get_next_bin(belt_id)
@@ -300,7 +300,6 @@ class FeedingMasterController:
                         ctx.early_moved_from_clearing = True
                         ctx.clearing_strategy = 'reverse'
                         self.scheduler.mark_executing(belt_id, route_id, nxt)
-                        self.route_manager.set_route_state(route_id, RouteState.MOVING_TO_TARGET)
                         print(f"[FM] {route_id} 顺序清空: 立即移小车 {cart_id}→{next_pos} ({nxt})", flush=True)
                     except (ValueError, IndexError):
                         pass

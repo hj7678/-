@@ -114,6 +114,7 @@ class StateTransitionEngine:
                 actions['close_hoppers'] = (clearing_strategy != 'column_switch')
                 if clearing_strategy == 'sequential':
                     actions['stop_endpoint'] = True
+                    return RouteState.MOVING_TO_TARGET, actions
                 return RouteState.CLEARING, actions
             return current_state, actions
 
