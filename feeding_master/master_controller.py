@@ -599,6 +599,12 @@ class FeedingMasterController:
                     if self._total_runtime - self._last_diag_time > 3.0:
                         self._last_diag = None
         diag = getattr(self, '_last_diag', None)
+        # 上料点切换阶段1: 停止旧路线（在 send_commands 之前，确保本帧推送 IDLE 状态）
+        pending_switch = getattr(self, '_pending_route_switch', None)
+        if pending_switch:
+            self._pending_route_switch = None
+            old_rid, new_rid, tgt_bin = pending_switch
+            self._switch_route_phase1(old_rid, new_rid, tgt_bin)
         # 始终推送（即使无指令，也发送路线状态+调度序列保证HMI实时更新）
         self.server.send_commands(commands, route_info, sched_info, diag)
         if hasattr(self, '_deactivated_routes'):
@@ -614,12 +620,8 @@ class FeedingMasterController:
                 if self.activate_route(route_id2, nxt):
                     print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
-        # 6. 延迟上料点切换: 等本帧指令执行后再切路线，避免状态冲突
-        pending_switch = getattr(self, '_pending_route_switch', None)
-        if pending_switch:
-            self._pending_route_switch = None
-            old_rid, new_rid, tgt_bin = pending_switch
-            self._switch_route(old_rid, new_rid, tgt_bin)
+        # 6. 延迟上料点切换阶段2: 非共用皮带清空后激活新路线
+        # (由 _try_activate_pending_route 在每帧检查 _pending_belt_clear 时触发)
 
     # ── 外部接口 ──
 
@@ -792,18 +794,14 @@ class FeedingMasterController:
                     return rid
         return None
 
-    def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
-        """两阶段切换路线:
-        阶段1: 停止旧上料点+旧路线，非共用皮带清空30s
-        阶段2: 非共用皮带清空后，激活新路线+新上料点
-        """
+    def _switch_route_phase1(self, old_route_id: str, new_route_id: str, target_bin: str):
+        """阶段1: 停止旧路线 + 旧上料点，记录非共用皮带清空"""
         old_ctx = self.route_manager.get_route_context(old_route_id)
         if not old_ctx:
             return
         old_fp = old_ctx.feed_point or config.FEED_ROUTES.get(old_route_id, {}).get('feed_point', '')
-        # 阶段1: 停止旧路线和旧上料点
         old_ctx.state = RouteState.IDLE
-        old_ctx.target_bin = ''  # 清除目标，确保 UI 移除小车
+        old_ctx.target_bin = ''
         old_ctx.cart_target_position = 0
         old_ctx.cart_moving = False
         self._active_routes.discard(old_route_id)
@@ -811,10 +809,8 @@ class FeedingMasterController:
             self._deactivated_routes = set()
         self._deactivated_routes.add(old_route_id)
         self.route_manager._release_resources(old_route_id)
-        # 立即停止旧上料点
         if old_fp:
             self._pending_feed_stop = old_fp
-        # 非共用皮带：清空后停止
         old_convs = set(config.FEED_ROUTES.get(old_route_id, {}).get('conveyors', []))
         new_convs = set(config.FEED_ROUTES.get(new_route_id, {}).get('conveyors', []))
         non_shared = old_convs - new_convs
@@ -823,7 +819,6 @@ class FeedingMasterController:
                 self._pending_belt_clear = {}
             for cid in non_shared:
                 self._pending_belt_clear[cid] = (self._total_runtime, self._total_runtime)
-            # 阶段2: 记录待激活路线，等非共用皮带清空后执行
             if not hasattr(self, '_pending_route_activate'):
                 self._pending_route_activate = {}
             switch_key = f"{old_route_id}→{new_route_id}"
@@ -835,6 +830,10 @@ class FeedingMasterController:
             self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
             self.activate_route(new_route_id, target_bin)
             print(f"[FM] {old_route_id}→{new_route_id} 切换完成 (无共用皮带)", flush=True)
+
+    def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
+        """两阶段切换（兼容旧调用）"""
+        self._switch_route_phase1(old_route_id, new_route_id, target_bin)
 
     def _try_activate_pending_route(self):
         """检查所有非共用皮带是否已清空，若清空则激活新路线（阶段2）"""
