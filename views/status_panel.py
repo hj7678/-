@@ -1129,6 +1129,20 @@ class StatusPanel(QWidget):
                 }
             """)
 
+    def _read_feed_material_states(self) -> dict:
+        """从 TCP 上料点服务端读取状态"""
+        try:
+            import json, socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.3)
+            s.connect(('127.0.0.1', 9010))
+            s.sendall(json.dumps({'type': 'get_states'}).encode('utf-8'))
+            data = s.recv(4096).decode('utf-8')
+            s.close()
+            return json.loads(data).get('states', {})
+        except Exception:
+            return {}
+
     def update_all_status(self, simulator):
         """从仿真器更新所有状态"""
         # 获取故障传感器列表
@@ -1184,11 +1198,13 @@ class StatusPanel(QWidget):
             faults = simulator.get_diagnosis_result()
             self.update_diagnosis_result(faults)
 
-        # 更新激光传感器状态
-        if hasattr(simulator, 'laser_sensor_states'):
-            for laser_id in self.laser_sensor_labels.keys():
-                has_material = simulator.get_laser_sensor_state(laser_id)
-                self.update_laser_sensor_display(laser_id, has_material)
+        # 更新激光传感器状态（从上料点服务端 TCP 读取）
+        feed_states = self._read_feed_material_states()
+        for laser_id in self.laser_sensor_labels.keys():
+            # 去掉 S- 前缀得到服务端 key
+            key = laser_id[2:] if laser_id.startswith('S-') else laser_id
+            has_material = feed_states.get(key, True)
+            self.update_laser_sensor_display(laser_id, has_material)
 
         # 更新料位传感器状态（只更新S1-S12）
         if hasattr(simulator, 'get_all_level_sensors'):
