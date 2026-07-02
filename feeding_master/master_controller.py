@@ -722,7 +722,7 @@ class FeedingMasterController:
             if belt_id == 'D9' and d9_override and feed_point != d9_override:
                 continue
             # D8: feed3 有料→选 feed3, 无料→选 silo_out
-            if belt_id == 'D8' and feed_point == 'silo_out' and laser.get('feed3', True):
+            if belt_id == 'D8' and feed_point == 'silo_out' and self._has_feed_material('feed3', prefix):
                 continue  # feed3 有料，跳过 silo_out
             # silo_out 无需激光检测（默认有料）
             has_material = (feed_point == 'silo_out' or self._has_feed_material(feed_point, prefix))
