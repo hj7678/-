@@ -1806,10 +1806,7 @@ class SimulationController(QObject):
 
     def _on_feeding_commands(self, commands: list):
         """收到 FeedingMaster 控制指令"""
-        if not commands:
-            return
-
-        # FM 为唯一控制大脑，始终执行 FM 指令
+        # FM 为唯一控制大脑，始终执行 FM 指令（即使无指令也同步路线状态）
         self._feeding_bridge.apply_commands(commands)
 
     def set_use_feeding_master(self, enabled: bool):
