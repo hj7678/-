@@ -921,9 +921,7 @@ class FeedingMasterController:
             old_ctx.cart_target_position = 0
             old_ctx.cart_moving = False
             self._active_routes.discard(old_route_id)
-            if not hasattr(self, '_deactivated_routes'):
-                self._deactivated_routes = set()
-            self._deactivated_routes.add(old_route_id)
+            # 不放入 _deactivated_routes，避免 HMI 残留显示
             self.route_manager._release_resources(old_route_id)
         if self.activate_route(new_route_id, target_bin):
             self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
