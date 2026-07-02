@@ -765,9 +765,10 @@ class FeedingMasterController:
 
             # D6: 仅一个上料点 feed2_2，无料时直接停止，有料时恢复
             if belt_id == 'D6':
-                if not laser.get(fp, True):
+                prefix = target_bin.split('-')[0]
+                if not self._has_feed_material('feed2_2', prefix):
                     self._pending_feed_stop = fp
-                    print(f"[FM] D6 上料点 {fp} 无料 → 停止出料", flush=True)
+                    print(f"[FM] D6 上料点 {fp} 无料({prefix}) → 停止出料", flush=True)
                 else:
                     self._pending_feed_start = fp
                 continue
