@@ -295,13 +295,18 @@ class StatusPanel(QWidget):
         layout = QGridLayout()
         layout.setSpacing(8)
 
-        # 上料点名称映射
+        # 上料点名称映射（含物料级别）
         feed_point_names = {
             'feed1_1': '上料点1-1',
             'feed1_2': '上料点1-2',
             'feed2_1': '上料点2-1',
             'feed2_2': '上料点2-2',
+            'feed2_2_stone': '上料点2-2(石粉)',
+            'feed2_2_10mm': '上料点2-2(10mm)',
+            'feed2_2_20mm': '上料点2-2(20mm)',
             'feed3': '上料点3',
+            'feed3_stone': '上料点3(石粉)',
+            'feed3_10mm': '上料点3(10mm)',
         }
 
         # 创建每个激光传感器的显示单元格
@@ -313,9 +318,11 @@ class StatusPanel(QWidget):
             # 从传感器配置获取上料点信息
             sensor_config = config.LASER_SENSORS.get(laser_id, {})
             feed_point = sensor_config.get('feed_point', '')
+            # 物料级别传感器使用自己的 ID 作为名称键
+            name_key = laser_id if laser_id in feed_point_names else feed_point
 
             # 获取上料点中文名称
-            feed_point_name = feed_point_names.get(feed_point, feed_point)
+            feed_point_name = feed_point_names.get(name_key, name_key)
 
             cell = self._create_laser_sensor_cell(laser_id, feed_point_name)
             self.laser_sensor_labels[laser_id] = cell
