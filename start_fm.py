@@ -11,7 +11,6 @@ SERVICES = [
     ("Scheduling", "scheduling.main"),
     ("Fault Diagnosis", "tcp_diagnosis.main"),
     ("FeedingMaster", "feeding_master.main"),
-    ("Feed Material", "feed_material_service.main"),
     ("Upper HMI", "upper_hmi.main"),
 ]
 
