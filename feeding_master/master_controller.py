@@ -235,6 +235,10 @@ class FeedingMasterController:
         if pending_stop:
             commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
             self._pending_feed_stop = None
+        pending_start = getattr(self, '_pending_feed_start', None)
+        if pending_start:
+            commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
+            self._pending_feed_start = None
         # 非共用皮带清空：判定传感器从有料→无料时完成
         pending_clear = getattr(self, '_pending_belt_clear', {})
         if pending_clear:
@@ -722,7 +726,7 @@ class FeedingMasterController:
 
             cart_id = ctx.assigned_cart or ''
             belt_id = CART_TO_BELT.get(cart_id, '')
-            if belt_id not in ('D7', 'D8', 'D9'):
+            if belt_id not in ('D7', 'D8', 'D9', 'D6'):
                 continue
 
             fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
@@ -731,6 +735,15 @@ class FeedingMasterController:
 
             target_bin = ctx.target_bin or ''
             if not target_bin:
+                continue
+
+            # D6: 仅一个上料点 feed2_2，无料时直接停止，有料时恢复
+            if belt_id == 'D6':
+                if not laser.get(fp, True):
+                    self._pending_feed_stop = fp
+                    print(f"[FM] D6 上料点 {fp} 无料 → 停止出料", flush=True)
+                else:
+                    self._pending_feed_start = fp
                 continue
 
             prefix = target_bin.split('-')[0]
