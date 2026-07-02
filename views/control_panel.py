@@ -438,10 +438,12 @@ class ControlPanel(QWidget):
 
         for laser_id, sensor_info in all_laser_items:
             feed_point = sensor_info.get('feed_point', laser_id)
+            # 物料级别传感器使用 laser_id 作为名称键
+            name_key = laser_id if feed_point in material_feeds else feed_point
             # 物料级别 feed_point 映射到组合 feed_point 获取路线
             base_feed = material_feed_map.get(feed_point, feed_point)
             routes = LASER_TO_ROUTE_MAPPING.get(base_feed, [])
-            feed_point_name = feed_point_names.get(feed_point, feed_point) or laser_id
+            feed_point_name = feed_point_names.get(name_key, name_key) or laser_id
 
             row_layout = QHBoxLayout()
             row_layout.setSpacing(8)
