@@ -75,13 +75,9 @@ class FeedMaterialService:
             print(f"[上料点服务] UI写入: {key} → {'有料' if has_material else '无料'}", flush=True)
 
     def get_all_states(self) -> Dict[str, bool]:
-        """获取全部状态（FM 查询时调用）"""
+        """获取全部状态"""
         with self._lock:
-            states = dict(self._states)
-        # 记录查询日志
-        items = [f"{k}={states[k]}" for k in sorted(states.keys())]
-        print(f"[上料点服务] 推送状态: {', '.join(items)}", flush=True)
-        return states
+            return dict(self._states)
 
     def _start_periodic_log(self):
         """启动定时日志线程"""
