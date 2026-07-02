@@ -915,6 +915,7 @@ class FeedingMasterController:
         old_ctx = self.route_manager.get_route_context(old_route_id)
         belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '') if old_ctx else ''
         if old_ctx:
+            print(f"[FM] {old_route_id}: {old_ctx.state.value} → idle (彻底关闭)", flush=True)
             old_ctx.state = RouteState.IDLE
             old_ctx.target_bin = ''
             old_ctx.cart_target_position = 0
