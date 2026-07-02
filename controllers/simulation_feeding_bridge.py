@@ -36,6 +36,8 @@ class SimulationFeedingBridge(QObject):
         self._stock_thread: Optional[threading.Thread] = None
         self._last_push = 0.0  # 上次推送时间戳
         self._ack_id = 0
+        # 启动上料点原料服务 TCP 端
+        self._start_feed_material_server()
 
         self._fm.on_commands(self._on_commands)
         self._fm._on_ack = self._on_ack
@@ -206,6 +208,12 @@ class SimulationFeedingBridge(QObject):
             "maintenance_bins": list(ctrl.get_maintenance_bins()) if hasattr(ctrl, 'get_maintenance_bins') else [],
         }
         self._fm.send_sensor_states(sensor_data)
+
+    def _start_feed_material_server(self):
+        """启动上料点原料服务 TCP 服务端"""
+        from feed_material_service import FeedMaterialService
+        svc = FeedMaterialService.instance()
+        svc.start_server()
 
     def _get_feed_material_states(self) -> dict:
         """获取上料点原料状态（从服务端读取）"""

@@ -4,6 +4,8 @@
 
 import threading
 import time
+import json
+import socket
 from typing import Dict, Optional
 
 # 料仓前缀 → 物料后缀映射
@@ -90,6 +92,46 @@ class FeedMaterialService:
                 print(f"[上料点服务] 定时状态: {', '.join(items)}", flush=True)
         t = threading.Thread(target=_log_loop, daemon=True)
         t.start()
+
+    def start_server(self, host='127.0.0.1', port=9010):
+        """启动 TCP 服务端，供独立终端连接"""
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((host, port))
+        server.listen(5)
+        print(f"[上料点服务] TCP 服务端已启动, 端口 {port}", flush=True)
+
+        def _serve():
+            while True:
+                try:
+                    conn, addr = server.accept()
+                    t = threading.Thread(target=self._handle_client, args=(conn, addr), daemon=True)
+                    t.start()
+                except Exception:
+                    break
+
+        t = threading.Thread(target=_serve, daemon=True)
+        t.start()
+
+    def _handle_client(self, conn, addr):
+        try:
+            data = conn.recv(4096).decode('utf-8')
+            msg = json.loads(data) if data.strip() else {}
+            msg_type = msg.get('type', '')
+            if msg_type == 'get_states':
+                resp = {'type': 'feed_material_rsp', 'states': self.get_all_states()}
+            elif msg_type == 'set_state':
+                key = msg.get('key', '')
+                value = msg.get('value', True)
+                self.set_state(key, value)
+                resp = {'type': 'ok'}
+            else:
+                resp = {'type': 'error', 'message': f'unknown: {msg_type}'}
+            conn.sendall(json.dumps(resp).encode('utf-8'))
+        except Exception:
+            pass
+        finally:
+            conn.close()
 
     def has_material(self, feed_point: str, bin_prefix: str) -> bool:
         """根据上料点和目标仓前缀判断是否有料
