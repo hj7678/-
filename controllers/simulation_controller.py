@@ -1939,7 +1939,7 @@ class SimulationController(QObject):
         candidates = []
         for feed_point, route_id in available:
             if feed_point in config.FEED_POINTS_WITH_LASER:
-                has_material = self.laser_sensor_states.get(feed_point, False)
+                has_material = self.laser_sensor_states.get(feed_point, True)
             else:
                 has_material = True
 
