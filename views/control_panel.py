@@ -505,6 +505,9 @@ class ControlPanel(QWidget):
         """激光传感器状态改变"""
         has_material = (state == Qt.Checked)
         self.laser_sensor_changed.emit(laser_id, has_material)
+        # 同步到上料点原料服务端
+        from feed_material_service import FeedMaterialService
+        FeedMaterialService.instance().set_state(feed_point, has_material)
 
     def _create_cart_sensor_group(self) -> QGroupBox:
         """创建小车初始化设置组"""

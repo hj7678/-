@@ -201,19 +201,28 @@ class SimulationFeedingBridge(QObject):
             "route_targets": dict(ctrl.route_to_bin),
             "d7_feed_override": getattr(ctrl, '_d7_feed_override', ''),
             "d9_feed_override": getattr(ctrl, '_d9_feed_override', ''),
-            "laser_sensor_states": self._build_laser_states(ctrl),
+            "laser_sensor_states": dict(ctrl.laser_sensor_states) if hasattr(ctrl, 'laser_sensor_states') else {},
+            "feed_material_states": self._get_feed_material_states(),
             "maintenance_bins": list(ctrl.get_maintenance_bins()) if hasattr(ctrl, 'get_maintenance_bins') else [],
         }
         self._fm.send_sensor_states(sensor_data)
 
-    def _build_laser_states(self, ctrl) -> dict:
-        """构建 FM 兼容的激光传感器状态，feed2_2/feed3 聚合为单一值"""
-        raw = dict(ctrl.laser_sensor_states) if hasattr(ctrl, 'laser_sensor_states') else {}
-        # feed2_2: 任一物料有料即认为有料
-        raw['feed2_2'] = any(raw.get(k, True) for k in ('feed2_2_stone', 'feed2_2_10mm', 'feed2_2_20mm'))
-        # feed3: 任一物料有料即认为有料
-        raw['feed3'] = any(raw.get(k, True) for k in ('feed3_stone', 'feed3_10mm'))
-        return raw
+    def _get_feed_material_states(self) -> dict:
+        """获取上料点原料状态（从服务端读取）"""
+        from feed_material_service import FeedMaterialService
+        return FeedMaterialService.instance().get_all_states()
+
+    def _handle_feed_material_query(self, msg):
+        """处理 FM 的上料点原料状态查询"""
+        from feed_material_service import FeedMaterialService
+        svc = FeedMaterialService.instance()
+        states = svc.get_all_states()
+        seq = msg.get('seq', 0)
+        self._fm._send({
+            'type': 'feed_material_rsp',
+            'seq': seq,
+            'states': states,
+        })
 
     def _on_commands(self, msg):
         """接收命令 (含路线状态) from FeedingMaster"""
@@ -222,6 +231,10 @@ class SimulationFeedingBridge(QObject):
             route_states = {}
             schedule = {}
         else:
+            # 处理 FM 的上料点原料状态查询请求
+            if msg.get('type') == 'get_feed_material':
+                self._handle_feed_material_query(msg)
+                return
             commands = msg.get('commands', [])
             route_states = msg.get('route_states', {})
             schedule = msg.get('schedule', {})
