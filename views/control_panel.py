@@ -439,7 +439,7 @@ class ControlPanel(QWidget):
 
             # 激光传感器名称
             laser_label = QLabel(f"{feed_point_name}:")
-            laser_label.setStyleSheet("color: #E6EDF3; font-weight: bold; min-width: 65px;")
+            laser_label.setStyleSheet("color: #E6EDF3; font-weight: bold; min-width: 100px;")
             row_layout.addWidget(laser_label)
 
             # 有料/无料复选框
@@ -476,8 +476,8 @@ class ControlPanel(QWidget):
 
             # 相关路线提示
             if routes:
-                route_names = [config.FEED_ROUTES[r]['name'] for r in routes]
-                routes_label = QLabel(f"({', '.join(route_names)})")
+                route_nums = [r.replace('route', '') for r in routes]
+                routes_label = QLabel(f" 路线{','.join(route_nums)}")
                 routes_label.setStyleSheet("color: #6E7681; font-size: 9px;")
                 row_layout.addWidget(routes_label)
 
