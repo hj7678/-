@@ -532,6 +532,26 @@ class FeedingMasterController:
         # 3. 调度引擎联动
         self.scheduler.tick(self._total_runtime)
 
+        # 3.5 延迟自动续料: 在构建 route_info 前处理，确保 HMI 不显示已关闭的旧路线
+        pending = getattr(self, '_pending_auto_continue', None)
+        if pending:
+            self._pending_auto_continue = None
+            belt_id, nxt = pending
+            route_id2 = self._pick_route_for_bin(belt_id, nxt)
+            if route_id2:
+                old_route = None
+                for rid in list(self._active_routes):
+                    ctx = self.route_manager.get_route_context(rid)
+                    if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id and rid != route_id2:
+                        if ctx.state in (RouteState.WAITING, RouteState.STANDBY):
+                            old_route = rid
+                            break
+                if old_route:
+                    self._do_switch(old_route, route_id2, nxt)
+                    print(f"[FM] {belt_id} 自动续料 {old_route}→{route_id2} → {nxt}", flush=True)
+                elif self.activate_route(route_id2, nxt):
+                    print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
+
         # 4. 推送控制指令 (含路线状态+调度序列用于HMI显示)
         deactivated = getattr(self, '_deactivated_routes', set())
         # 始终构建路线状态和调度序列信息（即使无指令也推送，保证HMI实时更新）
@@ -611,27 +631,6 @@ class FeedingMasterController:
         self.server.send_commands(commands, route_info, sched_info, diag)
         if hasattr(self, '_deactivated_routes'):
             self._deactivated_routes.clear()
-
-        # 5. 延迟自动续料: 等上一轮的关闭斗指令先执行, 下一tick再开新路线
-        pending = getattr(self, '_pending_auto_continue', None)
-        if pending:
-            self._pending_auto_continue = None
-            belt_id, nxt = pending
-            route_id2 = self._pick_route_for_bin(belt_id, nxt)
-            if route_id2:
-                # 找到同皮带旧路线，使用 _do_switch 切换（与 D7 一致）
-                old_route = None
-                for rid in list(self._active_routes):
-                    ctx = self.route_manager.get_route_context(rid)
-                    if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id and rid != route_id2:
-                        if ctx.state in (RouteState.WAITING, RouteState.STANDBY):
-                            old_route = rid
-                            break
-                if old_route:
-                    self._do_switch(old_route, route_id2, nxt)
-                    print(f"[FM] {belt_id} 自动续料 {old_route}→{route_id2} → {nxt}", flush=True)
-                elif self.activate_route(route_id2, nxt):
-                    print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
         # 6. 延迟上料点切换阶段2: 非共用皮带清空后激活新路线
         # (由 _try_activate_pending_route 在每帧检查 _pending_belt_clear 时触发)
