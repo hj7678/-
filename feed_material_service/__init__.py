@@ -24,10 +24,12 @@ FEED_POINT_MATERIALS = {
 }
 
 # S仓 → 物料类型映射
+# S仓 → 物料类型映射（与 pos.py SILO_BIN_MATERIALS 一致）
 SILO_MATERIAL = {
-    'S1': 'stone', 'S2': 'stone', 'S3': 'stone',
-    'S4': '10mm', 'S5': '10mm', 'S6': '10mm',
-    'S7': '20mm', 'S8': '20mm', 'S9': '20mm',
+    'S1': '20mm', 'S2': '20mm', 'S3': '20mm',
+    'S4': '20mm', 'S5': '20mm', 'S6': '20mm',
+    'S7': 'stone', 'S8': 'stone',
+    'S9': '10mm', 'S10': '10mm', 'S11': '10mm', 'S12': '10mm',
 }
 
 
