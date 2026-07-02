@@ -426,9 +426,13 @@ class ControlPanel(QWidget):
             'feed3_10mm': 'feed3',
         }
 
-        # 创建每个激光传感器的设置
-        for laser_id in config.LASER_SENSORS.keys():
-            feed_point = laser_to_feed.get(laser_id, laser_id)
+        # 创建每个激光传感器的设置（通用 + 物料级别）
+        all_laser_items = list(config.LASER_SENSORS.items())
+        for key, info in config.MATERIAL_LASER_SENSORS.items():
+            all_laser_items.append((key, info))
+
+        for laser_id, sensor_info in all_laser_items:
+            feed_point = sensor_info.get('feed_point', laser_id)
             # 物料级别 feed_point 映射到组合 feed_point 获取路线
             base_feed = material_feed_map.get(feed_point, feed_point)
             routes = LASER_TO_ROUTE_MAPPING.get(base_feed, [])

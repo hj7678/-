@@ -309,15 +309,16 @@ class StatusPanel(QWidget):
             'feed3_10mm': '上料点3(10mm)',
         }
 
-        # 创建每个激光传感器的显示单元格
-        laser_ids = list(config.LASER_SENSORS.keys())
-        for idx, laser_id in enumerate(laser_ids):
+        # 创建每个激光传感器的显示单元格（通用 + 物料级别）
+        all_laser_items = list(config.LASER_SENSORS.items())
+        for key, info in config.MATERIAL_LASER_SENSORS.items():
+            all_laser_items.append((key, info))
+
+        for idx, (laser_id, sensor_info) in enumerate(all_laser_items):
             row = idx // 2
             col = idx % 2
 
-            # 从传感器配置获取上料点信息
-            sensor_config = config.LASER_SENSORS.get(laser_id, {})
-            feed_point = sensor_config.get('feed_point', '')
+            feed_point = sensor_info.get('feed_point', '')
             # 物料级别传感器使用自己的 ID 作为名称键
             name_key = laser_id if laser_id in feed_point_names else feed_point
 
