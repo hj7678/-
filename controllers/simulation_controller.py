@@ -169,6 +169,7 @@ class SimulationController(QObject):
             'D6': False, 'D7': False, 'D8': False, 'D9': False,
         }
         self._d7_feed_override: Optional[str] = None  # D7用户自选上料点
+        self._d9_feed_override: Optional[str] = None  # D9用户自选上料点
         # 状态转换引擎（调度回调解耦）
         self._state_engine = StateTransitionEngine()
         self._state_engine.set_schedule_callback(self._on_engine_schedule_request)

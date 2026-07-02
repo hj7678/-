@@ -647,6 +647,12 @@ class MainWindow(QMainWindow):
                 "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
             if ok:
                 self.controller._d7_feed_override = item.split()[0]
+            # D9也需要选择上料点
+            d9_fps = ['silo_out (高位储料仓)', 'feed2_2 (上料点2-2)']
+            d9_item, d9_ok = QInputDialog.getItem(self, "选择D9上料点",
+                "请选择D9皮带自动上料使用的上料点:", d9_fps, 0, False)
+            if d9_ok:
+                self.controller._d9_feed_override = d9_item.split()[0]
             if self.controller._feeding_bridge is not None:
                 for bid in ['D6', 'D7', 'D8', 'D9']:
                     self.controller._feeding_bridge._fm._send(
@@ -667,6 +673,12 @@ class MainWindow(QMainWindow):
                     "请选择D7皮带自动上料使用的上料点:", fps, 0, False)
                 if ok:
                     self.controller._d7_feed_override = item.split()[0]
+            elif belt_id == 'D9':
+                d9_fps = ['silo_out (高位储料仓)', 'feed2_2 (上料点2-2)']
+                d9_item, d9_ok = QInputDialog.getItem(self, "选择D9上料点",
+                    "请选择D9皮带自动上料使用的上料点:", d9_fps, 0, False)
+                if d9_ok:
+                    self.controller._d9_feed_override = d9_item.split()[0]
             self.controller._feeding_bridge._fm._send(
                 {"type": "belt_active", "belt_id": belt_id, "active": True})
             self._update_status_bar(f"{belt_id} 自动调度已启动")

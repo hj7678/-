@@ -135,6 +135,7 @@ class FeedingMasterController:
         self.scheduler._laser_states = data.get('laser_sensor_states', {})
         self.scheduler._maintenance_bins = set(data.get('maintenance_bins', []))
         self._d7_feed_override = data.get('d7_feed_override', '')
+        self._d9_feed_override = data.get('d9_feed_override', '')
         # 同步调度开关: UI点击"调度服务"后FM才开始请求调度
         self.scheduler.set_active(data.get('scheduling_active', False))
 
@@ -694,6 +695,13 @@ class FeedingMasterController:
             d7_override = getattr(self, '_d7_feed_override', '')
             if belt_id == 'D7' and d7_override and feed_point != d7_override:
                 continue
+            # D9: 用户选择了指定上料点, 只选该上料点的路线
+            d9_override = getattr(self, '_d9_feed_override', '')
+            if belt_id == 'D9' and d9_override and feed_point != d9_override:
+                continue
+            # D8: feed3 有料→选 feed3, 无料→选 silo_out
+            if belt_id == 'D8' and feed_point == 'silo_out' and laser.get('feed3', True):
+                continue  # feed3 有料，跳过 silo_out
             # silo_out 无需激光检测（默认有料）
             has_material = (feed_point == 'silo_out' or laser.get(feed_point, True))
             if not has_material:
@@ -730,7 +738,7 @@ class FeedingMasterController:
                 continue
 
             fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-            if not fp or fp == 'silo_out':
+            if not fp:
                 continue
 
             target_bin = ctx.target_bin or ''
@@ -744,6 +752,31 @@ class FeedingMasterController:
                     print(f"[FM] D6 上料点 {fp} 无料 → 停止出料", flush=True)
                 else:
                     self._pending_feed_start = fp
+                continue
+
+            # D8: feed3 无料 → 切换 silo_out
+            if belt_id == 'D8' and fp == 'feed3' and not laser.get('feed3', True):
+                available = config.BIN_TO_AVAILABLE_ROUTES.get(target_bin, [])
+                for fp_candidate, rid in available:
+                    if fp_candidate == 'silo_out' and rid != route_id:
+                        self._pending_route_switch = (route_id, rid, target_bin)
+                        print(f"[FM] D8 上料点 feed3 无料 → 切换 {rid}", flush=True)
+                        return
+                continue
+
+            # D9: feed2_2 无料 → 切换 silo_out
+            if belt_id == 'D9' and fp == 'feed2_2' and not laser.get('feed2_2', True):
+                available = config.BIN_TO_AVAILABLE_ROUTES.get(target_bin, [])
+                for fp_candidate, rid in available:
+                    if fp_candidate == 'silo_out' and rid != route_id:
+                        self._pending_route_switch = (route_id, rid, target_bin)
+                        print(f"[FM] D9 上料点 feed2_2 无料 → 切换 {rid}", flush=True)
+                        return
+                continue
+
+            # silo_out 默认有料，无需切换
+            if fp == 'silo_out':
+                continue
                 continue
 
             prefix = target_bin.split('-')[0]

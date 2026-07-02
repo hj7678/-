@@ -200,6 +200,7 @@ class SimulationFeedingBridge(QObject):
             "scheduling_active": ctrl._auto_feeding_active,
             "route_targets": dict(ctrl.route_to_bin),
             "d7_feed_override": getattr(ctrl, '_d7_feed_override', ''),
+            "d9_feed_override": getattr(ctrl, '_d9_feed_override', ''),
             "laser_sensor_states": dict(ctrl.laser_sensor_states) if hasattr(ctrl, 'laser_sensor_states') else {},
             "maintenance_bins": list(ctrl.get_maintenance_bins()) if hasattr(ctrl, 'get_maintenance_bins') else [],
         }
