@@ -763,14 +763,19 @@ class FeedingMasterController:
             if not target_bin:
                 continue
 
-            # D6: 仅一个上料点 feed2_2，无料时直接停止，有料时恢复
+            # D6: 仅一个上料点 feed2_2，无料时进入清空余料，有料时恢复
             if belt_id == 'D6':
                 prefix = target_bin.split('-')[0]
                 if not self._has_feed_material('feed2_2', prefix):
-                    self._pending_feed_stop = fp
-                    print(f"[FM] D6 上料点 {fp} 无料({prefix}) → 停止出料", flush=True)
-                else:
+                    if ctx.state != RouteState.CLEARING:
+                        self._pending_feed_stop = fp
+                        ctx.state = RouteState.CLEARING
+                        print(f"[FM] D6 上料点 {fp} 无料({prefix}) → 进入清空余料", flush=True)
+                elif ctx.state == RouteState.CLEARING:
+                    # 物料恢复，恢复上料
                     self._pending_feed_start = fp
+                    ctx.state = RouteState.FEEDING
+                    print(f"[FM] D6 上料点 {fp} 有料({prefix}) → 恢复上料", flush=True)
                 continue
 
             # D8: feed3 当前物料无料 → 切换 silo_out
