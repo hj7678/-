@@ -913,6 +913,7 @@ class FeedingMasterController:
     def _do_switch(self, old_route_id: str, new_route_id: str, target_bin: str):
         """同时停旧路线+激活新路线"""
         old_ctx = self.route_manager.get_route_context(old_route_id)
+        belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '') if old_ctx else ''
         if old_ctx:
             old_ctx.state = RouteState.IDLE
             old_ctx.target_bin = ''
@@ -923,9 +924,15 @@ class FeedingMasterController:
                 self._deactivated_routes = set()
             self._deactivated_routes.add(old_route_id)
             self.route_manager._release_resources(old_route_id)
-        belt_id = CART_TO_BELT.get(old_ctx.assigned_cart or '', '') if old_ctx else ''
-        self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
-        self.activate_route(new_route_id, target_bin)
+        if self.activate_route(new_route_id, target_bin):
+            self.scheduler.mark_executing(belt_id, new_route_id, target_bin)
+        else:
+            # 激活失败，回退旧路线
+            if old_ctx:
+                old_ctx.state = RouteState.WAITING
+                self._active_routes.add(old_route_id)
+                self._deactivated_routes.discard(old_route_id)
+            print(f"[FM] _do_switch {old_route_id}→{new_route_id} 激活失败", flush=True)
 
     def _switch_route(self, old_route_id: str, new_route_id: str, target_bin: str):
         """两阶段切换（兼容旧调用）"""
