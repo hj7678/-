@@ -3611,33 +3611,19 @@ class SimulationController(QObject):
         if sensor_id in self.laser_sensor_states:
             return self.laser_sensor_states[sensor_id]
 
-        # 从LASER_SENSORS配置中找到对应的feed_point_id
-        sensor_config = config.LASER_SENSORS.get(sensor_id)
-        if sensor_config:
-            feed_point = sensor_config.get('feed_point')
-            if feed_point and feed_point in self.laser_sensor_states:
-                return self.laser_sensor_states[feed_point]
+        # 去掉 S- 前缀再查（如 S-feed2_2_stone → feed2_2_stone）
+        if sensor_id.startswith('S-'):
+            plain = sensor_id[2:]
+            if plain in self.laser_sensor_states:
+                return self.laser_sensor_states[plain]
 
-        return False
+        return True
 
     def set_laser_sensor_state(self, sensor_id: str, has_material: bool):
-        """设置激光传感器状态（True=有料，False=无料）
-
-        Args:
-            sensor_id: 激光传感器ID（如 'L-feed2_1'）
-            has_material: 是否有原料
-        """
-        # 从LASER_SENSORS配置中找到对应的feed_point_id
-        sensor_config = config.LASER_SENSORS.get(sensor_id)
-        if sensor_config:
-            feed_point = sensor_config.get('feed_point')
-            if feed_point and feed_point in self.laser_sensor_states:
-                self.laser_sensor_states[feed_point] = has_material
-                self.mark_dirty()
-        # 也尝试直接使用sensor_id作为键
-        elif sensor_id in self.laser_sensor_states:
-            self.laser_sensor_states[sensor_id] = has_material
-            self.mark_dirty()
+        """设置激光传感器状态"""
+        key = sensor_id[2:] if sensor_id.startswith('S-') else sensor_id
+        self.laser_sensor_states[key] = has_material
+        self.mark_dirty()
 
     def get_feed_point_has_material(self, feed_point_id: str) -> bool:
         """获取上料点是否有原料
