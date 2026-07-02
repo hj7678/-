@@ -1159,13 +1159,11 @@ class StatusPanel(QWidget):
             is_faulty = sensor_id in faulty_sensors
             self.update_sensor_status(sensor_id, is_active, is_faulty)
 
-        # 更新中转斗（开关状态从仿真实时读取，称重从 generate_data.json 同步）
+        # 更新中转斗（开关状态和称重数据从 generate_data.json 同步）
         for hopper_id in self.hopper_labels.keys():
             level = simulator.get_hopper_level(hopper_id)
             switch_data = hopper_data.get(hopper_id, {})
-            # 优先从仿真实时对象读取开关状态，避免文件缓存延迟
-            hopper_obj = simulator.hoppers.get(hopper_id) if hasattr(simulator, 'hoppers') else None
-            switch_open = hopper_obj.is_open if hopper_obj else switch_data.get('switch', True)
+            switch_open = switch_data.get('switch', True)
             weight_kg = switch_data.get('weight', 0)
             # 转换为吨用于计算料位百分比
             weight_tons = weight_kg / 1000.0

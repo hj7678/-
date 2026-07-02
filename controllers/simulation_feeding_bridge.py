@@ -308,6 +308,8 @@ class SimulationFeedingBridge(QObject):
                         hopper.is_open = True
                     elif action == "close":
                         hopper.is_open = False
+                    # 同步写入数据管理器，确保状态栏实时显示
+                    ctrl.sensor_data_manager.write_hopper_switch(dev_id, hopper.is_open)
 
             elif device == "feed_point":
                 if action in ("start", "on"):
