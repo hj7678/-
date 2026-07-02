@@ -3,6 +3,7 @@
 """
 
 import threading
+import time
 from typing import Dict, Optional
 
 # 料仓前缀 → 物料后缀映射
@@ -48,6 +49,7 @@ class FeedMaterialService:
         for fp, mats in FEED_POINT_MATERIALS.items():
             for m in mats:
                 self._states[_state_key(fp, m)] = True
+        self._start_periodic_log()
 
     @classmethod
     def instance(cls) -> 'FeedMaterialService':
@@ -63,16 +65,35 @@ class FeedMaterialService:
             return self._states.get(_state_key(feed_point, material), True)
 
     def set_state(self, key: str, has_material: bool):
-        """设置上料点物料状态
+        """设置上料点物料状态（UI 控制面板调用）
         key 格式: feed2_2_stone, feed3_10mm 等
         """
+        old = self._states.get(key)
         with self._lock:
             self._states[key] = has_material
+        if old != has_material:
+            print(f"[上料点服务] UI写入: {key} → {'有料' if has_material else '无料'}", flush=True)
 
     def get_all_states(self) -> Dict[str, bool]:
-        """获取全部状态"""
+        """获取全部状态（FM 查询时调用）"""
         with self._lock:
-            return dict(self._states)
+            states = dict(self._states)
+        # 记录查询日志
+        items = [f"{k}={states[k]}" for k in sorted(states.keys())]
+        print(f"[上料点服务] 推送状态: {', '.join(items)}", flush=True)
+        return states
+
+    def _start_periodic_log(self):
+        """启动定时日志线程"""
+        def _log_loop():
+            while True:
+                time.sleep(10)
+                with self._lock:
+                    states = dict(self._states)
+                items = [f"{k}={states[k]}" for k in sorted(states.keys())]
+                print(f"[上料点服务] 定时状态: {', '.join(items)}", flush=True)
+        t = threading.Thread(target=_log_loop, daemon=True)
+        t.start()
 
     def has_material(self, feed_point: str, bin_prefix: str) -> bool:
         """根据上料点和目标仓前缀判断是否有料
