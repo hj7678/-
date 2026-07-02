@@ -398,8 +398,11 @@ class ControlPanel(QWidget):
             'feed1_1': '上料点1-1',
             'feed1_2': '上料点1-2',
             'feed2_1': '上料点2-1',
-            'feed2_2': '上料点2-2',
-            'feed3': '上料点3',
+            'feed2_2_stone': '上料点2-2(石粉)',
+            'feed2_2_10mm': '上料点2-2(10mm)',
+            'feed2_2_20mm': '上料点2-2(20mm)',
+            'feed3_stone': '上料点3(石粉)',
+            'feed3_10mm': '上料点3(10mm)',
         }
 
         # 激光传感器到上料点的映射
@@ -407,15 +410,29 @@ class ControlPanel(QWidget):
             'S-feed1_1': 'feed1_1',
             'S-feed1_2': 'feed1_2',
             'S-feed2_1': 'feed2_1',
-            'S-feed2_2': 'feed2_2',
-            'S-feed3': 'feed3',
+            'S-feed2_2_stone': 'feed2_2_stone',
+            'S-feed2_2_10mm': 'feed2_2_10mm',
+            'S-feed2_2_20mm': 'feed2_2_20mm',
+            'S-feed3_stone': 'feed3_stone',
+            'S-feed3_10mm': 'feed3_10mm',
+        }
+
+        # 物料级别的 feed_point 映射到组合 feed_point (用于 LASER_TO_ROUTE_MAPPING)
+        material_feed_map = {
+            'feed2_2_stone': 'feed2_2',
+            'feed2_2_10mm': 'feed2_2',
+            'feed2_2_20mm': 'feed2_2',
+            'feed3_stone': 'feed3',
+            'feed3_10mm': 'feed3',
         }
 
         # 创建每个激光传感器的设置
         for laser_id in config.LASER_SENSORS.keys():
             feed_point = laser_to_feed.get(laser_id, laser_id)
+            # 物料级别 feed_point 映射到组合 feed_point 获取路线
+            base_feed = material_feed_map.get(feed_point, feed_point)
+            routes = LASER_TO_ROUTE_MAPPING.get(base_feed, [])
             feed_point_name = feed_point_names.get(feed_point, feed_point) or laser_id
-            routes = LASER_TO_ROUTE_MAPPING.get(feed_point, [])
 
             row_layout = QHBoxLayout()
             row_layout.setSpacing(8)

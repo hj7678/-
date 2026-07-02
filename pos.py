@@ -99,8 +99,13 @@ FEED_POINT_LASER_SENSORS = {
     'feed1_1': {'name': 'S-feed1_1', 'x': 60, 'y': 315, 'feed_point': 'feed1_1'},
     'feed1_2': {'name': 'S-feed1_2', 'x': 45, 'y': 500, 'feed_point': 'feed1_2'},
     'feed2_1': {'name': 'S-feed2_1', 'x': 195, 'y': 193, 'feed_point': 'feed2_1'},
-    'feed2_2': {'name': 'S-feed2_2', 'x': 256, 'y': 201, 'feed_point': 'feed2_2'},
-    'feed3': {'name': 'S-feed3', 'x': 1161, 'y': 358, 'feed_point': 'feed3'},
+    # feed2_2: 三种物料分别检测
+    'feed2_2_stone': {'name': 'S-feed2_2(石粉)', 'x': 246, 'y': 196, 'feed_point': 'feed2_2', 'material': 'stone_powder'},
+    'feed2_2_10mm': {'name': 'S-feed2_2(10mm)', 'x': 256, 'y': 201, 'feed_point': 'feed2_2', 'material': 'aggregate_10mm'},
+    'feed2_2_20mm': {'name': 'S-feed2_2(20mm)', 'x': 266, 'y': 206, 'feed_point': 'feed2_2', 'material': 'aggregate_20mm'},
+    # feed3: 两种物料分别检测
+    'feed3_stone': {'name': 'S-feed3(石粉)', 'x': 1151, 'y': 353, 'feed_point': 'feed3', 'material': 'stone_powder'},
+    'feed3_10mm': {'name': 'S-feed3(10mm)', 'x': 1161, 'y': 358, 'feed_point': 'feed3', 'material': 'aggregate_10mm'},
 }
 
 # =============================================================================

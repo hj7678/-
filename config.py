@@ -299,8 +299,13 @@ FEED_POINT_LASER_STATES = {
     'feed1_1': True,   # 上料点1-1 有料
     'feed1_2': True,   # 上料点1-2 有料
     'feed2_1': True,   # 上料点2-1 有料
-    'feed2_2': True,   # 上料点2-2 有料
-    'feed3': True,     # 上料点3 有料
+    # feed2_2: 三种物料
+    'feed2_2_stone': True,   # 石粉
+    'feed2_2_10mm': True,   # 10mm碎石
+    'feed2_2_20mm': True,   # 20mm碎石
+    # feed3: 两种物料
+    'feed3_stone': True,   # 石粉
+    'feed3_10mm': True,   # 10mm碎石
 }
 
 # =============================================================================
