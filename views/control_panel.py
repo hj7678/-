@@ -480,7 +480,7 @@ class ControlPanel(QWidget):
                 }
             """)
             checkbox.stateChanged.connect(
-                lambda state, lid=laser_id, fid=feed_point: self._on_laser_sensor_changed(lid, fid, state)
+                lambda state, lid=laser_id, fid=name_key: self._on_laser_sensor_changed(lid, fid, state)
             )
             self.laser_sensor_checkboxes[laser_id] = checkbox
             row_layout.addWidget(checkbox)
