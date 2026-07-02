@@ -232,9 +232,15 @@ class FeedingMasterController:
         # 追踪指令变化: new_cmds继承prev_cmds, 未被本帧更新的保持原状态
         prev_cmds = getattr(self, '_last_commands', {})
 
-        # 2. 遍历活跃路线，执行状态机
         commands = []
         new_cmds = dict(prev_cmds)  # 继承上帧: 打开的斗仍然是打开
+        # 小车归位（旧路线关闭时触发）
+        cart_return = getattr(self, '_pending_cart_return', None)
+        if cart_return:
+            self._pending_cart_return = None
+            commands.append({'device': 'cart', 'id': cart_return[0], 'action': 'move',
+                           'target': cart_return[1], 'route_id': '', 'left_divert': True, 'right_divert': False})
+            print(f"[FM] 小车归位: {cart_return[0]}→{cart_return[1]}", flush=True)
         # 上料点切换: 停止旧上料点
         pending_stop = getattr(self, '_pending_feed_stop', None)
         if pending_stop:
@@ -620,6 +626,10 @@ class FeedingMasterController:
                         if ctx.state in (RouteState.WAITING, RouteState.STANDBY):
                             self.route_manager.set_route_state(rid, RouteState.STANDBY)
                             self._active_routes.discard(rid)
+                            # 小车归位到位置1
+                            cart_id = ctx.assigned_cart
+                            if cart_id:
+                                self._pending_cart_return = (cart_id, 1)
                             print(f"[FM] {rid}: 旧路线关闭，为 {route_id2} 让路", flush=True)
                 if self.activate_route(route_id2, nxt):
                     print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
