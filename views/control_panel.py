@@ -504,10 +504,14 @@ class ControlPanel(QWidget):
     def _on_laser_sensor_changed(self, laser_id: str, feed_point: str, state: int):
         """激光传感器状态改变"""
         has_material = (state == Qt.Checked)
+        print(f"[控制面板] 激光传感器变更: laser={laser_id}, feed_point={feed_point}, 有料={has_material}", flush=True)
         self.laser_sensor_changed.emit(laser_id, has_material)
         # 同步到上料点原料服务端
         from feed_material_service import FeedMaterialService
-        FeedMaterialService.instance().set_state(feed_point, has_material)
+        svc = FeedMaterialService.instance()
+        print(f"[控制面板] 服务端实例ID={id(svc)}, 写入前: {svc.get_all_states()}", flush=True)
+        svc.set_state(feed_point, has_material)
+        print(f"[控制面板] 写入后: {svc.get_all_states()}", flush=True)
 
     def _create_cart_sensor_group(self) -> QGroupBox:
         """创建小车初始化设置组"""

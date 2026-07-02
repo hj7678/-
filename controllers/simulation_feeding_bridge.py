@@ -210,7 +210,8 @@ class SimulationFeedingBridge(QObject):
     def _get_feed_material_states(self) -> dict:
         """获取上料点原料状态（从服务端读取）"""
         from feed_material_service import FeedMaterialService
-        return FeedMaterialService.instance().get_all_states()
+        svc = FeedMaterialService.instance()
+        return svc.get_all_states()
 
     def _handle_feed_material_query(self, msg):
         """处理 FM 的上料点原料状态查询"""
