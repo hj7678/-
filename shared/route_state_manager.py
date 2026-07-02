@@ -316,7 +316,8 @@ class RouteStateManager:
         ctx = self.routes[route_id]
         for hopper_id in ctx.assigned_hoppers:
             lock = self._resource_locks.get(hopper_id)
-            if lock is not None:
+            if lock is not None and lock != route_id:
+                # 同一路线重新激活，允许（先释放再获取，或直接覆盖）
                 print(f"[RouteMgr] _acquire_resources({route_id}) FAIL: {hopper_id} locked by {lock}", flush=True)
                 return False
         # 注意：小车（Cart）不被独占锁定，允许不同路线共用同一小车
