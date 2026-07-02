@@ -619,19 +619,18 @@ class FeedingMasterController:
             belt_id, nxt = pending
             route_id2 = self._pick_route_for_bin(belt_id, nxt)
             if route_id2:
-                # 关闭同皮带的旧路线（WAITING 状态），防止皮带命令冲突
+                # 找到同皮带旧路线，使用 _do_switch 切换（与 D7 一致）
+                old_route = None
                 for rid in list(self._active_routes):
                     ctx = self.route_manager.get_route_context(rid)
                     if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id and rid != route_id2:
                         if ctx.state in (RouteState.WAITING, RouteState.STANDBY):
-                            self.route_manager.set_route_state(rid, RouteState.STANDBY)
-                            self._active_routes.discard(rid)
-                            # 小车归位到位置1
-                            cart_id = ctx.assigned_cart
-                            if cart_id:
-                                self._pending_cart_return = (cart_id, 1)
-                            print(f"[FM] {rid}: 旧路线关闭，为 {route_id2} 让路", flush=True)
-                if self.activate_route(route_id2, nxt):
+                            old_route = rid
+                            break
+                if old_route:
+                    self._do_switch(old_route, route_id2, nxt)
+                    print(f"[FM] {belt_id} 自动续料 {old_route}→{route_id2} → {nxt}", flush=True)
+                elif self.activate_route(route_id2, nxt):
                     print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
         # 6. 延迟上料点切换阶段2: 非共用皮带清空后激活新路线
