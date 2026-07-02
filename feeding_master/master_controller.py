@@ -677,11 +677,18 @@ class FeedingMasterController:
         print(f"[FM] {belt_id} activate {route_id} → {first_bin}: {'OK' if ok else 'FAIL'}", flush=True)
 
     def _has_feed_material(self, feed_point: str, bin_prefix: str) -> bool:
-        """根据上料点和目标仓前缀判断是否有对应物料
-        使用 feed_material_service 的物料级别状态
-        """
-        from feed_material_service import FeedMaterialService
-        return FeedMaterialService.instance().has_material(feed_point, bin_prefix)
+        """通过 TCP 查询上料点原料服务端"""
+        try:
+            import json, socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect(('127.0.0.1', 9010))
+            s.sendall(json.dumps({'type': 'has_material', 'feed_point': feed_point, 'bin_prefix': bin_prefix}).encode('utf-8'))
+            data = s.recv(4096).decode('utf-8')
+            s.close()
+            return json.loads(data).get('result', True)
+        except Exception:
+            return True  # 服务端不可用时默认有料
 
     def _pick_route_for_bin(self, belt_id: str, bin_id: str) -> Optional[str]:
         """根据料仓ID选择路线（复用仿真侧的 BIN_TO_AVAILABLE_ROUTES）"""
