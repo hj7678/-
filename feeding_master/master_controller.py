@@ -306,7 +306,7 @@ class FeedingMasterController:
             sensor_clear_timers = {}
             sensor_clear_timeouts = {}
             if ctx.state == RouteState.CLEARING:
-                sensor_clear_timers, sensor_clear_timeouts = self._build_clearing_data(ctx, route_id)
+                sensor_clear_timers, sensor_clear_timeouts = self._build_clearing_data(ctx, route_id, strategy)
 
             # 顺序策略: 进入 MOVING_TO_TARGET 时立即设置目标+关闭斗+终点皮带
             if (ctx.state == RouteState.MOVING_TO_TARGET and strategy == 'sequential'
@@ -874,8 +874,10 @@ class FeedingMasterController:
         distance = base + self._LINE_SPACING * (8 - row)
         return distance / 2.5 + 2.0
 
-    def _build_clearing_data(self, ctx, route_id: str) -> tuple:
-        """构建清空检测所需的 sensor_clear_timers 和 sensor_clear_timeouts"""
+    def _build_clearing_data(self, ctx, route_id: str, strategy: str = 'reverse') -> tuple:
+        """构建清空检测数据。
+        反序清空时有下一仓 → 只需终点传感器清空，非终点皮带余料由下一仓消耗。
+        """
         timers = getattr(ctx, 'sensor_clear_timers', {}) or {}
         timeouts = {}
         proximity = self._sensor_states.get('proximity', {})
@@ -886,8 +888,18 @@ class FeedingMasterController:
         final_conveyor = conveyors[-1] if conveyors else ''
         endpoint_sensor = self._ENDPOINT_SENSORS.get(final_conveyor, '')
 
+        # 反序清空 + 有下一仓 → 仅追踪终点传感器
+        belt_id = CART_TO_BELT.get(ctx.assigned_cart or '', '')
+        has_next = bool(self.scheduler.get_next_bin(belt_id)) if belt_id else False
+        only_endpoint = (strategy == 'reverse' and has_next)
+
         for sid in route_sensors:
             is_active = proximity.get(sid, False)
+            if only_endpoint and sid != endpoint_sensor:
+                # 非终点传感器：有下一仓时跳过，直接清空计时器
+                if sid in timers:
+                    del timers[sid]
+                continue
             if sid == endpoint_sensor:
                 timeouts[sid] = self._calc_endpoint_timeout(final_conveyor, ctx.target_bin or '')
             else:
@@ -899,8 +911,6 @@ class FeedingMasterController:
             else:
                 if sid not in timers:
                     timers[sid] = self._total_runtime
-                else:
-                    pass  # 计时中
 
         ctx.sensor_clear_timers = timers
         return timers, timeouts
