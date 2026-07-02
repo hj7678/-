@@ -311,10 +311,13 @@ class RouteStateManager:
     def _acquire_resources(self, route_id: str) -> bool:
         """获取路线所需资源"""
         if route_id not in self.routes:
+            print(f"[RouteMgr] _acquire_resources({route_id}) FAIL: route not found", flush=True)
             return False
         ctx = self.routes[route_id]
         for hopper_id in ctx.assigned_hoppers:
-            if self._resource_locks.get(hopper_id) is not None:
+            lock = self._resource_locks.get(hopper_id)
+            if lock is not None:
+                print(f"[RouteMgr] _acquire_resources({route_id}) FAIL: {hopper_id} locked by {lock}", flush=True)
                 return False
         # 注意：小车（Cart）不被独占锁定，允许不同路线共用同一小车
         for hopper_id in ctx.assigned_hoppers:
@@ -329,6 +332,7 @@ class RouteStateManager:
         for hopper_id in ctx.assigned_hoppers:
             if self._resource_locks.get(hopper_id) == route_id:
                 self._resource_locks[hopper_id] = None
+                print(f"[RouteMgr] _release({route_id}): {hopper_id} freed", flush=True)
 
     def is_resource_available(self, resource_id: str) -> bool:
         """检查资源是否可用"""
