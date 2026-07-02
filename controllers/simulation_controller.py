@@ -3313,6 +3313,8 @@ class SimulationController(QObject):
                     print(f"[{cart_id}] 移动: {old_pos} → {self.cart_positions[cart_id]} (目标={target_pos})", flush=True)
                     # 同步传感器上报值（实时跟踪实际位置）
                     self.cart_sensor_positions[cart_id] = self.cart_positions[cart_id]
+                    # 同步写入数据管理器，确保状态栏实时显示
+                    self.sensor_data_manager.write_cart_position(cart_id, self.cart_positions[cart_id])
 
                     # 检查是否有小车到达
                     self._check_virtual_cart_arrival(cart_id)
