@@ -670,6 +670,12 @@ class FeedingMasterController:
         if self.scheduler.is_executing(belt_id):
             print(f"[FM] {belt_id} 已在执行中, 序列缓存", flush=True)
             return
+        # 双保险: 检查 _active_routes 中是否有同皮带活跃路线
+        for rid in self._active_routes:
+            ctx = self.route_manager.get_route_context(rid)
+            if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id:
+                print(f"[FM] {belt_id} 已有活跃路线 {rid}, 序列缓存", flush=True)
+                return
 
         first_bin = sequence[0] if sequence else None
         if not first_bin:
