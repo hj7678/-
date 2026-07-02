@@ -1101,7 +1101,11 @@ class SimulationController(QObject):
         if self.enable_sensor_data_generation:
             if self.total_runtime - self._last_sensor_write_time >= 1.0:
                 sensor_delta = self.total_runtime - self._last_sensor_write_time
-                self._generate_sensor_data(sensor_delta)
+                # FM 接管时，跳过控制策略生成器的 hopper 数据写入，避免覆盖 FM 命令
+                if self._feeding_bridge is None or not self._feeding_bridge._enabled:
+                    self._generate_sensor_data(sensor_delta)
+                else:
+                    self._generate_sensor_data_fm(sensor_delta)
                 self._last_sensor_write_time = self.total_runtime
 
         # 标记脏，通知UI需要更新
@@ -1477,26 +1481,39 @@ class SimulationController(QObject):
             if ctx.state == RouteState.WAITING:
                 self._complete_stop_route(route_id)
 
-    def _generate_sensor_data(self, delta_seconds: float = 0.0):
-        """
-        生成传感器数据并写入JSON文件
-        使用控制策略生成器生成数据
-        """
-        # 获取小车位置
-        cart_positions = {
+    def _generate_sensor_data_fm(self, delta_seconds: float = 0.0):
+        """FM 接管时生成传感器数据（跳过 hopper，由 _update_hoppers 和桥接写入）"""
+        self.control_strategy_generator.generate_all_data(
+            active_routes=self.active_routes,
+            hoppers={},  # 空字典 → 跳过 hopper 数据生成
+            conveyors=self.conveyors,
+            materials=self.active_materials,
+            cart_positions=self._get_cart_positions_dict(),
+            small_bins=self.small_bins,
+            silo_compartments=self.view.silo_compartments if hasattr(self, 'view') and self.view else None,
+            delta_seconds=delta_seconds
+        )
+
+    def _get_cart_positions_dict(self) -> dict:
+        return {
             'Cart1': self.cart_positions.get('Cart1', 1),
             'Cart2': self.cart_positions.get('Cart2', 1),
             'Cart3': self.cart_positions.get('Cart3', 1),
             'Cart4': self.cart4_position,
         }
 
+    def _generate_sensor_data(self, delta_seconds: float = 0.0):
+        """
+        生成传感器数据并写入JSON文件
+        使用控制策略生成器生成数据
+        """
         # 使用控制策略生成器生成数据
         self.control_strategy_generator.generate_all_data(
             active_routes=self.active_routes,
             hoppers=self.hoppers,
             conveyors=self.conveyors,
             materials=self.active_materials,
-            cart_positions=cart_positions,
+            cart_positions=self._get_cart_positions_dict(),
             small_bins=self.small_bins,
             silo_compartments=self.view.silo_compartments if hasattr(self, 'view') and self.view else None,
             delta_seconds=delta_seconds
