@@ -253,6 +253,7 @@ def _build_laser_sensors():
     return result
 
 LASER_SENSORS = _build_laser_sensors()
+MATERIAL_LASER_SENSORS = pos.MATERIAL_LASER_SENSORS
 
 # =============================================================================
 # 运料小车传感器配置
