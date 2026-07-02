@@ -670,6 +670,10 @@ class FeedingMasterController:
         route_id = self._pick_route_for_bin(belt_id, first_bin)
         print(f"[FM] {belt_id} pick {first_bin} → {route_id}", flush=True)
         if not route_id:
+            # D6: 上料点物料不可用，跳过该仓继续下一个
+            if belt_id == 'D6':
+                self.scheduler.pop_next_bin(belt_id)
+                print(f"[FM] D6 跳过 {first_bin} (上料点物料不可用)，尝试下一仓", flush=True)
             return
 
         self.scheduler.pop_next_bin(belt_id)
