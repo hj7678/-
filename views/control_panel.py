@@ -426,8 +426,13 @@ class ControlPanel(QWidget):
             'feed3_10mm': 'feed3',
         }
 
-        # 创建每个激光传感器的设置（通用 + 物料级别）
-        all_laser_items = list(config.LASER_SENSORS.items())
+        # 创建每个激光传感器的设置（通用传感器跳过有物料级别的）
+        material_feeds = set(info['feed_point'] for info in config.MATERIAL_LASER_SENSORS.values())
+        all_laser_items = []
+        for key, info in config.LASER_SENSORS.items():
+            feed_point = info.get('feed_point', '')
+            if feed_point not in material_feeds:
+                all_laser_items.append((key, info))
         for key, info in config.MATERIAL_LASER_SENSORS.items():
             all_laser_items.append((key, info))
 
