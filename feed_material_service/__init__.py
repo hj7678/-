@@ -15,6 +15,8 @@ BIN_MATERIAL_SUFFIX = {
 
 # 上料点 → 物料类型列表
 FEED_POINT_MATERIALS = {
+    'feed1_1': ['stone'],
+    'feed1_2': ['stone'],
     'feed2_2': ['stone', '10mm', '20mm'],
     'feed3': ['stone', '10mm'],
 }
@@ -28,7 +30,9 @@ SILO_MATERIAL = {
 
 
 def _state_key(feed_point: str, material: str) -> str:
-    return f"{feed_point}_{material}"
+    """生成物料状态 key。单物料上料点直接用 feed_point 名"""
+    mats = FEED_POINT_MATERIALS.get(feed_point, [])
+    return feed_point if len(mats) <= 1 else f"{feed_point}_{material}"
 
 
 class FeedMaterialService:
