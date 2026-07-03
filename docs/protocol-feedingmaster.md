@@ -82,9 +82,18 @@
       "route1": "P1-1", "route5": "S3"
     },
     "laser_sensor_states": {
-      "feed1_1": true, "feed1_2": true, "feed2_1": true, "feed2_2": true, "feed3": true
+      "feed1_1": true, "feed1_2": true, "feed2_1": true,
+      "feed2_2_stone": true, "feed2_2_10mm": true, "feed2_2_20mm": true,
+      "feed3_stone": true, "feed3_10mm": true
     },
-    "maintenance_bins": ["P1-3"]
+    "feed_material_states": {
+      "feed1_1": true, "feed1_2": true, "feed2_1": true,
+      "feed2_2_stone": true, "feed2_2_10mm": true, "feed2_2_20mm": true,
+      "feed3_stone": true, "feed3_10mm": true
+    },
+    "maintenance_bins": ["P1-3"],
+    "d7_feed_override": null,
+    "d9_feed_override": null
   }
 }
 ```
@@ -189,11 +198,26 @@
 
 **`route_targets`** — 每条路线当前目标料仓 ID。P 仓格式 `P{列}-{行}`（如 `P1-1`），S 仓格式 `S{编号}`（如 `S3`，编号 1-12）。
 
-**`laser_sensor_states`** — 5 个上料点激光传感器，`true`=有料，`false`=无料。FM 选路线时跳过无料上料点（`silo_out` 默认有料）。
+**`laser_sensor_states`** — 8 个上料点激光传感器（物料级别），`true`=有料，`false`=无料。FM 选路线时跳过无料上料点（`silo_out` 默认有料）。
+
+| 键 | 上料点 | 物料 |
+|-----|---------|------|
+| `feed1_1` | 上料点1-1 | 石粉 |
+| `feed1_2` | 上料点1-2 | 石粉 |
+| `feed2_1` | 上料点2-1 | 石粉 |
+| `feed2_2_stone` | 上料点2-2 | 石粉 |
+| `feed2_2_10mm` | 上料点2-2 | 10mm碎石 |
+| `feed2_2_20mm` | 上料点2-2 | 20mm碎石 |
+| `feed3_stone` | 上料点3 | 石粉 |
+| `feed3_10mm` | 上料点3 | 10mm碎石 |
+
+**`feed_material_states`** — 上料点原料状态（来自 `feed_material_service` TCP 9010），与 `laser_sensor_states` 键相同，表示服务端记录的原料状态。FM 通过 TCP 查询此服务端判断上料点物料可用性。
 
 **`maintenance_bins`** — 检修中的料仓 ID 列表，FM 传给调度引擎排除。
 
-**`d7_feed_override`** — D7 用户在 UI 选择的上料点（`feed1_1`/`feed1_2`/`feed2_1`），FM 只激活该上料点的路线。
+**`d7_feed_override`** — D7 用户在 UI 选择的上料点（`feed1_1`/`feed1_2`/`feed2_1`），FM 只激活该上料点的路线。未选择时值为 `null`。
+
+**`d9_feed_override`** — D9 用户在 UI 选择的上料点（`feed2_2`/`silo_out`），FM 只激活该上料点的路线。未选择时值为 `null`。
 
 ---
 
@@ -393,7 +417,7 @@ HMI 显示格式：`[类别] ID: 故障名`，如 `[接近开关] S-D13: 卡低`
 | route5 | ⑤ | E6,E7,E9,D5,D6 | hopper2,hopper6,hopper7 | Cart4 | D6 |
 | route6 | ⑥ | D13,D2,D4,D8 | hopper5 | Cart2 | D8 |
 | route7 | ⑦ | D1,D3,D9 | — | Cart3 | D9 |
-| route8 | ⑧ | D4,D2,D8 | — | Cart2 | D8 |
+| route8 | ⑧ | D2,D4,D8 | hopper5 | Cart2 | D8 |
 
 ### 小车→皮带
 
