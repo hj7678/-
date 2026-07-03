@@ -547,8 +547,15 @@ class FeedingMasterController:
                             old_route = rid
                             break
                 if old_route:
+                    old_convs = set(config.FEED_ROUTES.get(old_route, {}).get('conveyors', []))
+                    new_convs = set(config.FEED_ROUTES.get(route_id2, {}).get('conveyors', []))
+                    non_shared = old_convs - new_convs
                     self._do_switch(old_route, route_id2, nxt)
-                    print(f"[FM] {belt_id} 自动续料 {old_route}→{route_id2} → {nxt}", flush=True)
+                    # 停止旧路线非共用皮带
+                    for cid in non_shared:
+                        commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                        new_cmds[f"belt:{cid}"] = 'stop'
+                    print(f"[FM] {belt_id} 自动续料 {old_route}→{route_id2} → {nxt} (停非共用: {non_shared})", flush=True)
                 elif self.activate_route(route_id2, nxt):
                     print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
