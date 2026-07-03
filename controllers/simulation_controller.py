@@ -38,9 +38,6 @@ from shared.route_state_manager import RouteState, get_route_state_manager, Rout
 from control_strategy_generator import ControlStrategyGenerator, get_control_strategy_generator
 from tcp_data_sender import TcpDataSender
 from udp_binary_sender import UdpBinarySender
-from tcp_diagnosis import DiagnosisEngine
-from controllers.fault_diagnosis_adapter import FaultDiagnosisAdapter
-from controllers.tcp_diagnosis_client import TcpDiagnosisClient
 from controllers.tcp_scheduling_client import TcpSchedulingClient
 from scheduling.bin_config import BELT_BINS
 from shared.state_transition_engine import StateTransitionEngine
@@ -118,11 +115,6 @@ class SimulationController(QObject):
         self.fault_diagnosis = SensorFaultDiagnosis()
         self.diagnosis_result: List[Tuple[str, str]] = []
 
-        # 独立诊断引擎 + 适配器（跨传感器一致性故障检测）
-        self.diagnosis_engine = DiagnosisEngine()
-        self.fault_diagnosis_adapter = FaultDiagnosisAdapter(self.diagnosis_engine)
-        self._accumulated_diagnosis: Dict[str, tuple] = {}  # key → (insert_time, DiagnosisResult)
-
         # 传感器数据管理器（读写JSON文件）
         self.sensor_data_manager = get_data_manager()
 
@@ -145,7 +137,6 @@ class SimulationController(QObject):
         self.udp_sender = UdpBinarySender()
 
         # TCP 诊断客户端（远程诊断服务 :8890）
-        self._tcp_diagnosis_client = None
         # TCP 调度客户端（调度算法服务 :8891/:8892/:8893）
         self._tcp_scheduling_client = None
         # FeedingMaster 桥接 (仿真 → 上料主控)
@@ -157,8 +148,6 @@ class SimulationController(QObject):
         self._fm_safe_mode = False
         # Stock Management 拉回的料位 (用于 HMI 显示，不影响 small_bins 仿真逻辑)
         self.display_levels: Dict[str, float] = {}
-        # 诊断模式："local" / "tcp"
-        self._diagnosis_mode = "local"
         # 最新调度结果 belt_id → dict
         self._tcp_schedules: Dict[str, dict] = {}
 
@@ -862,8 +851,6 @@ class SimulationController(QObject):
         # 重置故障诊断系统
         self.fault_diagnosis.clear_all_faults()
         self.diagnosis_result.clear()
-        self._accumulated_diagnosis.clear()
-        self.diagnosis_engine.clear_history()
         # 持久化状态（reset_all_data会清空JSON，需提前保存）
         _saved_cart_positions = dict(self.cart_positions)
         _saved_cart_divert = dict(self.cart_divert)
@@ -1076,8 +1063,6 @@ class SimulationController(QObject):
         self._update_materials(delta_seconds)
         self._update_sensors()
         self._update_cart_positions(delta_seconds)
-        if self.active_routes:
-            self._run_fault_diagnosis()
         self._check_alarms()
 
         self._update_bin_consumption(delta_seconds)
@@ -1545,9 +1530,6 @@ class SimulationController(QObject):
         }
         self.tcp_sender.update_data(data)
 
-        if self._tcp_diagnosis_client is not None:
-            self._tcp_diagnosis_client.update_data(data)
-
         # 调度数据推送已移至 push_scheduling_data()（由 main_window 定时调用）
         # 确保仿真未启动时也能正常收发调度数据
 
@@ -1605,48 +1587,6 @@ class SimulationController(QObject):
         return self.udp_sender._active
 
     # ============ TCP 诊断客户端 ============
-
-    def set_diagnosis_mode(self, mode: str):
-        self._diagnosis_mode = mode
-
-    def start_tcp_diagnosis(self):
-        if self._tcp_diagnosis_client is not None:
-            return
-        self._tcp_diagnosis_client = TcpDiagnosisClient()
-        self._tcp_diagnosis_client.results_received.connect(self._on_tcp_diagnosis_results)
-        self._tcp_diagnosis_client.start()
-
-    def stop_tcp_diagnosis(self):
-        if self._tcp_diagnosis_client is None:
-            return
-        self._tcp_diagnosis_client.stop()
-        self._tcp_diagnosis_client = None
-
-    def _on_tcp_diagnosis_results(self, results):
-        now = self.total_runtime
-        for r in results:
-            if r.confidence >= 0.7:
-                key = f"{r.sensor_id}:{r.fault_type}"
-                self._accumulated_diagnosis[key] = (now, r)
-                self._raise_alarm('SENSOR_FAULT', r.description, alarm_key=key)
-
-        stale_keys = [
-            k for k, (ts, _) in self._accumulated_diagnosis.items()
-            if now - ts > 35.0
-        ]
-        for k in stale_keys:
-            del self._accumulated_diagnosis[k]
-
-        accumulated = [r for _, r in self._accumulated_diagnosis.values()]
-        self.diagnosis_result = [
-            (r.sensor_id, r.description) for r in accumulated
-        ]
-        self._full_diagnosis_results = accumulated
-
-    def get_tcp_diagnosis_status(self) -> bool:
-        if self._tcp_diagnosis_client is None:
-            return False
-        return self._tcp_diagnosis_client.is_connected
 
     # ============ 手动/自动模式切换 ============
 
@@ -2708,47 +2648,6 @@ class SimulationController(QObject):
                 if alarm_key not in self.active_alarms:
                     self._raise_alarm('BELT_SLIP', f"{hopper.name}相关皮带打滑")
 
-    def _run_fault_diagnosis(self):
-        """运行故障诊断——使用独立诊断引擎"""
-        if self._diagnosis_mode == "tcp":
-            return
-        cart_data = self.sensor_data_manager.read_cart_sensors()
-        speed_data = self.sensor_data_manager.read_conveyor_speeds()
-
-        results = self.fault_diagnosis_adapter.run_diagnosis(
-            sensors=self.sensors,
-            hoppers=self.hoppers,
-            conveyors=self.conveyors,
-            active_routes=self.active_routes,
-            route_state_manager=self.route_state_manager,
-            cart_data=cart_data,
-            speed_data=speed_data,
-            total_runtime=self.total_runtime,
-        )
-
-        now = self.total_runtime
-
-        # 累积结果：新检测到的故障更新 dict，保持持续显示
-        for r in results:
-            if r.confidence >= 0.7:
-                key = f"{r.sensor_id}:{r.fault_type}"
-                self._accumulated_diagnosis[key] = (now, r)
-                self._raise_alarm('SENSOR_FAULT', r.description, alarm_key=key)
-
-        # 清除超过35秒未重新确认的结果（引擎去重周期为30秒）
-        stale_keys = [
-            k for k, (ts, _) in self._accumulated_diagnosis.items()
-            if now - ts > 35.0
-        ]
-        for k in stale_keys:
-            del self._accumulated_diagnosis[k]
-
-        accumulated = [r for _, r in self._accumulated_diagnosis.values()]
-        self.diagnosis_result = [
-            (r.sensor_id, r.description) for r in accumulated
-        ]
-        self._full_diagnosis_results = accumulated
-
     def _build_route_hopper_sensor_map(self) -> Dict[str, Dict[str, Tuple[str, str]]]:
         """
         构建路线到中转斗传感器的映射
@@ -2833,8 +2732,6 @@ class SimulationController(QObject):
         """清除所有故障设置"""
         self.fault_diagnosis.clear_all_faults()
         self.diagnosis_result.clear()
-        self._accumulated_diagnosis.clear()
-        self.diagnosis_engine.clear_history()
         # 清除所有中转斗故障
         for hopper in self.hoppers.values():
             hopper.switch_fault_mode = None
@@ -2848,8 +2745,6 @@ class SimulationController(QObject):
     def reset_sensor_data(self):
         """重置传感器数据到初始状态（不停止仿真）"""
         self.sensor_data_manager.reset_all_data()
-        self._accumulated_diagnosis.clear()
-        self.diagnosis_engine.clear_history()
         self.diagnosis_result.clear()
         for conv_id in config.CONVEYOR_STATES:
             config.CONVEYOR_STATES[conv_id] = None
@@ -2906,8 +2801,6 @@ class SimulationController(QObject):
 
         # 清除所有现有故障
         self.fault_diagnosis.clear_all_faults()
-        self._accumulated_diagnosis.clear()
-        self.diagnosis_engine.clear_history()
         for hopper in self.hoppers.values():
             hopper.switch_fault_mode = None
             hopper.weight_fault_mode = None

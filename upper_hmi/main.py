@@ -30,8 +30,7 @@ def main():
     # 隐藏不需要的按钮(FM接管+桥接已默认启用)
     if hasattr(window, 'top_bridge_btn'): window.top_bridge_btn.hide()
     if hasattr(window, 'top_fm_btn'): window.top_fm_btn.hide()
-    # FM接管: 诊断模式固定TCP(结果由FM推送), 隐藏切换按钮
-    window.controller.set_diagnosis_mode("tcp")
+    # FM接管: 诊断结果由FM推送
     if hasattr(window.control_panel, 'diag_mode_layout'):
         for i in range(window.control_panel.diag_mode_layout.count()):
             w = window.control_panel.diag_mode_layout.itemAt(i).widget()

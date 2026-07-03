@@ -531,10 +531,7 @@ class MainWindow(QMainWindow):
             self.operation_log.add_belt_log(belt_id, ' '.join(parts), '#8B949E')
 
     def _poll_tcp_status(self):
-        """轮询 TCP 诊断/调度客户端连接状态，更新 UI + 顶栏同步"""
-        if hasattr(self.controller, 'get_tcp_diagnosis_status'):
-            diag_connected = self.controller.get_tcp_diagnosis_status()
-            self.control_panel.set_diagnosis_tcp_status(diag_connected)
+        """轮询 TCP 调度客户端连接状态，更新 UI + 顶栏同步"""
         if hasattr(self.controller, 'get_tcp_scheduling_status'):
             sched_status = self.controller.get_tcp_scheduling_status()
             self.control_panel.set_scheduling_tcp_status(sched_status)
@@ -712,10 +709,8 @@ class MainWindow(QMainWindow):
         pass
 
     def _on_diagnosis_tcp_toggled(self, enabled: bool):
-        if enabled:
-            self.controller.start_tcp_diagnosis()
-        else:
-            self.controller.stop_tcp_diagnosis()
+        # FM 模式：诊断结果由 FM 推送，不启动本地诊断
+        pass
 
     def _on_consumption_toggled(self, active: bool):
         self.controller.toggle_consumption(active)
