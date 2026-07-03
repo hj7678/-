@@ -19,6 +19,7 @@ BIN_MATERIAL_SUFFIX = {
 FEED_POINT_MATERIALS = {
     'feed1_1': ['stone'],
     'feed1_2': ['stone'],
+    'feed2_1': ['stone'],
     'feed2_2': ['stone', '10mm', '20mm'],
     'feed3': ['stone', '10mm'],
 }
