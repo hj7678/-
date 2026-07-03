@@ -28,8 +28,8 @@ CART_TO_BELT = {'Cart1': 'D7', 'Cart2': 'D8', 'Cart3': 'D9', 'Cart4': 'D6'}
 BELT_TO_CART = {v: k for k, v in CART_TO_BELT.items()}
 
 # 调度冷却
-SCHEDULE_COOLDOWN = 120.0      # 普通请求冷却
-EMERGENCY_COOLDOWN = 10.0      # 紧急请求冷却
+SCHEDULE_COOLDOWN = 180.0      # 普通请求冷却
+EMERGENCY_COOLDOWN = 180.0      # 紧急请求冷却
 EMERGENCY_THRESHOLD_TONS = 11.0  # 紧急阈值 (吨)
 IDLE_THRESHOLD_TONS = 70.0      # 空闲阈值 (吨) — D7/D8/D9
 D6_IDLE_THRESHOLD_TONS = 336.0  # D6 空闲阈值 (420*0.8)
