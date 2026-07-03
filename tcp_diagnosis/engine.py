@@ -604,24 +604,10 @@ class DiagnosisEngine:
                 else:
                     self._hopper_switch_fault_start.pop(f"{hid}:switch_open_in_clearing", None)
 
-        # 共享状态：接近开关取并集 → MOVING_TO_TARGET不检查，共享状态也不检查
+        # 清空阶段：接近开关不设置卡高诊断
         if in_shared:
             for sid in route.proximity_sensor_ids:
                 self._proximity_fault_start.pop(f"{sid}:stuck_high_moving", None)
-        else:
-            for sid in route.proximity_sensor_ids:
-                sensor = snapshot.proximity_sensors.get(sid)
-                if sensor and sensor.state:
-                    clearing_start = self._route_state_since.get(route.route_id, ts)
-                    lit_dur = self._true_duration_since(sid, clearing_start, ts) / 1000.0
-                    if lit_dur > CLEARING_PROXIMITY_MAX_LIT_S:
-                        results.append(DiagnosisResult(
-                            sensor_id=sid,
-                            fault_type="stuck_high",
-                            confidence=0.85,
-                            description=f"接近开关{sid}故障(卡高): 清空阶段点亮{lit_dur:.1f}s超过{CLEARING_PROXIMITY_MAX_LIT_S}s",
-                            category="proximity",
-                        ))
 
         return results
 
