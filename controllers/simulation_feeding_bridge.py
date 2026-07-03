@@ -291,9 +291,11 @@ class SimulationFeedingBridge(QObject):
                         if info.get('target_bin'):
                             ctx.target_bin = info['target_bin']
                             ctrl.route_to_bin[rid] = info['target_bin']
+                            print(f"[桥接] 路线激活: {rid} → {info['target_bin']} (state={new_s.value if new_s else '?'})", flush=True)
                         elif new_s == RouteState.IDLE:
                             # 路线停用：清除 route_to_bin 映射，防止 UI 残留小车
                             ctrl.route_to_bin.pop(rid, None)
+                            print(f"[桥接] 路线关闭: {rid} → 清除 route_to_bin", flush=True)
                         if info.get('cart_target') is not None:
                             ctx.cart_target_position = info['cart_target']
                         ctx.cart_moving = info.get('cart_moving', False)
