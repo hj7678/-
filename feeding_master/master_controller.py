@@ -882,12 +882,18 @@ class FeedingMasterController:
         return None
 
     def _switch_route_phase1(self, old_route_id: str, new_route_id: str, target_bin: str):
-        """阶段1: 停止旧上料点，旧路线设IDLE但不移除（小车保留），等待判定传感器清空"""
+        """阶段1: 停止旧上料点，旧路线设IDLE，等待判定传感器清空"""
         old_ctx = self.route_manager.get_route_context(old_route_id)
         if not old_ctx:
             return
         old_fp = old_ctx.feed_point or config.FEED_ROUTES.get(old_route_id, {}).get('feed_point', '')
         old_ctx.state = RouteState.IDLE
+        old_ctx.target_bin = ''           # 清除目标仓，确保桥接收到IDLE时移除route_to_bin
+        old_ctx.cart_target_position = 0  # 清除小车目标
+        old_ctx.cart_moving = False
+        if not hasattr(self, '_deactivated_routes'):
+            self._deactivated_routes = set()
+        self._deactivated_routes.add(old_route_id)  # 加入deactivated，route_info会包含
         if old_fp:
             self._pending_feed_stop = old_fp
         old_convs = set(config.FEED_ROUTES.get(old_route_id, {}).get('conveyors', []))
