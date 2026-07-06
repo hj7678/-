@@ -352,9 +352,15 @@ class SimulationFeedingBridge(QObject):
                     ctrl.set_feed_point_active(cmd["id"], False)
 
             elif device == "cart":
-                    print(f"[桥接-debug] 收到 cart 命令: {dev_id} → target={cmd.get('target')} route={cmd.get('route_id')}", flush=True)
                     target = cmd.get("target")
                     if target is not None:
+                        # 仅当目标变化时打印日志
+                        last_target = getattr(self, '_last_cart_target', {}).get(dev_id)
+                        if last_target != target:
+                            print(f"[桥接] {dev_id} 收到移动命令: →{target} route={cmd.get('route_id')}", flush=True)
+                            if not hasattr(self, '_last_cart_target'):
+                                self._last_cart_target = {}
+                            self._last_cart_target[dev_id] = target
                         if dev_id == 'Cart4':
                             if ctrl.cart4_position != target:
                                 ctrl.cart4_target_position = target
@@ -369,7 +375,9 @@ class SimulationFeedingBridge(QObject):
                                 grids = abs(target - current_pos)
                                 duration = grids * self._cart_move_per_grid
                                 self._cart_moves[dev_id] = (target, time.time(), duration)
-                                print(f"[桥接] {dev_id} 开始移动: {current_pos}→{target} ({grids}格={duration:.0f}s)", flush=True)
+                                # 仅当目标变化时打印
+                                if last_target != target:
+                                    print(f"[桥接] {dev_id} 开始移动: {current_pos}→{target} ({grids}格={duration:.0f}s)", flush=True)
                                 if dev_id == 'Cart1': ctrl._cart1_is_moving = True
                                 if dev_id == 'Cart2': ctrl._cart2_is_moving = True
                                 if dev_id == 'Cart3': ctrl._cart3_is_moving = True
