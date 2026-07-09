@@ -325,13 +325,22 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
     {"device": "cart", "id": "Cart1", "action": "move", "target": 3},
     {"device": "cart", "id": "Cart4", "action": "move", "target": 6}
   ],
+  "schedule": {
+    "executing_bin": {"D6": "S3", "D7": "P1-1", "D8": "", "D9": ""},
+    "sequences": {
+      "D7": ["P1-2", "P1-3", "P1-4"],
+      "D8": ["P2-1", "P2-2"],
+      "D9": [],
+      "D6": []
+    }
+  },
   "diagnosis": [
     {"sensor_id": "S-D13", "fault_type": "stuck_low", "confidence": 0.85, "description": "接近开关S-D13: 卡低", "category": "proximity"}
   ]
 }
 ```
 
-**真实 HMI 只需解析 `commands` + `diagnosis`。** 以下 `route_states` 和 `schedule` 为仿真专用，真实 HMI 可忽略：
+**真实 HMI 解析 `commands` + `schedule` + `diagnosis`。** 以下 `route_states` 为仿真专用，真实 HMI 可忽略：
 
 ```json
 {
@@ -341,10 +350,6 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
       "assigned_hoppers": ["hopper1", "hopper3", "hopper4"], "feeding_start_time": 12.5, "clearing_start_time": 0.0},
     "route2": {"state": "idle"},
     ...
-  },
-  "schedule": {
-    "executing_bin": {"D6": "S3", "D7": "P1-1", "D8": "", "D9": ""},
-    "sequences": {"D7": ["P1-2", "P1-3"], "D8": ["P2-1", "P2-2"], "D9": [], "D6": []}
   }
 }
 ```
@@ -390,7 +395,7 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 `state: "idle"` 的路线表示已停用，上位机应从 `active_routes` 中移除该路线。停用的路线只含 `state` 字段。
 
-#### 2.1.3 `schedule` — 🟡 仿真专用
+#### 2.1.3 `schedule` — 调度序列
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
