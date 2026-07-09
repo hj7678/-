@@ -205,6 +205,7 @@ class FeedingMasterController:
 
     def _run(self):
         last_tick = time.time()
+        last_level_report = 0.0
         while self._running:
             now = time.time()
             delta = now - last_tick
@@ -215,6 +216,16 @@ class FeedingMasterController:
                 self._tick(delta)
             except Exception as e:
                 print(f"[FeedingMaster] tick 异常: {e}", file=sys.stderr)
+
+            # 每5s发送料位报告
+            if self._total_runtime - last_level_report >= 5.0:
+                last_level_report = self._total_runtime
+                try:
+                    levels = self.stock.get_all_levels()
+                    if levels:
+                        self.server.send_levels(levels)
+                except Exception as e:
+                    print(f"[FeedingMaster] 料位发送异常: {e}", file=sys.stderr)
 
             elapsed = time.time() - now
             sleep_time = max(0, self._tick_ms / 1000.0 - elapsed)

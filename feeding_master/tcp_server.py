@@ -87,6 +87,14 @@ class FeedingMasterServer:
         }
         self._send(payload)
 
+    def send_levels(self, levels: dict):
+        """推送料位数据给上位机 (每5s)"""
+        payload = {
+            "type": "level_report",
+            "levels": levels,
+        }
+        self._send(payload)
+
     def _send(self, data: dict):
         with self._upper_lock:
             sock = self._upper_socket

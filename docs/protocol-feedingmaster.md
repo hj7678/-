@@ -420,6 +420,29 @@ HMI 显示格式：`[类别] ID: 故障名`，如 `[接近开关] S-D13: 卡低`
 
 ---
 
+### 2.2 level_report — 料位报告
+
+频率：5s（独立于 command 消息）
+
+```json
+{
+  "type": "level_report",
+  "levels": [
+    {"bin_id": "P1-1", "stock": 45.2, "capacity": 100.0},
+    {"bin_id": "P1-2", "stock": 62.0, "capacity": 100.0},
+    {"bin_id": "S1",   "stock": 180.0, "capacity": 420.0}
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `bin_id` | string | 料仓 ID（P1-1~P4-7 共28个, S1~S12 共12个, 总计40个） |
+| `stock` | float | 当前库存（吨） |
+| `capacity` | float | 料仓容量（吨） |
+
+---
+
 ## 三、路线与设备对应关系
 
 ### 路线配置（config.FEED_ROUTES）
