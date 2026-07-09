@@ -144,7 +144,12 @@ class ScheduleManager:
                 cart2_bin = self._executing_bin.get('D8', '') if hasattr(self, '_executing_bin') else ''
                 if cart2_bin and cart2_bin in cross_ids:
                     cross_ids = [b for b in cross_ids if b != cart2_bin]
-                bin_ids = cross_ids
+                # 兼职调度：只取料位最低的单个仓，不生成序列
+                if cross_ids:
+                    lowest = self.stock.get_levels(cross_ids)
+                    if lowest:
+                        lowest.sort(key=lambda b: b.get('level_tons', 0))
+                        bin_ids = [lowest[0]['bin_id']]
 
         levels = self.stock.get_levels(bin_ids)
         result = [
