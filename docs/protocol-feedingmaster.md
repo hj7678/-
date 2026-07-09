@@ -322,8 +322,8 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
     {"device": "hopper", "id": "hopper3", "action": "close"},
     {"device": "feed_point", "id": "feed1_1", "action": "start"},
     {"device": "silo_gate", "id": "silo_gate_S3", "action": "open"},
-    {"device": "cart", "id": "Cart1", "action": "move", "target": 3},
-    {"device": "cart", "id": "Cart4", "action": "move", "target": 6}
+    {"device": "cart", "id": "Cart1", "action": "move", "target": 3, "left_divert": true, "right_divert": false},
+    {"device": "cart", "id": "Cart4", "action": "move", "target": 6, "left_divert": false, "right_divert": true}
   ],
   "schedule": {
     "executing_bin": {"D6": "S3", "D7": "P1-1", "D8": "", "D9": ""},
@@ -362,7 +362,14 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 **中转斗** (`device: "hopper"`): `action`: `"open"` | `"close"`。ID: `hopper1` ~ `hopper7`。
 
-**小车** (`device: "cart"`): `action`: `"move"`。附加字段：`target`（目标位置 int）。ID: `Cart1`, `Cart2`, `Cart3`, `Cart4`。真实 HMI 不需要 `route_id` 字段。
+**小车** (`device: "cart"`): `action`: `"move"`。附加字段：`target`（目标位置 int），`left_divert`（bool，左分料器），`right_divert`（bool，右分料器）。ID: `Cart1`, `Cart2`, `Cart3`, `Cart4`。真实 HMI 不需要 `route_id` 字段。
+
+| ID | 皮带 | 左分料 | 右分料 | 说明 |
+|-----|------|:---:|:---:|------|
+| Cart1 | D7 | 始终 true | 始终 false | 只负责 P1 |
+| Cart2 | D8 | P2=true | P3=true | 目标列决定 |
+| Cart3 | D9 | 始终 false | 始终 true | 只负责 P4 |
+| Cart4 | D6 | S1~S6=true | S7~S12=true | 目标仓决定 |
 
 **上料点** (`device: "feed_point"`): `action`: `"start"` | `"stop"`。FM 在进入 FEEDING 时发送 `start`，离开 FEEDING 时发送 `stop`。
 
