@@ -12,6 +12,7 @@
 | 重连 | 上位机自动重连（每 3s），先启 HMI 后启 FM 也能正常工作 |
 | 通信模式 | 全双工 |
 | 序列号 | FM 下行消息含递增 `seq` 字段，HMI 检测跳跃以发现丢包 |
+| 必需字段 | 真实 HMI 只需发送传感器原始数据（接近开关、斗、小车、皮带、激光），FM 自行管理路线状态 |
 
 ---
 
@@ -86,11 +87,6 @@
       "feed2_2_stone": true, "feed2_2_10mm": true, "feed2_2_20mm": true,
       "feed3_stone": true, "feed3_10mm": true
     },
-    "feed_material_states": {
-      "feed1_1": true, "feed1_2": true, "feed2_1": true,
-      "feed2_2_stone": true, "feed2_2_10mm": true, "feed2_2_20mm": true,
-      "feed3_stone": true, "feed3_10mm": true
-    },
     "silo_gate_states": {
       "S1": false, "S2": false, "S3": false, "S4": false,
       "S5": false, "S6": false, "S7": false, "S8": false,
@@ -98,7 +94,19 @@
     },
     "maintenance_bins": ["P1-3"],
     "d7_feed_override": null,
-    "d9_feed_override": null
+    "d9_feed_override": null,
+
+    "feed_material_states": {/* 仿真专用 */},
+    "active_routes": ["route1", "route5"],
+    "route_states": {
+      "route1": "feeding", "route2": "idle", "route3": "idle",
+      "route4": "idle", "route5": "moving_to_target",
+      "route6": "idle", "route7": "idle", "route8": "idle"
+    },
+    "scheduling_active": true,
+    "route_targets": {
+      "route1": "P1-1", "route5": "S3"
+    }
   }
 }
 ```
@@ -186,9 +194,9 @@
 | E 系列 | E1, E2, E4, E5, E6, E7, E8, E9, E10 |
 | D 系列 | D1, D2, D3, D4, D5, D6, D7, D8, D9, D13 |
 
-**`active_routes`** — 当前活跃路线（`string[]`），路线 ID: `route1` ~ `route8`。
+**`active_routes`** — 🟡 仿真专用。当前活跃路线（`string[]`），路线 ID: `route1` ~ `route8`。FM 自行管理路线激活状态，真实 HMI 不需要发送此字段。
 
-**`route_states`** — 8 条路线状态（`string`），枚举值：
+**`route_states`** — 🟡 仿真专用。8 条路线状态（`string`），枚举值：
 
 | 值 | 含义 |
 |------|------|
@@ -199,9 +207,9 @@
 | `waiting` | 清空完成，等待续料 |
 | `standby` | 节能待机 |
 
-**`scheduling_active`** — `bool`，UI"调度服务"按钮状态。
+**`scheduling_active`** — 🟡 仿真专用。`bool`，UI"调度服务"按钮状态。真实 HMI 可用 `scheduling_enabled` 布尔值替代。
 
-**`route_targets`** — 每条路线当前目标料仓 ID。P 仓格式 `P{列}-{行}`（如 `P1-1`），S 仓格式 `S{编号}`（如 `S3`，编号 1-12）。
+**`route_targets`** — 🟡 仿真专用。每条路线当前目标料仓 ID。FM 自行管理路线目标，真实 HMI 不需要发送此字段。
 
 **`laser_sensor_states`** — 8 个上料点激光传感器（物料级别），`true`=有料，`false`=无料。FM 选路线时跳过无料上料点（`silo_out` 默认有料）。
 
@@ -216,7 +224,7 @@
 | `feed3_stone` | 上料点3 | 石粉 |
 | `feed3_10mm` | 上料点3 | 10mm碎石 |
 
-**`feed_material_states`** — 上料点原料状态（来自 `feed_material_service` TCP 9010），与 `laser_sensor_states` 键相同，表示服务端记录的原料状态。FM 通过 TCP 查询此服务端判断上料点物料可用性。
+**`feed_material_states`** — 🟡 仿真专用。上料点原料状态（来自 `feed_material_service` TCP 9010），与 `laser_sensor_states` 键相同。FM 通过 TCP 直接查询服务端，真实 HMI 不需要发送此字段。
 
 **`silo_gate_states`** — 12 个高位储料仓卸料门状态，`true`=开，`false`=关。ID 为 `S1`~`S12`。当 `silo_out` 作为上料点时，FM 下发 `silo_gate open` 打开对应仓门。
 
@@ -225,6 +233,14 @@
 **`d7_feed_override`** — D7 用户在 UI 选择的上料点（`feed1_1`/`feed1_2`/`feed2_1`），FM 只激活该上料点的路线。未选择时值为 `null`。
 
 **`d9_feed_override`** — D9 用户在 UI 选择的上料点（`feed2_2`/`silo_out`），FM 只激活该上料点的路线。未选择时值为 `null`。
+
+#### 字段分类
+
+| 类别 | 字段 | 真实 HMI 必填 |
+|------|------|:---:|
+| 🔴 必需 | `proximity`, `hopper_states`, `hopper_weights`, `cart_positions`, `cart_moving`, `cart_divert`, `belt_states`, `laser_sensor_states`, `silo_gate_states` | 是 |
+| 🟢 推荐 | `belt_speeds`, `cart_limits`, `maintenance_bins`, `d7_feed_override`, `d9_feed_override` | 否 |
+| 🟡 仿真专用 | `active_routes`, `route_states`, `route_targets`, `scheduling_active`, `feed_material_states` | 否 |
 
 ---
 
