@@ -659,8 +659,15 @@ class FeedingMasterController:
             self._pending_route_switch = None
             old_rid, new_rid, tgt_bin = pending_switch
             self._switch_route_phase1(old_rid, new_rid, tgt_bin)
-        # 始终推送（即使无指令，也发送路线状态+调度序列保证HMI实时更新）
-        self.server.send_commands(commands, route_info, sched_info, diag)
+        # 指令变化时推送，避免每帧(50ms)高频发送相同指令
+        last_cmds = getattr(self, '_last_sent_commands', [])
+        last_sched = getattr(self, '_last_sent_sched', {})
+        cmds_changed = (commands != last_cmds)
+        sched_changed = (sched_info != last_sched)
+        if cmds_changed or sched_changed or diag:
+            self._last_sent_commands = list(commands)
+            self._last_sent_sched = dict(sched_info) if sched_info else {}
+            self.server.send_commands(commands, route_info, sched_info, diag)
         if hasattr(self, '_deactivated_routes'):
             self._deactivated_routes.clear()
 
