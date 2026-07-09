@@ -72,12 +72,7 @@
       "D1": 0.0, "D2": 0.0, "D3": 0.0, "D4": 0.0, "D5": 0.0,
       "D6": 0.0, "D7": 0.0, "D8": 0.0, "D9": 0.0, "D13": 0.0
     },
-    "active_routes": ["route1", "route5"],
-    "route_states": {
-      "route1": "feeding", "route2": "idle", "route3": "idle",
-      "route4": "idle", "route5": "moving_to_target",
-      "route6": "idle", "route7": "idle", "route8": "idle"
-    },
+
     "scheduling_active": true,
     "route_targets": {
       "route1": "P1-1", "route5": "S3"
@@ -330,36 +325,26 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
     {"device": "cart", "id": "Cart1", "action": "move", "target": 3},
     {"device": "cart", "id": "Cart4", "action": "move", "target": 6}
   ],
+  "diagnosis": [
+    {"sensor_id": "S-D13", "fault_type": "stuck_low", "confidence": 0.85, "description": "接近开关S-D13: 卡低", "category": "proximity"}
+  ]
+}
+```
+
+**真实 HMI 只需解析 `commands` + `diagnosis`。** 以下 `route_states` 和 `schedule` 为仿真专用，真实 HMI 可忽略：
+
+```json
+{
   "route_states": {
-    "route1": {
-      "state": "feeding",
-      "target_bin": "P1-1",
-      "cart_target": 1,
-      "cart_moving": false,
-      "clearing_strategy": "reverse",
-      "early_moved": false,
-      "assigned_cart": "Cart1",
-      "assigned_hoppers": ["hopper1", "hopper3", "hopper4"],
-      "feeding_start_time": 12.5,
-      "clearing_start_time": 0.0
-    },
+    "route1": {"state": "feeding", "target_bin": "P1-1", "cart_target": 1, "cart_moving": false,
+      "clearing_strategy": "reverse", "early_moved": false, "assigned_cart": "Cart1",
+      "assigned_hoppers": ["hopper1", "hopper3", "hopper4"], "feeding_start_time": 12.5, "clearing_start_time": 0.0},
     "route2": {"state": "idle"},
-    "route3": {"state": "idle"},
-    "route4": {"state": "idle"},
-    "route5": {"state": "moving_to_target", "target_bin": "S3", "cart_target": 5, "cart_moving": true,
-      "clearing_strategy": "reverse", "early_moved": false, "assigned_cart": "Cart4", "assigned_hoppers": [], "feeding_start_time": 0.0, "clearing_start_time": 0.0},
-    "route6": {"state": "idle"},
-    "route7": {"state": "idle"},
-    "route8": {"state": "idle"}
+    ...
   },
   "schedule": {
     "executing_bin": {"D6": "S3", "D7": "P1-1", "D8": "", "D9": ""},
-    "sequences": {
-      "D7": ["P1-2", "P1-3", "P1-4"],
-      "D8": ["P2-1", "P2-2"],
-      "D9": [],
-      "D6": []
-    }
+    "sequences": {"D7": ["P1-2", "P1-3"], "D8": ["P2-1", "P2-2"], "D9": [], "D6": []}
   }
 }
 ```
@@ -386,7 +371,7 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 **高位储料仓卸料门** (`device: "silo_gate"`): `action`: `"open"` | `"close"`。FM 在 `silo_out` 路线进入 FEEDING 时发送 `open`，离开 FEEDING 时发送 `close`。ID 为 `silo_gate_S1`~`silo_gate_S12`，对应 12 个高位储料仓小仓。高位储料仓出料由 `silo_gate` 控制，不再使用 `feed_point silo_out`。
 
-#### 2.1.2 `route_states` — 路线状态
+#### 2.1.2 `route_states` — 🟡 仿真专用
 
 每条路线一个对象，key 为路线 ID (`route1`~`route8`)：
 
@@ -405,7 +390,7 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 `state: "idle"` 的路线表示已停用，上位机应从 `active_routes` 中移除该路线。停用的路线只含 `state` 字段。
 
-#### 2.1.3 `schedule` — 调度序列
+#### 2.1.3 `schedule` — 🟡 仿真专用
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
