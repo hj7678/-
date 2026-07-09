@@ -127,13 +127,27 @@ class ScheduleManager:
     # ── 构建请求 ──
 
     def _get_belt_bins(self, belt_id: str) -> List[dict]:
-        """从 Stock Management 获取某皮带对应料仓的料位"""
-        from scheduling.bin_config import BELT_BINS
+        """从 Stock Management 获取某皮带对应料仓的料位（含跨列逻辑）"""
+        from scheduling.bin_config import BELT_BINS, CROSS_COLUMN_BINS, IDLE_THRESHOLD_TONS
         bin_ids = BELT_BINS.get(belt_id, [])
         if not bin_ids:
             return []
+
+        # 跨列调度检测（D7/D9 主列全部高于阈值 → 启用备用列）
+        cross_column = False
+        if belt_id in CROSS_COLUMN_BINS:
+            primary = self.stock.get_levels(bin_ids)
+            if primary and all(b.get('level_tons', 0) >= IDLE_THRESHOLD_TONS for b in primary):
+                cross_column = True
+                cross_ids = CROSS_COLUMN_BINS[belt_id]
+                # 排除 Cart2 正在上料的仓
+                cart2_bin = self._executing_bin.get('D8', '') if hasattr(self, '_executing_bin') else ''
+                if cart2_bin and cart2_bin in cross_ids:
+                    cross_ids = [b for b in cross_ids if b != cart2_bin]
+                bin_ids = cross_ids
+
         levels = self.stock.get_levels(bin_ids)
-        return [
+        result = [
             {
                 'bin_id': b['bin_id'],
                 'stock': b['level_tons'],
@@ -143,6 +157,9 @@ class ScheduleManager:
             }
             for b in levels
         ]
+        if cross_column:
+            print(f"[FM-Sched] {belt_id} 跨列调度 → {[b['bin_id'] for b in result]}", flush=True)
+        return result
 
     def _request_schedule(self, belt_id: str):
         """发送调度请求到调度服务"""
@@ -173,6 +190,13 @@ class ScheduleManager:
             "right_divert": right_div,
             "maintenance_bins": list(getattr(self, '_maintenance_bins', set())),
         }
+        # 跨列调度: 检测 bin 前缀是否与 belt 默认前缀不同
+        from scheduling.bin_config import BELT_TO_COL_PREFIX, CROSS_COL_PREFIX
+        default_prefix = BELT_TO_COL_PREFIX.get(belt_id, '')
+        if bins and default_prefix:
+            first = bins[0]['bin_id']
+            if not first.startswith(default_prefix):
+                payload["cross_prefix"] = CROSS_COL_PREFIX.get(belt_id, first.split('-')[0])
 
         t = threading.Thread(target=self._send_and_recv, args=(belt_id, payload), daemon=True)
         t.start()

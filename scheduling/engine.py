@@ -194,9 +194,9 @@ class SchedulingEngine:
         if survival_time >= SAFE_DURATION_THRESHOLD:
             return 0.0
         return URGENCY_PENALTY_FACTOR * (
-            (1.0 / (survival_time + 1e-9)) - (1.0 / SAFE_DURATION_THRESHOLD)
+            (SAFE_DURATION_THRESHOLD - survival_time)/SAFE_DURATION_THRESHOLD + 1
         )
-
+        # (SAFE_DURATION_THRESHOLD - survival_time)/SAFE_DURATION_THRESHOLD+1
     def _get_company(self, wh_id: int) -> str:
         line = self._get_line_number(wh_id)
         for company, lines in COMPANY_LINES_D8.items():
@@ -548,11 +548,12 @@ class SchedulingEngine:
         return result
 
     def solve(self, bins: List[BinState], boost: bool = False,
-              cart_position: int = None) -> ScheduleResult:
+              cart_position: int = None, cross_prefix: str = None) -> ScheduleResult:
         """主入口：输入料仓状态，输出调度结果
 
         Args:
             cart_position: 小车当前位置（1-based），None 则使用默认值
+            cross_prefix: 跨列调度时的列前缀（如 D7→P2, D9→P3）
         """
         from scheduling.bin_config import (
             bin_id_to_wh, d8_bin_id_to_wh, d8_wh_to_bin_id,
@@ -597,7 +598,7 @@ class SchedulingEngine:
             rev_func = d8_wh_to_bin_id       # wh_id → bin_id
             all_wh_ids = list(range(1, 15))
         else:
-            prefix = BELT_TO_COL_PREFIX.get(self.belt_id, 'P1')
+            prefix = cross_prefix or BELT_TO_COL_PREFIX.get(self.belt_id, 'P1')
             fwd_func = bin_id_to_wh
             rev_func = make_wh_to_bin_id(prefix)
             all_wh_ids = list(range(1, 8))

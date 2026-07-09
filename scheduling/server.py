@@ -185,7 +185,8 @@ class SchedulingServer:
         logger.info(f"[{self.belt_id}] 收到调度请求: {stock_summary} | cart_pos={cart_position} | boost={boost}")
         print(f"[{self.belt_id}] 收到调度请求: {stock_summary} | cart_pos={cart_position}", flush=True)
 
-        result = self.engine.solve(bins, boost, cart_position=cart_position)
+        result = self.engine.solve(bins, boost, cart_position=cart_position,
+                                cross_prefix=data.get("cross_prefix"))
 
         if result.sequence:
             logger.info(f"[{self.belt_id}] 调度结果: sequence={result.sequence} | feasible={result.is_feasible}")
