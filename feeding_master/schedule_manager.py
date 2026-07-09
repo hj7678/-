@@ -128,7 +128,7 @@ class ScheduleManager:
 
     def _get_belt_bins(self, belt_id: str) -> List[dict]:
         """从 Stock Management 获取某皮带对应料仓的料位（含跨列逻辑）"""
-        from scheduling.bin_config import BELT_BINS, CROSS_COLUMN_BINS, IDLE_THRESHOLD_TONS
+        from scheduling.bin_config import BELT_BINS, CROSS_COLUMN_BINS
         bin_ids = BELT_BINS.get(belt_id, [])
         if not bin_ids:
             return []
