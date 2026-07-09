@@ -5,7 +5,10 @@ FM 监听器 —— 仿真真实上位机接收端
 用于验证 FM 发送给真实上位机的通讯协议是否符合预期。
 
 用法:
-    py fm_monitor.py
+    py fm_monitor.py [host] [port]
+
+    默认: host=127.0.0.1, port=8896
+    示例: py fm_monitor.py 192.168.3.222 8896
 """
 
 import json
@@ -44,7 +47,10 @@ def format_msg(msg: dict) -> str:
 
 
 def main():
-    print(f"FM 监听器启动 → {HOST}:{PORT}")
+    host = sys.argv[1] if len(sys.argv) > 1 else HOST
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else PORT
+
+    print(f"FM 监听器启动 → {host}:{port}")
     print("等待 FM 连接...")
 
     while True:
@@ -52,7 +58,7 @@ def main():
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
-            sock.connect((HOST, PORT))
+            sock.connect((host, port))
             sock.settimeout(None)
             print(f"\n✓ 已连接 FM ({HOST}:{PORT})")
             print("=" * 60)

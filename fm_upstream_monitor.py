@@ -5,7 +5,10 @@
 用于验证仿真 HMI 发送给 FM 的传感器状态是否符合协议。
 
 用法:
-    py fm_upstream_monitor.py
+    py fm_upstream_monitor.py [host] [port]
+
+    默认: host=127.0.0.1, port=8896
+    示例: py fm_upstream_monitor.py 192.168.3.222 8896
 """
 
 import json
@@ -20,7 +23,10 @@ PRINT_INTERVAL = 2.0  # 打印间隔（秒），避免 sensor_states 刷屏
 
 
 def main():
-    print(f"上游监听器启动 → {HOST}:{PORT}")
+    host = sys.argv[1] if len(sys.argv) > 1 else HOST
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else PORT
+
+    print(f"上游监听器启动 → {host}:{port}")
     print("等待 FM 连接...")
 
     while True:
@@ -28,9 +34,9 @@ def main():
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
-            sock.connect((HOST, PORT))
+            sock.connect((host, port))
             sock.settimeout(None)
-            print(f"\n✓ 已连接 FM ({HOST}:{PORT})")
+            print(f"\n✓ 已连接 FM ({host}:{port})")
             print("=" * 60)
 
             buf = b""
