@@ -196,6 +196,12 @@ class FeedingMasterServer:
             return
 
         msg_type = msg.get("type", "")
+        # 广播上游消息给所有监听客户端（用于 fm_monitor 查看完整通讯）
+        if msg_type == "sensor_states":
+            self._send({"type": "echo_sensor_states", "data": msg.get("data", {})})
+        elif msg_type in ("manual_start", "manual_stop", "belt_active", "emergency_stop"):
+            self._send({"type": f"echo_{msg_type}", "data": msg})
+
         if msg_type == "sensor_states" and self._on_sensor_states:
             self._on_sensor_states(msg.get("data", {}))
         elif msg_type == "manual_start" and self._on_manual_start:
