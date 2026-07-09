@@ -428,8 +428,8 @@ HMI 显示格式：`[类别] ID: 故障名`，如 `[接近开关] S-D13: 卡低`
 {
   "type": "level_report",
   "levels": [
-    {"bin_id": "P1-1", "level_pct": 45.2, "capacity": 100.0},
-    {"bin_id": "P1-2", "level_pct": 62.0, "capacity": 100.0},
+    {"bin_id": "P1-1", "level_pct": 45.2, "capacity": 110.0},
+    {"bin_id": "P1-2", "level_pct": 62.0, "capacity": 110.0},
     {"bin_id": "S1",   "level_pct": 42.9, "capacity": 420.0}
   ]
 }
