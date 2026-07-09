@@ -24,7 +24,7 @@ PORT = 8896
 
 
 class FeedingMasterServer:
-    """FeedingMaster 与 Upper Computer 之间的 TCP 通信"""
+    """FeedingMaster 与 Upper Computer 之间的 TCP 通信（支持多客户端）"""
 
     def __init__(self, host: str = HOST, port: int = PORT):
         self.host = host
@@ -33,8 +33,8 @@ class FeedingMasterServer:
         self._running = False
         self._seq = 0  # 消息序列号
 
-        # 连接的 Upper Computer
-        self._upper_socket: Optional[socket.socket] = None
+        # 连接的 Upper Computer（支持多个，广播发送）
+        self._upper_sockets: List[socket.socket] = []
         self._upper_lock = threading.Lock()
 
         # 接收回调
@@ -96,15 +96,15 @@ class FeedingMasterServer:
         self._send(payload)
 
     def _send(self, data: dict):
+        """广播消息给所有连接的上位机"""
         with self._upper_lock:
-            sock = self._upper_socket
-        if sock is None:
-            return
-        try:
-            sock.sendall((json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8"))
-        except (BrokenPipeError, ConnectionResetError, OSError) as e:
-            print(f"[FeedingMaster] 发送失败: {e}", file=sys.stderr)
-            self._close_upper()
+            sockets = list(self._upper_sockets)
+        payload = (json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8")
+        for sock in sockets:
+            try:
+                sock.sendall(payload)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                self._remove_upper(sock)
 
     # ── 服务生命周期 ──
 
@@ -121,11 +121,10 @@ class FeedingMasterServer:
                 self._server.settimeout(1.0)
                 try:
                     client, addr = self._server.accept()
-                    print(f"[FeedingMaster] Upper Computer 已连接: {addr}", flush=True)
-                    self._close_upper()  # 断开旧连接
+                    print(f"[FeedingMaster] 上位机已连接: {addr}", flush=True)
                     with self._upper_lock:
-                        self._upper_socket = client
-                    self._handle_upper(client, addr)
+                        self._upper_sockets.append(client)
+                    threading.Thread(target=self._handle_upper, args=(client, addr), daemon=True).start()
                 except socket.timeout:
                     pass
             except Exception as e:
@@ -134,7 +133,7 @@ class FeedingMasterServer:
 
     def stop(self):
         self._running = False
-        self._close_upper()
+        self._close_all()
         if self._server:
             try:
                 self._server.close()
@@ -142,11 +141,20 @@ class FeedingMasterServer:
                 pass
         print("[FeedingMaster] 服务已停止", flush=True)
 
-    def _close_upper(self):
+    def _remove_upper(self, sock: socket.socket):
         with self._upper_lock:
-            sock = self._upper_socket
-            self._upper_socket = None
-        if sock:
+            if sock in self._upper_sockets:
+                self._upper_sockets.remove(sock)
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+    def _close_all(self):
+        with self._upper_lock:
+            sockets = list(self._upper_sockets)
+            self._upper_sockets.clear()
+        for sock in sockets:
             try:
                 sock.close()
             except Exception:
@@ -167,13 +175,15 @@ class FeedingMasterServer:
         except socket.timeout:
             pass
         except ConnectionResetError:
-            print(f"[FeedingMaster] Upper Computer 断开: {addr}", flush=True)
+            print(f"[FeedingMaster] 上位机断开: {addr}", flush=True)
         except Exception as e:
-            print(f"[FeedingMaster] Upper 通信错误: {e}", file=sys.stderr)
+            print(f"[FeedingMaster] 上位机通信错误: {e}", file=sys.stderr)
         finally:
-            self._close_upper()
+            self._remove_upper(client)
             try:
                 client.close()
+            except Exception:
+                pass
             except Exception:
                 pass
 
