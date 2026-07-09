@@ -364,9 +364,9 @@ class FeedingMasterController:
                     # 重置顺序清空标记，确保下一轮能正常触发 early move
                     ctx.early_moved_from_clearing = False
                     ctx.clearing_strategy = 'reverse'
-                    # 启动上料点
+                    # 启动上料点（silo_out 由 silo_gate 替代）
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-                    if fp:
+                    if fp and fp != 'silo_out':
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'start'})
                         new_cmds[f"feed_point:{fp}"] = 'start'
                         print(f"[FM] {route_id} feed_point start: {fp}", flush=True)
@@ -377,9 +377,9 @@ class FeedingMasterController:
                         new_cmds[f"silo_gate:{target_bin}"] = 'open'
                         print(f"[FM] {route_id} silo_gate open: {gate_id}", flush=True)
                 elif old.value == 'feeding':
-                    # 离开 FEEDING → 停止上料点
+                    # 离开 FEEDING → 停止上料点（silo_out 由 silo_gate 替代）
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-                    if fp:
+                    if fp and fp != 'silo_out':
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'stop'})
                         new_cmds[f"feed_point:{fp}"] = 'stop'
                         print(f"[FM] {route_id} feed_point stop: {fp}", flush=True)

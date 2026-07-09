@@ -325,8 +325,10 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
     {"device": "belt", "id": "D7", "action": "stop"},
     {"device": "hopper", "id": "hopper1", "action": "open"},
     {"device": "hopper", "id": "hopper3", "action": "close"},
-    {"device": "cart", "id": "Cart1", "action": "move", "target": 3, "route_id": "route1"},
-    {"device": "cart", "id": "Cart4", "action": "move", "target": 6, "route_id": "route5"}
+    {"device": "feed_point", "id": "feed1_1", "action": "start"},
+    {"device": "silo_gate", "id": "silo_gate_S3", "action": "open"},
+    {"device": "cart", "id": "Cart1", "action": "move", "target": 3},
+    {"device": "cart", "id": "Cart4", "action": "move", "target": 6}
   ],
   "route_states": {
     "route1": {
@@ -370,7 +372,7 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 
 **中转斗** (`device: "hopper"`): `action`: `"open"` | `"close"`。ID: `hopper1` ~ `hopper7`。
 
-**小车** (`device: "cart"`): `action`: `"move"`。附加字段：`target`（目标位置 int），`route_id`（关联路线 string）。ID: `Cart1`, `Cart2`, `Cart3`, `Cart4`。
+**小车** (`device: "cart"`): `action`: `"move"`。附加字段：`target`（目标位置 int）。ID: `Cart1`, `Cart2`, `Cart3`, `Cart4`。真实 HMI 不需要 `route_id` 字段。
 
 **上料点** (`device: "feed_point"`): `action`: `"start"` | `"stop"`。FM 在进入 FEEDING 时发送 `start`，离开 FEEDING 时发送 `stop`。
 
@@ -381,9 +383,8 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 | feed2_1 | 上料点2-1 | route3 |
 | feed2_2 | 上料点2-2 | route4/route5 |
 | feed3 | 上料点3 | route6 |
-| silo_out | 高位储料仓 | route7/route8 |
 
-**卸料门** (`device: "silo_gate"`): `action`: `"open"` | `"close"`。FM 在 `silo_out` 进入 FEEDING 时发送 `open`，离开 FEEDING 时发送 `close`。ID 为 `silo_gate_S1`~`silo_gate_S12`，对应 12 个高位储料仓小仓。
+**高位储料仓卸料门** (`device: "silo_gate"`): `action`: `"open"` | `"close"`。FM 在 `silo_out` 路线进入 FEEDING 时发送 `open`，离开 FEEDING 时发送 `close`。ID 为 `silo_gate_S1`~`silo_gate_S12`，对应 12 个高位储料仓小仓。高位储料仓出料由 `silo_gate` 控制，不再使用 `feed_point silo_out`。
 
 #### 2.1.2 `route_states` — 路线状态
 

@@ -355,8 +355,12 @@ class SimulationFeedingBridge(QObject):
             elif device == "silo_gate":
                 if action == "open":
                     ctrl.set_silo_gate(cmd["id"], True)
+                    ctrl.set_feed_point_active("silo_out", True)
                 elif action == "close":
                     ctrl.set_silo_gate(cmd["id"], False)
+                    # 仅当所有卸料门都关闭时才停 silo_out
+                    if hasattr(ctrl, 'silo_gate_states') and not any(ctrl.silo_gate_states.values()):
+                        ctrl.set_feed_point_active("silo_out", False)
 
             elif device == "cart":
                     target = cmd.get("target")
