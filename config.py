@@ -366,20 +366,24 @@ def _build_bin_available_routes():
             ('silo_out', 'route7'),
         ]
 
-    # P2配料站 -> 路线⑥⑧ (D8皮带)
+    # P2配料站 -> 路线⑥⑧ (D8皮带) + 跨列调度路线①②③ (D7皮带)
     for row in range(1, 8):
         bin_id = f'P2-{row}'
         result[bin_id] = [
             ('feed3', 'route6'),
             ('silo_out', 'route8'),
+            ('feed1_1', 'route1'),
+            ('feed1_2', 'route2'),
+            ('feed2_1', 'route3'),
         ]
 
-    # P3配料站 -> 路线⑥⑧ (D8皮带)
+    # P3配料站 -> 路线⑥⑧ (D8皮带) + 跨列调度路线④ (D9皮带)
     for row in range(1, 8):
         bin_id = f'P3-{row}'
         result[bin_id] = [
             ('feed3', 'route6'),
             ('silo_out', 'route8'),
+            ('feed2_2', 'route4'),
         ]
 
     # 高位储料仓 S1-S12 -> 路线⑤（仅补料）

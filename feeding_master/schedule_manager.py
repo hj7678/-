@@ -158,7 +158,12 @@ class ScheduleManager:
             for b in levels
         ]
         if cross_column:
-            print(f"[FM-Sched] {belt_id} 跨列调度 → {[b['bin_id'] for b in result]}", flush=True)
+            if not hasattr(self, '_last_cross_log'):
+                self._last_cross_log = {}
+            last = self._last_cross_log.get(belt_id, 0)
+            if time.time() - last > 30:  # 30s 内不重复打印
+                self._last_cross_log[belt_id] = time.time()
+                print(f"[FM-Sched] {belt_id} 跨列调度 → {[b['bin_id'] for b in result]}", flush=True)
         return result
 
     def _request_schedule(self, belt_id: str):
