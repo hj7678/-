@@ -428,9 +428,9 @@ HMI 显示格式：`[类别] ID: 故障名`，如 `[接近开关] S-D13: 卡低`
 {
   "type": "level_report",
   "levels": [
-    {"bin_id": "P1-1", "stock": 45.2, "capacity": 100.0},
-    {"bin_id": "P1-2", "stock": 62.0, "capacity": 100.0},
-    {"bin_id": "S1",   "stock": 180.0, "capacity": 420.0}
+    {"bin_id": "P1-1", "level_pct": 45.2, "level_tons": 45.2, "capacity": 100.0},
+    {"bin_id": "P1-2", "level_pct": 62.0, "level_tons": 62.0, "capacity": 100.0},
+    {"bin_id": "S1",   "level_pct": 42.9, "level_tons": 180.0, "capacity": 420.0}
   ]
 }
 ```
@@ -438,7 +438,8 @@ HMI 显示格式：`[类别] ID: 故障名`，如 `[接近开关] S-D13: 卡低`
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `bin_id` | string | 料仓 ID（P1-1~P4-7 共28个, S1~S12 共12个, 总计40个） |
-| `stock` | float | 当前库存（吨） |
+| `level_pct` | float | 料位百分比（%） |
+| `level_tons` | float | 当前库存（吨） |
 | `capacity` | float | 料仓容量（吨） |
 
 ---
