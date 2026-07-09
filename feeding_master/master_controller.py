@@ -223,7 +223,9 @@ class FeedingMasterController:
                 try:
                     levels = self.stock.get_all_levels()
                     if levels:
-                        self.server.send_levels(levels)
+                        # 只发送 bin_id + level_pct + capacity
+                        slim = [{'bin_id': b['bin_id'], 'level_pct': b.get('level_pct', 0), 'capacity': b.get('capacity', 0)} for b in levels]
+                        self.server.send_levels(slim)
                 except Exception as e:
                     print(f"[FeedingMaster] 料位发送异常: {e}", file=sys.stderr)
 
