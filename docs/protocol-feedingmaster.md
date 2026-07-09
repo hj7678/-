@@ -91,6 +91,11 @@
       "feed2_2_stone": true, "feed2_2_10mm": true, "feed2_2_20mm": true,
       "feed3_stone": true, "feed3_10mm": true
     },
+    "silo_gate_states": {
+      "S1": false, "S2": false, "S3": false, "S4": false,
+      "S5": false, "S6": false, "S7": false, "S8": false,
+      "S9": false, "S10": false, "S11": false, "S12": false
+    },
     "maintenance_bins": ["P1-3"],
     "d7_feed_override": null,
     "d9_feed_override": null
@@ -212,6 +217,8 @@
 | `feed3_10mm` | 上料点3 | 10mm碎石 |
 
 **`feed_material_states`** — 上料点原料状态（来自 `feed_material_service` TCP 9010），与 `laser_sensor_states` 键相同，表示服务端记录的原料状态。FM 通过 TCP 查询此服务端判断上料点物料可用性。
+
+**`silo_gate_states`** — 12 个高位储料仓卸料门状态，`true`=开，`false`=关。ID 为 `S1`~`S12`。当 `silo_out` 作为上料点时，FM 下发 `silo_gate open` 打开对应仓门。
 
 **`maintenance_bins`** — 检修中的料仓 ID 列表，FM 传给调度引擎排除。
 
@@ -359,6 +366,8 @@ UI「全部自动」或单独皮带按钮点击时发送。FM 收到后调用 `r
 | feed2_2 | 上料点2-2 | route4/route5 |
 | feed3 | 上料点3 | route6 |
 | silo_out | 高位储料仓 | route7/route8 |
+
+**卸料门** (`device: "silo_gate"`): `action`: `"open"` | `"close"`。FM 在 `silo_out` 进入 FEEDING 时发送 `open`，离开 FEEDING 时发送 `close`。ID 为 `silo_gate_S1`~`silo_gate_S12`，对应 12 个高位储料仓小仓。
 
 #### 2.1.2 `route_states` — 路线状态
 

@@ -284,6 +284,9 @@ class SimulationController(QObject):
 
         self.feed_points = config.FEED_POINTS.copy()
 
+        # 高位储料仓卸料门状态 (S1~S12, 默认关闭)
+        self.silo_gate_states: Dict[str, bool] = {f'S{i}': False for i in range(1, 13)}
+
     def _load_initial_levels(self):
         """从sensor_data_manager加载初始料位"""
         try:
@@ -3479,6 +3482,11 @@ class SimulationController(QObject):
         """FM控制上料点启停 (feed1_1/feed1_2/feed2_1/feed2_2/feed3)"""
         if feed_point_id in self.feed_points:
             self.feed_points[feed_point_id]['active'] = active
+
+    def set_silo_gate(self, gate_id: str, open: bool):
+        """FM控制高位储料仓卸料门开关 (silo_gate_S1~S12)"""
+        if hasattr(self, 'silo_gate_states') and gate_id in self.silo_gate_states:
+            self.silo_gate_states[gate_id] = open
 
     def get_cart_fault_status(self) -> dict:
         """获取所有小车传感器故障状态"""

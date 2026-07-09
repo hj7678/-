@@ -370,6 +370,12 @@ class FeedingMasterController:
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'start'})
                         new_cmds[f"feed_point:{fp}"] = 'start'
                         print(f"[FM] {route_id} feed_point start: {fp}", flush=True)
+                    # 高位储料仓上料 → 打开对应卸料门
+                    if fp == 'silo_out' and target_bin.startswith('S'):
+                        gate_id = f"silo_gate_{target_bin}"
+                        commands.append({'device': 'silo_gate', 'id': gate_id, 'action': 'open'})
+                        new_cmds[f"silo_gate:{target_bin}"] = 'open'
+                        print(f"[FM] {route_id} silo_gate open: {gate_id}", flush=True)
                 elif old.value == 'feeding':
                     # 离开 FEEDING → 停止上料点
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
@@ -377,6 +383,12 @@ class FeedingMasterController:
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'stop'})
                         new_cmds[f"feed_point:{fp}"] = 'stop'
                         print(f"[FM] {route_id} feed_point stop: {fp}", flush=True)
+                    # 高位储料仓上料 → 关闭对应卸料门
+                    if fp == 'silo_out' and target_bin and target_bin.startswith('S'):
+                        gate_id = f"silo_gate_{target_bin}"
+                        commands.append({'device': 'silo_gate', 'id': gate_id, 'action': 'close'})
+                        new_cmds[f"silo_gate:{target_bin}"] = 'close'
+                        print(f"[FM] {route_id} silo_gate close: {gate_id}", flush=True)
                 elif next_state.value == 'clearing':
                     threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
                     parts.append(f"料位{level:.0f}%≥{threshold}% 策略={strategy}")

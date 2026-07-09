@@ -203,6 +203,7 @@ class SimulationFeedingBridge(QObject):
             "d9_feed_override": getattr(ctrl, '_d9_feed_override', ''),
             "laser_sensor_states": dict(ctrl.laser_sensor_states) if hasattr(ctrl, 'laser_sensor_states') else {},
             "feed_material_states": self._get_feed_material_states(),
+            "silo_gate_states": dict(ctrl.silo_gate_states) if hasattr(ctrl, 'silo_gate_states') else {},
             "maintenance_bins": list(ctrl.get_maintenance_bins()) if hasattr(ctrl, 'get_maintenance_bins') else [],
         }
         self._fm.send_sensor_states(sensor_data)
@@ -350,6 +351,12 @@ class SimulationFeedingBridge(QObject):
                     ctrl.set_feed_point_active(cmd["id"], True)
                 elif action in ("stop", "off"):
                     ctrl.set_feed_point_active(cmd["id"], False)
+
+            elif device == "silo_gate":
+                if action == "open":
+                    ctrl.set_silo_gate(cmd["id"], True)
+                elif action == "close":
+                    ctrl.set_silo_gate(cmd["id"], False)
 
             elif device == "cart":
                     target = cmd.get("target")
