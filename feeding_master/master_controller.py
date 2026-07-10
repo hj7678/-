@@ -721,6 +721,16 @@ class FeedingMasterController:
         for rid in self._active_routes:
             ctx = self.route_manager.get_route_context(rid)
             if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id:
+                # 兼职调度回切: 新序列是主列(P1/P4)且当前路线是跨列(P2/P3)→强制停止
+                first_bin = sequence[0] if sequence else ''
+                from scheduling.bin_config import BELT_TO_COL_PREFIX, CROSS_COL_PREFIX
+                default_prefix = BELT_TO_COL_PREFIX.get(belt_id, '')
+                cross_prefix = CROSS_COL_PREFIX.get(belt_id, '')
+                if cross_prefix and first_bin.startswith(default_prefix) and \
+                   ctx.target_bin and ctx.target_bin.startswith(cross_prefix):
+                    print(f"[FM] {belt_id} 兼职回切: {ctx.target_bin}→{first_bin}", flush=True)
+                    self._stop_route_for_switch(rid)
+                    break
                 print(f"[FM] {belt_id} 已有活跃路线 {rid}, 序列缓存", flush=True)
                 return
 
@@ -1144,6 +1154,33 @@ class FeedingMasterController:
                 self._deactivated_routes = set()
             self._deactivated_routes.add(route_id)
             print(f"[FM] 手动停止: {route_id} {ctx.state.value}→STANDBY", flush=True)
+
+    def _stop_route_for_switch(self, route_id: str):
+        """兼职调度回切：停止当前跨列路线，让主列路线接管"""
+        ctx = self.route_manager.get_route_context(route_id)
+        if not ctx:
+            return
+        cart_id = ctx.assigned_cart or ''
+        belt_id = CART_TO_BELT.get(cart_id, '')
+        # 清除旧序列
+        self.scheduler._sequences.pop(belt_id, None)
+        if getattr(self, '_pending_auto_continue', (None, None))[0] == belt_id:
+            self._pending_auto_continue = None
+        self.scheduler.mark_completed(belt_id)
+        self.scheduler._last_request[belt_id] = self._total_runtime
+
+        if ctx.state == RouteState.FEEDING:
+            self.route_manager.set_route_state(route_id, RouteState.CLEARING)
+            ctx.clearing_start_time = self._total_runtime
+            print(f"[FM] 兼职回切: {route_id} {ctx.target_bin}→CLEARING", flush=True)
+        else:
+            self.route_manager._release_resources(route_id)
+            self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+            self._active_routes.discard(route_id)
+            if not hasattr(self, '_deactivated_routes'):
+                self._deactivated_routes = set()
+            self._deactivated_routes.add(route_id)
+            print(f"[FM] 兼职回切: {route_id} {ctx.state.value}→STANDBY", flush=True)
 
     def _on_belt_active(self, belt_id: str, active: bool):
         """UI点击皮带按钮 → 激活该皮带 + 强制启动调度"""
