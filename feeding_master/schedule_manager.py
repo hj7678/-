@@ -50,6 +50,7 @@ class ScheduleManager:
 
         self._last_request: Dict[str, float] = {}
         self._last_emergency: Dict[str, float] = {}
+        self._last_cross_request: Dict[str, float] = {}
 
         # 防抖: 每个belt每次tick最多触发一次
         self._tick_triggered: set = set()
@@ -81,8 +82,43 @@ class ScheduleManager:
                 continue
             if self._check_emergency(belt_id, total_runtime):
                 continue
+            if self._check_cross_column(belt_id, total_runtime):
+                continue
             if self._check_idle(belt_id, total_runtime):
                 continue
+
+    def _check_cross_column(self, belt_id: str, now: float) -> bool:
+        """跨列/兼职调度：主列全满→启用备用列，独立于空闲/紧急检测"""
+        if belt_id not in ('D7', 'D9'):
+            return False
+        from scheduling.bin_config import BELT_BINS, CROSS_COLUMN_BINS, CROSS_COL_PREFIX
+        primary = self.stock.get_levels(BELT_BINS.get(belt_id, []))
+        if not primary or not all(b.get('level_tons', 0) >= IDLE_THRESHOLD_TONS for b in primary):
+            return False  # 主列有需求，不触发跨列
+        # 主列全满→取跨列最低仓
+        cross_ids = list(CROSS_COLUMN_BINS.get(belt_id, []))
+        cart2_bin = self._executing_bin.get('D8', '')
+        if cart2_bin and cart2_bin in cross_ids:
+            cross_ids.remove(cart2_bin)
+        if not cross_ids:
+            return False
+        cross_levels = self.stock.get_levels(cross_ids)
+        if not cross_levels:
+            return False
+        cross_levels.sort(key=lambda b: b.get('level_tons', 0))
+        lowest = cross_levels[0]
+        if lowest.get('level_tons', 0) >= IDLE_THRESHOLD_TONS:
+            return False  # 跨列仓也全满，无需调度
+        # 避免重复请求
+        last = self._last_cross_request.get(belt_id, 0)
+        if now - last < 30:
+            return False
+        self._last_cross_request[belt_id] = now
+        print(f"[FM-Sched] {belt_id} 跨列调度 → {lowest['bin_id']}", flush=True)
+        # 直接构造单仓请求发给调度引擎
+        self._request_schedule_cross(belt_id, lowest['bin_id'],
+                                     CROSS_COL_PREFIX.get(belt_id, ''))
+        return True
 
     def _check_emergency(self, belt_id: str, now: float) -> bool:
         levels = self._get_belt_bins(belt_id)
@@ -99,12 +135,10 @@ class ScheduleManager:
     def _check_idle(self, belt_id: str, now: float) -> bool:
         # 兼职调度回切检测: 正在执行跨列但主列有仓低于阈值→强制请求调度
         if belt_id in self._executing and belt_id in ('D7', 'D9'):
-            # 确认当前路线确实在跨列上料
             current_bin = self._executing_bin.get(belt_id, '')
-            from scheduling.bin_config import BELT_TO_COL_PREFIX, CROSS_COL_PREFIX
+            from scheduling.bin_config import CROSS_COL_PREFIX
             cross_prefix = CROSS_COL_PREFIX.get(belt_id, '')
             if cross_prefix and current_bin.startswith(cross_prefix):
-                # 当前是跨列上料，检查主列是否有需求
                 primary = self._get_primary_bins(belt_id)
                 if primary and any(b['stock'] < IDLE_THRESHOLD_TONS for b in primary):
                     last = self._last_request.get(belt_id, 0)
@@ -129,19 +163,12 @@ class ScheduleManager:
         if not any_below:
             return False
 
-        # 跨列/兼职调度跳过长时间冷却，立即请求
-        from scheduling.bin_config import CROSS_COL_PREFIX
-        is_cross = belt_id in ('D7', 'D9') and levels and \
-            levels[0]['bin_id'].startswith(CROSS_COL_PREFIX.get(belt_id, ''))
-
         last = self._last_request.get(belt_id, 0)
-        cooldown = 5 if is_cross else SCHEDULE_COOLDOWN  # 跨列5s冷却，普通180s
-        if now - last < cooldown:
+        if now - last < SCHEDULE_COOLDOWN:
             return False
 
         self._last_request[belt_id] = now
-        label = "跨列调度" if is_cross else "空闲调度"
-        print(f"[FM-Sched] {belt_id} {label}", flush=True)
+        print(f"[FM-Sched] {belt_id} 空闲调度", flush=True)
         self._request_schedule(belt_id)
         return True
 
@@ -164,32 +191,13 @@ class ScheduleManager:
         ]
 
     def _get_belt_bins(self, belt_id: str) -> List[dict]:
-        """从 Stock Management 获取某皮带对应料仓的料位（含跨列逻辑）"""
-        from scheduling.bin_config import BELT_BINS, CROSS_COLUMN_BINS
+        """从 Stock Management 获取某皮带对应料仓的料位"""
+        from scheduling.bin_config import BELT_BINS
         bin_ids = BELT_BINS.get(belt_id, [])
         if not bin_ids:
             return []
-
-        # 跨列调度检测（D7/D9 主列全部高于阈值 → 启用备用列）
-        cross_column = False
-        if belt_id in CROSS_COLUMN_BINS:
-            primary = self.stock.get_levels(bin_ids)
-            if primary and all(b.get('level_tons', 0) >= IDLE_THRESHOLD_TONS for b in primary):
-                cross_column = True
-                cross_ids = CROSS_COLUMN_BINS[belt_id]
-                # 排除 Cart2 正在上料的仓
-                cart2_bin = self._executing_bin.get('D8', '') if hasattr(self, '_executing_bin') else ''
-                if cart2_bin and cart2_bin in cross_ids:
-                    cross_ids = [b for b in cross_ids if b != cart2_bin]
-                # 兼职调度：只取料位最低的单个仓，不生成序列
-                if cross_ids:
-                    lowest = self.stock.get_levels(cross_ids)
-                    if lowest:
-                        lowest.sort(key=lambda b: b.get('level_tons', 0))
-                        bin_ids = [lowest[0]['bin_id']]
-
         levels = self.stock.get_levels(bin_ids)
-        result = [
+        return [
             {
                 'bin_id': b['bin_id'],
                 'stock': b['level_tons'],
@@ -199,14 +207,27 @@ class ScheduleManager:
             }
             for b in levels
         ]
-        if cross_column:
-            if not hasattr(self, '_last_cross_log'):
-                self._last_cross_log = {}
-            last = self._last_cross_log.get(belt_id, 0)
-            if time.time() - last > 30:  # 30s 内不重复打印
-                self._last_cross_log[belt_id] = time.time()
-                print(f"[FM-Sched] {belt_id} 跨列调度 → {[b['bin_id'] for b in result]}", flush=True)
-        return result
+
+    def _request_schedule_cross(self, belt_id: str, bin_id: str, cross_prefix: str):
+        """跨列兼职调度：单仓直接请求，不依赖 _get_belt_bins"""
+        if belt_id in self._tick_triggered:
+            return
+        self._tick_triggered.add(belt_id)
+        bins = [{'bin_id': bin_id, 'stock': 0, 'consumption_rate': 0.01,
+                 'maintenance': False, 'has_future_order': False}]
+        cart_id = BELT_TO_CART.get(belt_id, '')
+        cart_pos = self._cart_positions.get(cart_id, 1) if hasattr(self, '_cart_positions') else 1
+        payload = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "belt_id": belt_id,
+            "boost_mode": False,
+            "bins": bins,
+            "cart_position": cart_pos,
+            "cross_prefix": cross_prefix,
+            "maintenance_bins": list(getattr(self, '_maintenance_bins', set())),
+        }
+        t = threading.Thread(target=self._send_and_recv, args=(belt_id, payload), daemon=True)
+        t.start()
 
     def _request_schedule(self, belt_id: str):
         """发送调度请求到调度服务"""
