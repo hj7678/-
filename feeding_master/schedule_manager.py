@@ -51,6 +51,7 @@ class ScheduleManager:
         self._last_request: Dict[str, float] = {}
         self._last_emergency: Dict[str, float] = {}
         self._last_cross_request: Dict[str, float] = {}
+        self._d9_last_route: str = ''
 
         # 防抖: 每个belt每次tick最多触发一次
         self._tick_triggered: set = set()
@@ -88,9 +89,16 @@ class ScheduleManager:
                 continue
 
     def _check_cross_column(self, belt_id: str, now: float) -> bool:
-        """跨列/兼职调度：主列全满→启用备用列，独立于空闲/紧急检测"""
+        """跨列/兼职调度：主列序列执行完毕+全满→启用备用列"""
         if belt_id not in ('D7', 'D9'):
             return False
+        # 仅在空闲时触发（序列全部执行完毕）
+        if belt_id in self._executing:
+            return False
+        # D9: 仅路线4可触发兼职调度，路线7不能
+        if belt_id == 'D9' and getattr(self, '_d9_last_route', '') != 'route4':
+            return False
+
         from scheduling.bin_config import BELT_BINS, CROSS_COLUMN_BINS, CROSS_COL_PREFIX
         primary = self.stock.get_levels(BELT_BINS.get(belt_id, []))
         if not primary or not all(b.get('level_tons', 0) >= IDLE_THRESHOLD_TONS for b in primary):
@@ -345,10 +353,19 @@ class ScheduleManager:
     def mark_executing(self, belt_id: str, route_id: str, bin_id: str):
         self._executing[belt_id] = route_id
         self._executing_bin[belt_id] = bin_id
+        if belt_id == 'D9':
+            self._d9_last_route = route_id
 
     def mark_completed(self, belt_id: str):
         self._executing.pop(belt_id, None)
         self._executing_bin.pop(belt_id, None)
+        # D9 路线清除
+        if belt_id == 'D9':
+            self._d9_last_route = ''
+
+    def set_d9_route(self, route_id: str):
+        """FM 通知 D9 当前使用的路线（用于兼职调度判断）"""
+        self._d9_last_route = route_id
 
     def is_executing(self, belt_id: str) -> bool:
         return belt_id in self._executing
