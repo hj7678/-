@@ -714,23 +714,29 @@ class FeedingMasterController:
 
     def _on_schedule_sequence(self, belt_id: str, sequence: list):
         """收到调度序列 → 若皮带空闲则自动启动"""
+        # 兼职调度回切: 执行中但新序列是主列且当前路线是跨列→强制停止
         if self.scheduler.is_executing(belt_id):
+            first_bin = sequence[0] if sequence else ''
+            from scheduling.bin_config import BELT_TO_COL_PREFIX, CROSS_COL_PREFIX
+            default_prefix = BELT_TO_COL_PREFIX.get(belt_id, '')
+            cross_prefix = CROSS_COL_PREFIX.get(belt_id, '')
+            if cross_prefix and first_bin.startswith(default_prefix):
+                current_bin = self.scheduler._executing_bin.get(belt_id, '')
+                if current_bin.startswith(cross_prefix):
+                    # 跨列→主列回切
+                    for rid in self._active_routes:
+                        ctx = self.route_manager.get_route_context(rid)
+                        if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id \
+                           and ctx.target_bin and ctx.target_bin.startswith(cross_prefix):
+                            print(f"[FM] {belt_id} 兼职回切: {ctx.target_bin}→{first_bin}", flush=True)
+                            self._stop_route_for_switch(rid)
+                            return
             print(f"[FM] {belt_id} 已在执行中, 序列缓存", flush=True)
             return
         # 双保险: 检查 _active_routes 中是否有同皮带活跃路线
         for rid in self._active_routes:
             ctx = self.route_manager.get_route_context(rid)
             if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id:
-                # 兼职调度回切: 新序列是主列(P1/P4)且当前路线是跨列(P2/P3)→强制停止
-                first_bin = sequence[0] if sequence else ''
-                from scheduling.bin_config import BELT_TO_COL_PREFIX, CROSS_COL_PREFIX
-                default_prefix = BELT_TO_COL_PREFIX.get(belt_id, '')
-                cross_prefix = CROSS_COL_PREFIX.get(belt_id, '')
-                if cross_prefix and first_bin.startswith(default_prefix) and \
-                   ctx.target_bin and ctx.target_bin.startswith(cross_prefix):
-                    print(f"[FM] {belt_id} 兼职回切: {ctx.target_bin}→{first_bin}", flush=True)
-                    self._stop_route_for_switch(rid)
-                    break
                 print(f"[FM] {belt_id} 已有活跃路线 {rid}, 序列缓存", flush=True)
                 return
 
