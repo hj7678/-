@@ -912,6 +912,11 @@ class FeedingMasterController:
                     continue
                 if fp_candidate == 'silo_out':
                     continue
+                # 跨带拒绝: 新路线必须与当前路线在同一皮带上
+                new_cart = self.route_manager.ROUTE_CARTS.get(new_route_id, '')
+                cur_cart = self.route_manager.ROUTE_CARTS.get(route_id, '')
+                if CART_TO_BELT.get(new_cart, '') != CART_TO_BELT.get(cur_cart, ''):
+                    continue
                 candidate_priority = priority_map.get(fp_candidate, 99)
                 if candidate_priority < current_priority and laser.get(fp_candidate, True):
                     if belt_id == 'D7' and d7_override:
