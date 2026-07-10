@@ -99,15 +99,21 @@ class ScheduleManager:
     def _check_idle(self, belt_id: str, now: float) -> bool:
         # 兼职调度回切检测: 正在执行跨列但主列有仓低于阈值→强制请求调度
         if belt_id in self._executing and belt_id in ('D7', 'D9'):
-            primary = self._get_primary_bins(belt_id)
-            if primary and any(b['stock'] < IDLE_THRESHOLD_TONS for b in primary):
-                last = self._last_request.get(belt_id, 0)
-                if now - last < 30:  # 30s冷却，比普通调度短
-                    return False
-                self._last_request[belt_id] = now
-                print(f"[FM-Sched] {belt_id} 兼职回切: 主列有仓低于{IDLE_THRESHOLD_TONS}t", flush=True)
-                self._request_schedule(belt_id)
-                return True
+            # 确认当前路线确实在跨列上料
+            current_bin = self._executing_bin.get(belt_id, '')
+            from scheduling.bin_config import BELT_TO_COL_PREFIX, CROSS_COL_PREFIX
+            cross_prefix = CROSS_COL_PREFIX.get(belt_id, '')
+            if cross_prefix and current_bin.startswith(cross_prefix):
+                # 当前是跨列上料，检查主列是否有需求
+                primary = self._get_primary_bins(belt_id)
+                if primary and any(b['stock'] < IDLE_THRESHOLD_TONS for b in primary):
+                    last = self._last_request.get(belt_id, 0)
+                    if now - last < 30:
+                        return False
+                    self._last_request[belt_id] = now
+                    print(f"[FM-Sched] {belt_id} 兼职回切: 主列有仓低于{IDLE_THRESHOLD_TONS}t", flush=True)
+                    self._request_schedule(belt_id)
+                    return True
 
         # 正在执行中或已有缓存序列 → 跳过
         if belt_id in self._executing:
