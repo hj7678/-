@@ -97,6 +97,18 @@ class ScheduleManager:
         return False
 
     def _check_idle(self, belt_id: str, now: float) -> bool:
+        # 兼职调度回切检测: 正在执行跨列但主列有仓低于阈值→强制请求调度
+        if belt_id in self._executing and belt_id in ('D7', 'D9'):
+            primary = self._get_primary_bins(belt_id)
+            if primary and any(b['stock'] < IDLE_THRESHOLD_TONS for b in primary):
+                last = self._last_request.get(belt_id, 0)
+                if now - last < 30:  # 30s冷却，比普通调度短
+                    return False
+                self._last_request[belt_id] = now
+                print(f"[FM-Sched] {belt_id} 兼职回切: 主列有仓低于{IDLE_THRESHOLD_TONS}t", flush=True)
+                self._request_schedule(belt_id)
+                return True
+
         # 正在执行中或已有缓存序列 → 跳过
         if belt_id in self._executing:
             return False
@@ -125,6 +137,18 @@ class ScheduleManager:
         self._request_schedule(belt_id)
 
     # ── 构建请求 ──
+
+    def _get_primary_bins(self, belt_id: str) -> List[dict]:
+        """只获取主列料仓（不触发跨列），用于回切检测"""
+        from scheduling.bin_config import BELT_BINS
+        bin_ids = BELT_BINS.get(belt_id, [])
+        if not bin_ids:
+            return []
+        levels = self.stock.get_levels(bin_ids)
+        return [
+            {'bin_id': b['bin_id'], 'stock': b['level_tons']}
+            for b in levels
+        ]
 
     def _get_belt_bins(self, belt_id: str) -> List[dict]:
         """从 Stock Management 获取某皮带对应料仓的料位（含跨列逻辑）"""
