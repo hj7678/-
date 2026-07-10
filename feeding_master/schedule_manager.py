@@ -129,12 +129,19 @@ class ScheduleManager:
         if not any_below:
             return False
 
+        # 跨列/兼职调度跳过长时间冷却，立即请求
+        from scheduling.bin_config import CROSS_COL_PREFIX
+        is_cross = belt_id in ('D7', 'D9') and levels and \
+            levels[0]['bin_id'].startswith(CROSS_COL_PREFIX.get(belt_id, ''))
+
         last = self._last_request.get(belt_id, 0)
-        if now - last < SCHEDULE_COOLDOWN:
+        cooldown = 5 if is_cross else SCHEDULE_COOLDOWN  # 跨列5s冷却，普通180s
+        if now - last < cooldown:
             return False
 
         self._last_request[belt_id] = now
-        print(f"[FM-Sched] {belt_id} 空闲调度", flush=True)
+        label = "跨列调度" if is_cross else "空闲调度"
+        print(f"[FM-Sched] {belt_id} {label}", flush=True)
         self._request_schedule(belt_id)
         return True
 
