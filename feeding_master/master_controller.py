@@ -781,6 +781,11 @@ class FeedingMasterController:
 
         candidates = []
         for feed_point, route_id in available:
+            # 过滤: 路线必须匹配当前皮带（跨列调度关键）
+            route_cart = self.route_manager.ROUTE_CARTS.get(route_id, '')
+            route_belt = CART_TO_BELT.get(route_cart, '')
+            if route_belt and route_belt != belt_id:
+                continue
             # feed3 优先级供 P2/P3，P4 不使用 feed3
             if feed_point == 'feed3' and prefix not in ('P2', 'P3'):
                 continue
