@@ -25,6 +25,8 @@ def main():
     print("等待 FM 连接...")
 
     last_cmds = None
+    last_level_time = 0.0
+    last_levels = None
 
     while True:
         sock = None
@@ -53,6 +55,19 @@ def main():
                         continue
 
                     if msg.get('type') != 'command':
+                        # level_report 独立定时打印
+                        if msg.get('type') == 'level_report':
+                            levels = msg.get('levels', [])
+                            now = time.time()
+                            if levels != last_levels and now - last_level_time >= 10:
+                                last_levels = list(levels)
+                                last_level_time = now
+                                print(f"\n[level_report] {len(levels)}个料仓:")
+                                for l in levels[:5]:
+                                    print(f"  {l['bin_id']}: {l['level_pct']}% ({l['capacity']}t)")
+                                if len(levels) > 5:
+                                    print(f"  ... 共{len(levels)}个")
+                                sys.stdout.flush()
                         continue
 
                     cmds = msg.get('commands', [])
