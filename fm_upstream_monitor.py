@@ -1,13 +1,10 @@
 """
-上游监听器 —— 代替 FM 接收真实上位机发送的数据
-
-监听端口，接收真实上位机连接并打印所有上行数据。
-用于验证真实上位机发送的传感器状态是否符合协议。
+FM 命令监听器 —— 仅打印 FM 发送给上位机的控制命令（变化时打印一次）
 
 用法:
-    py fm_upstream_monitor.py [port]
+    py fm_upstream_monitor.py [host] [port]
 
-    默认: port=8888（真实上位机 IP: 172.16.16.106）
+    默认: host=127.0.0.1, port=8896
 """
 
 import json
@@ -15,73 +12,84 @@ import socket
 import sys
 import time
 
-LISTEN_PORT = 8888
-PRINT_INTERVAL = 2.0  # sensor_states 打印间隔（秒）
-
-
-def handle_client(sock: socket.socket, addr: tuple):
-    buf = b""
-    last_print = 0.0
-    try:
-        while True:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                try:
-                    msg = json.loads(line.decode('utf-8').strip())
-                except json.JSONDecodeError:
-                    print(f"非JSON: {line[:200]}")
-                    continue
-
-                msg_type = msg.get('type', '?')
-                now = time.time()
-                if msg_type == 'sensor_states':
-                    if now - last_print < PRINT_INTERVAL:
-                        continue
-                    last_print = now
-                    data = msg.get('data', {})
-                    print(f"\n[{msg_type}] from {addr}")
-                    print(json.dumps(data, ensure_ascii=False, indent=2))
-                else:
-                    print(f"\n[{msg_type}] from {addr}")
-                    print(json.dumps(msg, ensure_ascii=False, indent=2))
-
-                sys.stdout.flush()
-    except (ConnectionResetError, BrokenPipeError, OSError):
-        pass
-    finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
+HOST = '127.0.0.1'
+PORT = 8896
+RECONNECT_DELAY = 3.0
 
 
 def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else LISTEN_PORT
+    host = sys.argv[1] if len(sys.argv) > 1 else HOST
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else PORT
 
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(('0.0.0.0', port))
-    server.listen(5)
-    print(f"上游监听器启动 → 监听 0.0.0.0:{port}")
-    print(f"等待真实上位机连接...")
-    print(f"sensor_states 打印间隔: {PRINT_INTERVAL}s")
-    print()
+    print(f"FM 命令监听器启动 → {host}:{port}")
+    print("等待 FM 连接...")
 
-    try:
-        while True:
-            client, addr = server.accept()
-            print(f"\n✓ 真实上位机已连接: {addr}")
+    last_cmds = None
+
+    while True:
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect((host, port))
+            sock.settimeout(None)
+            print(f"\n✓ 已连接 FM ({host}:{port})")
             print("=" * 60)
-            handle_client(client, addr)
-            print(f"\n✗ 真实上位机断开: {addr}")
-    except KeyboardInterrupt:
-        print("\n已停止")
-    finally:
-        server.close()
+
+            buf = b""
+            while True:
+                try:
+                    chunk = sock.recv(4096)
+                except (ConnectionResetError, ConnectionAbortedError, OSError):
+                    break
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    try:
+                        msg = json.loads(line.decode('utf-8').strip())
+                    except json.JSONDecodeError:
+                        continue
+
+                    if msg.get('type') != 'command':
+                        continue
+
+                    cmds = msg.get('commands', [])
+                    if cmds == last_cmds:
+                        continue
+                    last_cmds = list(cmds)
+
+                    seq = msg.get('seq', '?')
+                    print(f"\n[seq={seq}] {len(cmds)}条指令:")
+                    for c in cmds:
+                        print(f"  {c}")
+                    if 'schedule' in msg:
+                        sched = msg['schedule']
+                        print(f"  调度: {sched.get('executing_bin', {})}")
+                        for belt, seq in sched.get('sequences', {}).items():
+                            if seq:
+                                print(f"    {belt}: {seq}")
+                    if 'diagnosis' in msg:
+                        print(f"  诊断: {msg['diagnosis']}")
+                    sys.stdout.flush()
+
+        except (ConnectionRefusedError, OSError, socket.timeout):
+            if sock:
+                sock.close()
+            print(f"\r✗ FM 不可达，{RECONNECT_DELAY}s后重试...", end='', flush=True)
+            time.sleep(RECONNECT_DELAY)
+        except KeyboardInterrupt:
+            print("\n\n已停止")
+            if sock:
+                sock.close()
+            sys.exit(0)
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
 
 if __name__ == '__main__':
