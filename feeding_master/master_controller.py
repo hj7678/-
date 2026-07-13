@@ -459,6 +459,15 @@ class FeedingMasterController:
                             print(f"[FM] {belt_id} 自动续料 {route_id}→{route_id2} → {nxt} (停非共用: {non_shared})", flush=True)
                         elif route_id2 and self.activate_route(route_id2, nxt):
                             print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
+                        elif route_id2:
+                            # 激活失败(如仓已被占用)→跳过该仓重试下一个
+                            print(f"[FM] {belt_id} 跳过 {nxt} (激活失败), 尝试下一仓", flush=True)
+                            nxt2 = self.scheduler.get_next_bin(belt_id)
+                            if nxt2 and nxt2 != nxt:
+                                self.scheduler.pop_next_bin(belt_id)
+                                self._pending_auto_continue = (belt_id, nxt2)
+                            else:
+                                self._pending_auto_continue = (belt_id, nxt)
                         else:
                             self._pending_auto_continue = (belt_id, nxt)
                     else:
@@ -725,6 +734,12 @@ class FeedingMasterController:
 
     def activate_route(self, route_id: str, target_bin: str):
         """激活一条路线, 若cart已在目标位则直接FEEDING跳过MOVE"""
+        # 防重复上料: 目标仓已被其他皮带正在上料→跳过
+        for rid in self._active_routes:
+            ctx = self.route_manager.get_route_context(rid)
+            if ctx and ctx.target_bin == target_bin and rid != route_id:
+                print(f"[FM] {route_id} 跳过 {target_bin}: 已被 {rid} 上料中", flush=True)
+                return False
         ok = self.route_manager.start_route(route_id, target_bin)
         if ok:
             # start_route不处理S格式(Cart4), 补设正确目标
