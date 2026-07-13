@@ -95,6 +95,16 @@ class FeedingMasterServer:
         }
         self._send(payload)
 
+    def send_diagnosis(self, diag: list):
+        """推送诊断结果（变化时）"""
+        if not diag:
+            return
+        payload = {
+            "type": "diagnosis",
+            "data": diag,
+        }
+        self._send(payload)
+
     def _send(self, data: dict):
         """广播消息给所有连接的上位机"""
         with self._upper_lock:

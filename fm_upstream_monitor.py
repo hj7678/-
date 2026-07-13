@@ -55,6 +55,15 @@ def main():
                         continue
 
                     if msg.get('type') != 'command':
+                        # diagnosis 独立打印
+                        if msg.get('type') == 'diagnosis':
+                            data = msg.get('data', [])
+                            if data:
+                                print(f"\n[diagnosis]")
+                                for d in data:
+                                    print(f"  {d}")
+                                sys.stdout.flush()
+                            continue
                         # level_report 独立定时打印
                         if msg.get('type') == 'level_report':
                             levels = msg.get('levels', [])
@@ -97,7 +106,12 @@ def main():
                                     print(f"    {belt}: {seq}")
                             sys.stdout.flush()
                     if 'diagnosis' in msg:
-                        print(f"  诊断: {msg['diagnosis']}")
+                        diag = msg['diagnosis']
+                        if diag:
+                            print(f"\n[diagnosis]")
+                            for d in diag:
+                                print(f"  {d}")
+                            sys.stdout.flush()
                     sys.stdout.flush()
 
         except (ConnectionRefusedError, OSError, socket.timeout):

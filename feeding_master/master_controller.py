@@ -720,14 +720,19 @@ class FeedingMasterController:
         if commands != last_cmds and now - last_send_time >= min_interval:
             self._last_sent_commands = list(commands)
             self._last_send_time = now
-            self.server.send_commands(commands, route_info, sched_info, diag)
+            self.server.send_commands(commands, route_info, sched_info, None)
         else:
-            # 调度/诊断变化时也推送（即使指令未变）
             last_sched = getattr(self, '_last_sent_sched', {})
-            if (sched_info != last_sched or diag) and now - last_send_time >= min_interval:
+            if sched_info != last_sched and now - last_send_time >= min_interval:
                 self._last_sent_sched = dict(sched_info) if sched_info else {}
                 self._last_send_time = now
-                self.server.send_commands(commands, route_info, sched_info, diag)
+                self.server.send_commands(commands, route_info, sched_info, None)
+
+        # 诊断独立发送，变化时推送一次
+        last_diag = getattr(self, '_last_sent_diag', None)
+        if diag != last_diag:
+            self._last_sent_diag = diag
+            self.server.send_diagnosis(diag)
         if hasattr(self, '_deactivated_routes'):
             self._deactivated_routes.clear()
 
