@@ -696,6 +696,22 @@ class FeedingMasterController:
             old_rid, new_rid, tgt_bin = pending_switch
             self._switch_route_phase1(old_rid, new_rid, tgt_bin)
         # 指令变化时推送，发送全量指令（HMI根据全量设置状态，空缺表示关闭）
+        # 兜底：将 feed_point silo_out 替换为 silo_gate 命令
+        filtered = []
+        for c in commands:
+            if c['device'] == 'feed_point' and c['id'] == 'silo_out':
+                # 找到目标 S 仓
+                for rid in self._active_routes:
+                    ctx = self.route_manager.get_route_context(rid)
+                    if ctx and ctx.target_bin and ctx.target_bin.startswith('S'):
+                        gate_id = f"silo_gate_{ctx.target_bin}"
+                        filtered.append({'device': 'silo_gate', 'id': gate_id,
+                                        'action': 'open' if c['action'] == 'start' else 'close'})
+                        break
+            else:
+                filtered.append(c)
+        commands = filtered
+
         # 最低200ms间隔，避免高频刷新导致HMI动画卡顿
         last_send_time = getattr(self, '_last_send_time', 0)
         now = time.time()
