@@ -666,7 +666,7 @@ class FeedingMasterController:
         for c in commands:
             key = (c['device'], c['id'])
             cur_cmds[key] = c
-        # 计算增量: 新增/变化的指令 + 已移除的指令（stop）
+        # 计算增量: 新增/变化的指令 + 已移除的指令
         delta = []
         for key, c in cur_cmds.items():
             if key not in last_cmds or last_cmds[key] != c:
@@ -674,7 +674,12 @@ class FeedingMasterController:
         for key in last_cmds:
             if key not in cur_cmds:
                 dev, dev_id = key
-                delta.append({'device': dev, 'id': dev_id, 'action': 'stop'})
+                # 已关闭的组件跳过（last_cmds中action已是close则无需再发stop）
+                prev = last_cmds[key]
+                if prev.get('action', '') in ('close', 'stop'):
+                    continue
+                off_action = 'close' if dev in ('hopper', 'silo_gate') else 'stop'
+                delta.append({'device': dev, 'id': dev_id, 'action': off_action})
         # 没有变化且调度/诊断也未变 → 跳过
         last_sched = getattr(self, '_last_sent_sched', {})
         sched_changed = (sched_info != last_sched)
