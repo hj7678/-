@@ -696,15 +696,21 @@ class FeedingMasterController:
             old_rid, new_rid, tgt_bin = pending_switch
             self._switch_route_phase1(old_rid, new_rid, tgt_bin)
         # 指令变化时推送，发送全量指令（HMI根据全量设置状态，空缺表示关闭）
+        # 最低200ms间隔，避免高频刷新导致HMI动画卡顿
+        last_send_time = getattr(self, '_last_send_time', 0)
+        now = time.time()
+        min_interval = 0.2
         last_cmds = getattr(self, '_last_sent_commands', [])
-        if commands != last_cmds:
+        if commands != last_cmds and now - last_send_time >= min_interval:
             self._last_sent_commands = list(commands)
+            self._last_send_time = now
             self.server.send_commands(commands, route_info, sched_info, diag)
         else:
             # 调度/诊断变化时也推送（即使指令未变）
             last_sched = getattr(self, '_last_sent_sched', {})
-            if sched_info != last_sched or diag:
+            if (sched_info != last_sched or diag) and now - last_send_time >= min_interval:
                 self._last_sent_sched = dict(sched_info) if sched_info else {}
+                self._last_send_time = now
                 self.server.send_commands(commands, route_info, sched_info, diag)
         if hasattr(self, '_deactivated_routes'):
             self._deactivated_routes.clear()
