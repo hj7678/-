@@ -112,7 +112,7 @@ class FeedingMasterServer:
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server.bind((self.host, self.port))
-        self._server.listen(1)  # 只接受一个上位机连接
+        self._server.listen(5)  # 支持多客户端同时连接
         self._running = True
         print(f"[FeedingMaster] 服务已启动 {self.host}:{self.port}", flush=True)
 
