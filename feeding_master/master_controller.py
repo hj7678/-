@@ -433,7 +433,21 @@ class FeedingMasterController:
                         nxt = self.scheduler.get_next_bin(belt_id)
                     if nxt:
                         self.scheduler.pop_next_bin(belt_id)
-                        self._pending_auto_continue = (belt_id, nxt)
+                        # 同帧续料: 避免 WAITING 空窗期导致皮带 停→启
+                        route_id2 = self._pick_route_for_bin(belt_id, nxt)
+                        if route_id2 and route_id2 != route_id:
+                            old_convs = set(config.FEED_ROUTES.get(route_id, {}).get('conveyors', []))
+                            new_convs = set(config.FEED_ROUTES.get(route_id2, {}).get('conveyors', []))
+                            non_shared = old_convs - new_convs
+                            self._do_switch(route_id, route_id2, nxt)
+                            for cid in non_shared:
+                                commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                                new_cmds[f"belt:{cid}"] = 'stop'
+                            print(f"[FM] {belt_id} 自动续料 {route_id}→{route_id2} → {nxt} (停非共用: {non_shared})", flush=True)
+                        elif route_id2 and self.activate_route(route_id2, nxt):
+                            print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
+                        else:
+                            self._pending_auto_continue = (belt_id, nxt)
                     else:
                         # 无下一仓: 进入节能待机, 停止所有皮带
                         self.route_manager.set_route_state(route_id, RouteState.STANDBY)
