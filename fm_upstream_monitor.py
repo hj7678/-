@@ -26,6 +26,7 @@ def main():
 
     last_level_time = 0.0
     last_levels = None
+    last_sched = None
 
     while True:
         sock = None
@@ -79,10 +80,14 @@ def main():
                         print(f"  {c}")
                     if 'schedule' in msg:
                         sched = msg['schedule']
-                        print(f"  调度: {sched.get('executing_bin', {})}")
-                        for belt, seq in sched.get('sequences', {}).items():
-                            if seq:
-                                print(f"    {belt}: {seq}")
+                        if sched != last_sched:
+                            last_sched = sched
+                            print(f"\n[schedule]")
+                            print(f"  执行中: {sched.get('executing_bin', {})}")
+                            for belt, seq in sched.get('sequences', {}).items():
+                                if seq:
+                                    print(f"    {belt}: {seq}")
+                            sys.stdout.flush()
                     if 'diagnosis' in msg:
                         print(f"  诊断: {msg['diagnosis']}")
                     sys.stdout.flush()
