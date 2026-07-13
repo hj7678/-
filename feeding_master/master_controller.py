@@ -659,15 +659,30 @@ class FeedingMasterController:
             self._pending_route_switch = None
             old_rid, new_rid, tgt_bin = pending_switch
             self._switch_route_phase1(old_rid, new_rid, tgt_bin)
-        # 指令变化时推送，避免每帧(50ms)高频发送相同指令
-        last_cmds = getattr(self, '_last_sent_commands', [])
+        # 指令变化时推送，仅发送变化的部分（增量的启动/停止）
+        last_cmds = getattr(self, '_last_sent_commands', {})
+        # 将当前 commands 列表转为 key→action 字典
+        cur_cmds = {}
+        for c in commands:
+            key = (c['device'], c['id'])
+            cur_cmds[key] = c
+        # 计算增量: 新增/变化的指令 + 已移除的指令（stop）
+        delta = []
+        for key, c in cur_cmds.items():
+            if key not in last_cmds or last_cmds[key] != c:
+                delta.append(c)
+        for key in last_cmds:
+            if key not in cur_cmds:
+                dev, dev_id = key
+                delta.append({'device': dev, 'id': dev_id, 'action': 'stop'})
+        # 没有变化且调度/诊断也未变 → 跳过
         last_sched = getattr(self, '_last_sent_sched', {})
-        cmds_changed = (commands != last_cmds)
         sched_changed = (sched_info != last_sched)
-        if cmds_changed or sched_changed or diag:
-            self._last_sent_commands = list(commands)
-            self._last_sent_sched = dict(sched_info) if sched_info else {}
-            self.server.send_commands(commands, route_info, sched_info, diag)
+        if not delta and not sched_changed and not diag:
+            return
+        self._last_sent_commands = cur_cmds
+        self._last_sent_sched = dict(sched_info) if sched_info else {}
+        self.server.send_commands(delta, route_info, sched_info, diag)
         if hasattr(self, '_deactivated_routes'):
             self._deactivated_routes.clear()
 

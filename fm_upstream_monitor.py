@@ -24,7 +24,6 @@ def main():
     print(f"FM 命令监听器启动 → {host}:{port}")
     print("等待 FM 连接...")
 
-    last_cmds = None
     last_level_time = 0.0
     last_levels = None
 
@@ -71,9 +70,8 @@ def main():
                         continue
 
                     cmds = msg.get('commands', [])
-                    if cmds == last_cmds:
+                    if not cmds:
                         continue
-                    last_cmds = list(cmds)
 
                     seq = msg.get('seq', '?')
                     print(f"\n[seq={seq}] {len(cmds)}条指令:")
