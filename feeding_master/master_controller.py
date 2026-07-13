@@ -254,14 +254,27 @@ class FeedingMasterController:
             commands.append({'device': 'cart', 'id': cart_return[0], 'action': 'move',
                            'target': cart_return[1], 'route_id': '', 'left_divert': True, 'right_divert': False})
             print(f"[FM] 小车归位: {cart_return[0]}→{cart_return[1]}", flush=True)
-        # 上料点切换: 停止旧上料点
+        # 上料点切换: 停止旧上料点（silo_out 转为 silo_gate close）
         pending_stop = getattr(self, '_pending_feed_stop', None)
         if pending_stop:
-            commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
+            if pending_stop == 'silo_out':
+                # silo_out → 找到当前正在出料的卸料门并关闭
+                for rid in self._active_routes:
+                    ctx = self.route_manager.get_route_context(rid)
+                    if ctx and ctx.target_bin and ctx.target_bin.startswith('S'):
+                        commands.append({'device': 'silo_gate',
+                                        'id': f"silo_gate_{ctx.target_bin}",
+                                        'action': 'close'})
+                        break
+            else:
+                commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
             self._pending_feed_stop = None
         pending_start = getattr(self, '_pending_feed_start', None)
         if pending_start:
-            commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
+            if pending_start == 'silo_out':
+                pass  # silo_out 启动由 silo_gate open 处理（在 FEEDING 进入时）
+            else:
+                commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
             self._pending_feed_start = None
         # 非共用皮带清空：判定传感器从有料→无料时完成
         pending_clear = getattr(self, '_pending_belt_clear', {})
