@@ -75,8 +75,16 @@ def main():
                         continue
 
                     seq = msg.get('seq', '?')
-                    print(f"\n[seq={seq}] {len(cmds)}条指令:")
-                    for c in cmds:
+                    # 按类型分组显示
+                    belts = [c for c in cmds if c['device'] == 'belt']
+                    hoppers = [c for c in cmds if c['device'] == 'hopper']
+                    others = [c for c in cmds if c['device'] not in ('belt', 'hopper')]
+                    parts = []
+                    if belts: parts.append(f"{len(belts)}皮带")
+                    if hoppers: parts.append(f"{len(hoppers)}斗")
+                    if others: parts.append(f"{len(others)}其他")
+                    print(f"\n[seq={seq}] {'+'.join(parts)}:")
+                    for c in belts + hoppers + others:
                         print(f"  {c}")
                     if 'schedule' in msg:
                         sched = msg['schedule']
