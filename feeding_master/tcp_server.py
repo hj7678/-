@@ -70,6 +70,22 @@ class FeedingMasterServer:
 
     # ── 发送控制指令 ──
 
+    def send_commands(self, commands: list, route_info: dict = None, sched_info: dict = None, diag: list = None):
+        """推送控制指令给仿真 HMI（:8896，全量发送）"""
+        self._seq += 1
+        payload = {
+            "type": "command",
+            "seq": self._seq,
+            "commands": commands,
+        }
+        if route_info:
+            payload["route_states"] = route_info
+        if sched_info:
+            payload["schedule"] = sched_info
+        if diag:
+            payload["diagnosis"] = diag
+        self._send(payload)
+
     def send_commands_real(self, commands: list, route_info: dict = None, sched_info: dict = None, diag: list = None):
         """推送增量控制指令给真实上位机（仅 :8897）"""
         self._seq += 1
