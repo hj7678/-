@@ -157,14 +157,9 @@ def compute_cart_target_position(
         return None
 
     try:
-        row = int(target_bin.split('-')[1])
+        return int(target_bin.split('-')[1])
     except (ValueError, IndexError):
         return None
-
-    # Cart2(D8): 位置1=顶行(P2-7/P3-7), 位置7=底行(P2-1/P3-1)
-    if cart_id == 'Cart2':
-        return 8 - row
-    return row
 
 
 def compute_cart4_target_position(target_bin: str) -> Optional[int]:
