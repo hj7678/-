@@ -274,6 +274,10 @@ class ScheduleManager:
             if not first.startswith(default_prefix):
                 payload["cross_prefix"] = CROSS_COL_PREFIX.get(belt_id, first.split('-')[0])
 
+        # 调试: 打印实际发送的 bins
+        print(f"[FM-Sched] {belt_id} 发送调度请求: {[b['bin_id'] for b in bins[:3]]}... "
+              f"(共{len(bins)}仓) → port={SCHEDULING_PORTS.get(belt_id)}", flush=True)
+
         t = threading.Thread(target=self._send_and_recv, args=(belt_id, payload), daemon=True)
         t.start()
 
