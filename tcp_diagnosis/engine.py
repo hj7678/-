@@ -947,9 +947,13 @@ class DiagnosisEngine:
             is_endpoint = cid in belt_endpoints and any(
                 snapshot.routes.get(rid) and snapshot.routes[rid].state in active_states
                 for rid in belt_endpoints.get(cid, set()))
-            # 小车移动: 终点皮带故意停止, 不检查
+            # 小车移动: 终点皮带故意停止, 不检查（含 cart.moving 防止 FEEDING+MOVING 误判）
             is_endpoint_moving = is_endpoint and any(
-                snapshot.routes.get(rid) and snapshot.routes[rid].state == RouteState.MOVING_TO_TARGET
+                snapshot.routes.get(rid) and (
+                    snapshot.routes[rid].state == RouteState.MOVING_TO_TARGET or
+                    (snapshot.carts.get(ROUTE_CARTS.get(rid, '')) and
+                     snapshot.carts[ROUTE_CARTS.get(rid, '')].moving)
+                )
                 for rid in belt_endpoints.get(cid, set()))
             # 顺序策略终点: CLEARING期间终点皮带故意停止, 跳过检查
             sequential_endpoint = False
@@ -1049,6 +1053,18 @@ class DiagnosisEngine:
             if not route or route.state != RouteState.FEEDING:
                 continue
             if not route.proximity_sensor_ids:
+                continue
+
+            # 小车移动中跳过，避免MOVING阶段误判
+            cart_id = ROUTE_CARTS.get(route_id, '')
+            if cart_id:
+                cart = snapshot.carts.get(cart_id)
+                if cart and cart.moving:
+                    continue
+
+            # 刚进入FEEDING 2s内跳过
+            feeding_since = self._route_state_since.get(route_id, ts)
+            if ts - feeding_since < 2.0:
                 continue
 
             # 起始传感器 = 路线上第一个接近开关（对应起始皮带）
