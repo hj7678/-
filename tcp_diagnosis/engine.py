@@ -406,6 +406,11 @@ class DiagnosisEngine:
         results = []
         ts = snapshot.timestamp
 
+        # 刚进入FEEDING 2s内跳过检查，避免MOVING→FEEDING过渡期误报
+        feeding_since = self._route_state_since.get(route.route_id, ts)
+        if ts - feeding_since < 2.0:
+            return results
+
         for cid in route.conveyor_ids:
             conv = snapshot.conveyors.get(cid)
             # 顺序清空策略：终点皮带可能被故意停止（清空后还未重新启动），跳过检查
@@ -801,15 +806,25 @@ class DiagnosisEngine:
                 else:
                     self._hopper_switch_fault_start.pop(key_stuck_open, None)
 
-            # 规则3：FEEDING 时开关为关
+            # 规则3：FEEDING 时开关为关（MOVING_TO_TARGET / CLEARING 不检查）
             if route_state == RouteState.FEEDING and not hopper.switch_open:
-                results.append(DiagnosisResult(
-                    sensor_id=hopper_id,
-                    fault_type="hopper_switch_unexpected",
-                    confidence=0.50,
-                    description=f"{hopper_id}开关异常: FEEDING状态下开关为关",
-                    category="hopper_switch",
-                ))
+                route = self._hopper_route(hopper_id, snapshot)
+                if route and route.state == RouteState.FEEDING:
+                    key = f"{hopper_id}:feeding_closed"
+                    start = self._hopper_switch_fault_start.get(key, ts)
+                    self._hopper_switch_fault_start[key] = start
+                    if ts - start >= DEFAULT_FAULT_DURATION:
+                        results.append(DiagnosisResult(
+                            sensor_id=hopper_id,
+                            fault_type="hopper_switch_unexpected",
+                            confidence=0.50,
+                            description=f"{hopper_id}开关异常: FEEDING状态下开关为关(持续{ts-start:.0f}s)",
+                            category="hopper_switch",
+                        ))
+                else:
+                    self._hopper_switch_fault_start.pop(f"{hopper_id}:feeding_closed", None)
+            else:
+                self._hopper_switch_fault_start.pop(f"{hopper_id}:feeding_closed", None)
 
         return results
 
