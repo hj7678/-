@@ -35,6 +35,7 @@ class FeedingMasterServer:
         self._real_server: Optional[socket.socket] = None
         self._running = False
         self._seq = 0
+        self._real_seq = 0  # 真实上位机独立序号，不与仿真 HMI 共享
 
         # 仿真 HMI 连接（全量发送）
         self._upper_sockets: list = []
@@ -88,10 +89,10 @@ class FeedingMasterServer:
 
     def send_commands_real(self, commands: list, route_info: dict = None, sched_info: dict = None, diag: list = None):
         """推送增量控制指令给真实上位机（仅 :8897）"""
-        self._seq += 1
+        self._real_seq += 1
         payload = {
             "type": "command",
-            "seq": self._seq,
+            "seq": self._real_seq,
             "commands": commands,
         }
         if route_info:
