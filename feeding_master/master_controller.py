@@ -263,6 +263,12 @@ class FeedingMasterController:
                     cmd = {'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'close'}
                     if s_mat: cmd['material'] = s_mat
                     commands.append(cmd)
+            elif isinstance(pending_stop, tuple):
+                fp, tb = pending_stop
+                fp_mat = self._get_feed_point_material(fp, tb)
+                cmd = {'device': 'feed_point', 'id': fp, 'action': 'stop'}
+                if fp_mat: cmd['material'] = fp_mat
+                commands.append(cmd)
             else:
                 fp_mat = self._get_feed_point_material(pending_stop)
                 cmd = {'device': 'feed_point', 'id': pending_stop, 'action': 'stop'}
@@ -277,6 +283,12 @@ class FeedingMasterController:
                     cmd = {'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'open'}
                     if s_mat: cmd['material'] = s_mat
                     commands.append(cmd)
+            elif isinstance(pending_start, tuple):
+                fp, tb = pending_start
+                fp_mat = self._get_feed_point_material(fp, tb)
+                cmd = {'device': 'feed_point', 'id': fp, 'action': 'start'}
+                if fp_mat: cmd['material'] = fp_mat
+                commands.append(cmd)
             else:
                 fp_mat = self._get_feed_point_material(pending_start)
                 cmd = {'device': 'feed_point', 'id': pending_start, 'action': 'start'}
@@ -410,12 +422,12 @@ class FeedingMasterController:
                             new_cmds[f"silo_gate:{s_bin}"] = 'open'
                             print(f"[FM] {route_id} silo_gate open: {gate_id}", flush=True)
                     elif fp:
-                        mt = config.FEED_ROUTES.get(route_id, {}).get('material_types', [])
+                        mt = self._get_feed_point_material(fp, target_bin)
                         cmd = {'device': 'feed_point', 'id': fp, 'action': 'start'}
-                        if mt: cmd['material'] = mt[0]
+                        if mt: cmd['material'] = mt
                         commands.append(cmd)
                         new_cmds[f"feed_point:{fp}"] = 'start'
-                        print(f"[FM] {route_id} feed_point start: {fp}", flush=True)
+                        print(f"[FM] {route_id} feed_point start: {fp} ({mt})", flush=True)
                 elif old.value == 'feeding':
                     # 离开 FEEDING → 停止上料点（silo_out 关闭对应 silo_gate）
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
@@ -431,9 +443,9 @@ class FeedingMasterController:
                             new_cmds[f"silo_gate:{s_bin}"] = 'close'
                             print(f"[FM] {route_id} silo_gate close: {gate_id}", flush=True)
                     elif fp:
-                        mt = config.FEED_ROUTES.get(route_id, {}).get('material_types', [])
+                        mt = self._get_feed_point_material(fp, target_bin)
                         cmd = {'device': 'feed_point', 'id': fp, 'action': 'stop'}
-                        if mt: cmd['material'] = mt[0]
+                        if mt: cmd['material'] = mt
                         commands.append(cmd)
                         new_cmds[f"feed_point:{fp}"] = 'stop'
                         print(f"[FM] {route_id} feed_point stop: {fp}", flush=True)
@@ -533,7 +545,9 @@ class FeedingMasterController:
                 if ctx.state == RouteState.FEEDING:
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
                     if fp:
+                        mt = self._get_feed_point_material(fp, target_bin)
                         cmd = {'device': 'feed_point', 'id': fp, 'action': 'start'}
+                        if mt: cmd['material'] = mt
                         commands.append(cmd)
                         new_cmds[f"feed_point:{fp}"] = 'start'
 
@@ -744,9 +758,9 @@ class FeedingMasterController:
             if fp and fp != 'silo_out':
                 key = f"feed_point:{fp}"
                 if new_cmds.get(key) != 'stop':
-                    mt = config.FEED_ROUTES.get(rid, {}).get('material_types', [])
+                    mt = self._get_feed_point_material(fp, ctx.target_bin or '')
                     cmd = {'device': 'feed_point', 'id': fp, 'action': 'stop'}
-                    if mt: cmd['material'] = mt[0]
+                    if mt: cmd['material'] = mt
                     commands.append(cmd)
                     new_cmds[key] = 'stop'
         # 增量对比: 用有序列表保留中间状态(close→open同帧不丢失)
@@ -973,12 +987,12 @@ class FeedingMasterController:
                 prefix = target_bin.split('-')[0]
                 if not self._has_feed_material('feed2_2', prefix):
                     if ctx.state != RouteState.CLEARING:
-                        self._pending_feed_stop = fp
+                        self._pending_feed_stop = (fp, target_bin)
                         ctx.state = RouteState.CLEARING
                         print(f"[FM] D6 上料点 {fp} 无料({prefix}) → 进入清空余料", flush=True)
                 elif ctx.state == RouteState.CLEARING:
                     # 物料恢复，恢复上料
-                    self._pending_feed_start = fp
+                    self._pending_feed_start = (fp, target_bin)
                     ctx.state = RouteState.FEEDING
                     print(f"[FM] D6 上料点 {fp} 有料({prefix}) → 恢复上料", flush=True)
                 continue
@@ -1071,6 +1085,7 @@ class FeedingMasterController:
         if not old_ctx:
             return
         old_fp = old_ctx.feed_point or config.FEED_ROUTES.get(old_route_id, {}).get('feed_point', '')
+        old_target_bin = old_ctx.target_bin or ''  # 保存后再清除
         old_ctx.state = RouteState.IDLE
         old_ctx.target_bin = ''           # 清除目标仓，确保桥接收到IDLE时移除route_to_bin
         old_ctx.cart_target_position = 0  # 清除小车目标
@@ -1079,7 +1094,7 @@ class FeedingMasterController:
             self._deactivated_routes = set()
         self._deactivated_routes.add(old_route_id)  # 加入deactivated，route_info会包含
         if old_fp:
-            self._pending_feed_stop = old_fp
+            self._pending_feed_stop = (old_fp, old_target_bin)
         old_convs = set(config.FEED_ROUTES.get(old_route_id, {}).get('conveyors', []))
         new_convs = set(config.FEED_ROUTES.get(new_route_id, {}).get('conveyors', []))
         non_shared = old_convs - new_convs
@@ -1472,16 +1487,49 @@ class FeedingMasterController:
     def get_active_routes(self) -> Set[str]:
         return set(self._active_routes)
 
-    def _get_feed_point_material(self, fp: str) -> str:
-        """根据 feed_point ID 获取物料类型"""
+    def _get_feed_point_material(self, fp: str, target_bin: str = '') -> str:
+        """根据 feed_point 和目标料仓确定物料类型（优先使用 target_bin 精确匹配）"""
+        if target_bin:
+            mt = self._get_material_by_fp_and_target(fp, target_bin)
+            if mt:
+                return mt
+        # fallback: 从活跃路线反查
         for rid in self._active_routes:
             ctx = self.route_manager.get_route_context(rid)
             if not ctx:
                 continue
             route_fp = ctx.feed_point or config.FEED_ROUTES.get(rid, {}).get('feed_point', '')
             if route_fp == fp:
+                tb = ctx.target_bin or ''
+                if tb:
+                    mt = self._get_material_by_fp_and_target(fp, tb)
+                    if mt:
+                        return mt
                 mt = config.FEED_ROUTES.get(rid, {}).get('material_types', [])
                 return mt[0] if mt else ''
+        return ''
+
+    @staticmethod
+    def _get_material_by_fp_and_target(fp: str, target_bin: str) -> str:
+        """根据上料点和目标料仓精确确定物料类型"""
+        # feed1_1, feed1_2, feed2_1: 永远石粉
+        if fp in ('feed1_1', 'feed1_2', 'feed2_1'):
+            return 'stone_powder'
+        # feed2_2: 取决于目标料仓
+        if fp == 'feed2_2':
+            if target_bin.startswith('P4'):
+                return 'aggregate_20mm'
+            elif target_bin.startswith('P3'):
+                return 'aggregate_10mm'
+            elif target_bin.startswith('S'):
+                from pos import SILO_BIN_MATERIALS
+                return SILO_BIN_MATERIALS.get(target_bin, '')
+        # feed3: 取决于目标料仓
+        if fp == 'feed3':
+            if target_bin.startswith('P2'):
+                return 'stone_powder'
+            elif target_bin.startswith('P3'):
+                return 'aggregate_10mm'
         return ''
 
     def _pick_source_silo_by_active(self) -> tuple:
