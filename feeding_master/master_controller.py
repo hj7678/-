@@ -1677,6 +1677,9 @@ class FeedingMasterController:
     def _compute_cart_divert(cart_id: str, target_bin: str) -> tuple:
         """根据小车ID和目标料仓计算分料方向"""
         if cart_id == 'Cart1':
+            # D7: P1列 → 左true右false; P2跨列 → 左false右true
+            if target_bin.startswith('P2'):
+                return (False, True)
             return (True, False)
         elif cart_id == 'Cart2':
             if target_bin.startswith('P2'):
@@ -1685,6 +1688,9 @@ class FeedingMasterController:
                 return (False, True)
             return (True, False)
         elif cart_id == 'Cart3':
+            # D9: P4列 → 左false右true; P3跨列 → 左true右false
+            if target_bin.startswith('P3'):
+                return (True, False)
             return (False, True)
         elif cart_id == 'Cart4':
             if target_bin.startswith('S'):
