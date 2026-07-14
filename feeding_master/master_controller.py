@@ -768,32 +768,16 @@ class FeedingMasterController:
                     if mt: cmd['material'] = mt
                     commands.append(cmd)
                     new_cmds[key] = 'stop'
-        # 增量对比: 用有序列表保留中间状态(close→open同帧不丢失)
-        last_cmds = getattr(self, '_last_sent_cmds', [])
-        cur_keys = [(c['device'], c['id'], c['action']) for c in commands]
-        if cur_keys != last_cmds:
-            delta = []
-            last_actions = {k: v for (k1, k2, v) in last_cmds for k in [(k1, k2)]}
-            for c in commands:
-                key = (c['device'], c['id'])
-                prev = last_actions.get(key)
-                if prev != c['action']:
-                    delta.append(c)
-            for key in last_actions:
-                if key not in {(c['device'], c['id']) for c in commands}:
-                    dev, dev_id = key
-                    if last_actions[key] in ('close', 'stop'):
-                        continue
-                    off = 'close' if dev in ('hopper', 'silo_gate') else 'stop'
-                    delta.append({'device': dev, 'id': dev_id, 'action': off})
-            self._last_sent_cmds = cur_keys
-            if delta:
-                self.server.send_commands(delta, route_info, sched_info, None)
+        # 全量发送: 指令变化时发送完整 commands 列表
+        last_cmds = getattr(self, '_last_sent_commands', [])
+        if commands != last_cmds:
+            self._last_sent_commands = list(commands)
+            self.server.send_commands(commands, route_info, sched_info, None)
         else:
             last_sched = getattr(self, '_last_sent_sched', {})
             if sched_info != last_sched:
                 self._last_sent_sched = dict(sched_info) if sched_info else {}
-                self.server.send_commands([], route_info, sched_info, None)
+                self.server.send_commands(commands, route_info, sched_info, None)
 
         # 诊断独立发送，变化时推送一次
         last_diag = getattr(self, '_last_sent_diag', None)
