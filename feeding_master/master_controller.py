@@ -583,7 +583,7 @@ class FeedingMasterController:
                         cart_at_target=cart_at_target,
                         hopper_states=_hs,
                     )
-                    if strategy in ('column_switch', 'reverse'):
+                    if strategy == 'column_switch':
                         hopper_cmds = {hid: ActuatorAction.OPEN for hid in ctx.assigned_hoppers}
                     for hid, action in hopper_cmds.items():
                         key = f"hopper:{hid}"
