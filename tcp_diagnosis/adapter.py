@@ -115,6 +115,7 @@ class TcpDataAdapter:
                 right_limit=bool(_val(cart.get('right_limit', {}), False)),
                 left_divert=bool(_val(cart.get('left_divert', {}), False)),
                 right_divert=bool(_val(cart.get('right_divert', {}), False)),
+                moving=bool(_val(cart.get('moving', {}), False)),
             )
 
         snapshot = SystemSnapshot(

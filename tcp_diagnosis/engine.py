@@ -21,6 +21,7 @@ from tcp_diagnosis.diagnosis_types import (
     SystemSnapshot,
     DiagnosisResult,
 )
+from shared.route_state_manager import ROUTE_CARTS
 
 REPORT_COOLDOWN = 1.0  # 实时推送, 不做冷却
 FAULT_CONFIRMATION_DURATION = 3.0  # 故障确认时长: 故障需持续该时间后才上报UI/下位机
@@ -405,6 +406,13 @@ class DiagnosisEngine:
         """正常上料阶段：开关必须true；接近开关按上下游判断；皮带全部运行"""
         results = []
         ts = snapshot.timestamp
+
+        # 小车移动中跳过，避免Cart1/2/3在MOVING阶段误判为FEEDING
+        cart_id = ROUTE_CARTS.get(route.route_id, '')
+        if cart_id:
+            cart = snapshot.carts.get(cart_id)
+            if cart and cart.moving:
+                return results
 
         # 刚进入FEEDING 2s内跳过检查，避免MOVING→FEEDING过渡期误报
         feeding_since = self._route_state_since.get(route.route_id, ts)

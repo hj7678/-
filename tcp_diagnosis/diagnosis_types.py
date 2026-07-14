@@ -50,6 +50,7 @@ class CartSnapshot:
     right_limit: bool
     left_divert: bool
     right_divert: bool
+    moving: bool = False
 
 
 @dataclass
