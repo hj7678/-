@@ -402,6 +402,10 @@ class FeedingMasterController:
             self.state_engine._override_threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
             has_next = bool(self.scheduler.get_next_bin(belt_id_for_engine)) if belt_id_for_engine else False
             has_seq = self.scheduler.has_sequence(belt_id_for_engine) if belt_id_for_engine else False
+            # 调试: 清空判定参数
+            if ctx.state == RouteState.FEEDING and level >= 90:
+                print(f"[FM-debug] {route_id} {ctx.target_bin} 料位={level:.0f}% 策略={strategy} "
+                      f"阈值={self.state_engine._override_threshold} belt={belt_id_for_engine}", flush=True)
             next_state, actions = self.state_engine.evaluate(
                 route_id, ctx.state,
                 level_sensors={'__target__': level},
