@@ -254,8 +254,12 @@ class FeedingMasterController:
 
     def _tick(self, delta_seconds: float):
         """一个控制周期"""
-        # 1. 拉取料位
+        # 1. 拉取料位（断连时自动重连）
         levels = self.stock.get_all_levels()
+        if not levels:
+            # 尝试重连 Stock Management
+            self.stock.connect()
+            levels = self.stock.get_all_levels()
         level_map = {b['bin_id']: b for b in levels} if levels else {}
 
         # 上料点无料自动切换检测
@@ -358,6 +362,16 @@ class FeedingMasterController:
             if ctx.state == RouteState.FEEDING and strategy == 'reverse':
                 strategy = self._resolve_clearing_strategy(route_id)
                 ctx.clearing_strategy = strategy
+
+            # 料位异常检测: FEEDING 状态料位为0超过30s → 强制触发清空
+            if ctx.state == RouteState.FEEDING and level <= 0.5:
+                if not hasattr(ctx, '_zero_level_start'):
+                    ctx._zero_level_start = self._total_runtime
+                if self._total_runtime - ctx._zero_level_start > 30:
+                    print(f"[FM] {route_id} {target_bin} 料位为0超过30s，强制清空", flush=True)
+                    level = 100  # 强制触发清空
+            elif hasattr(ctx, '_zero_level_start'):
+                delattr(ctx, '_zero_level_start')
 
             # 最小feeding时间: 刚进入FEEDING或刚自动续料, 3s内不触发清空
             if ctx.state == RouteState.FEEDING:

@@ -112,7 +112,8 @@ class StateTransitionEngine:
             if threshold is None:
                 threshold = {'sequential': 98, 'reverse': 95, 'column_switch': 88}.get(clearing_strategy, 95)
             if route.get('belt_id') == 'D9': threshold = 94  # D9 始终反序
-            if level >= threshold:
+            # 安全网: 料位 ≥100% 强制触发清空（防止阈值配置异常导致卡死）
+            if level >= 100 or level >= threshold:
                 actions['close_hoppers'] = (clearing_strategy != 'column_switch')
                 if clearing_strategy == 'sequential':
                     actions['stop_endpoint'] = True
