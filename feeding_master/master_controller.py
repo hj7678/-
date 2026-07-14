@@ -353,7 +353,8 @@ class FeedingMasterController:
                 cur_val = (cart_pos, ctx.cart_moving)
                 if cur_val != getattr(ctx, last_key, None):
                     setattr(ctx, last_key, cur_val)
-                    print(f"[FM-debug] {route_id} MOVING: {cart_id} pos={cart_pos}→{cart_target} moving={ctx.cart_moving}", flush=True)
+                    print(f"[FM-debug] {route_id} MOVING: {cart_id} pos={cart_pos}→{cart_target}"
+                          f" moving={ctx.cart_moving} target_bin={ctx.target_bin}", flush=True)
             target_bin = ctx.target_bin or ''
 
             level = 0.0
@@ -834,6 +835,10 @@ class FeedingMasterController:
                 return False
         ok = self.route_manager.start_route(route_id, target_bin)
         if ok:
+            ctx = self.route_manager.get_route_context(route_id)
+            print(f"[FM-debug] activate {route_id} → {target_bin}: "
+                  f"cart_target={ctx.cart_target_position if ctx else '?'} "
+                  f"cart_pos={self._cart_positions.get(ctx.assigned_cart, '?') if ctx else '?'}", flush=True)
             # start_route不处理S格式(Cart4), 补设正确目标
             ctx = self.route_manager.get_route_context(route_id)
             if ctx and ctx.assigned_cart == 'Cart4' and target_bin.startswith('S'):
