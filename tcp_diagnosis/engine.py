@@ -21,7 +21,13 @@ from tcp_diagnosis.diagnosis_types import (
     SystemSnapshot,
     DiagnosisResult,
 )
-from shared.route_state_manager import ROUTE_CARTS
+
+# 路线→小车映射(与shared/route_state_manager保持一致)
+ROUTE_CARTS = {
+    'route1': 'Cart1', 'route2': 'Cart1', 'route3': 'Cart1',
+    'route4': 'Cart3', 'route5': 'Cart4',
+    'route6': 'Cart2', 'route7': 'Cart3', 'route8': 'Cart2',
+}
 
 REPORT_COOLDOWN = 1.0  # 实时推送, 不做冷却
 FAULT_CONFIRMATION_DURATION = 3.0  # 故障确认时长: 故障需持续该时间后才上报UI/下位机
