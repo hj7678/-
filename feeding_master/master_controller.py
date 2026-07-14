@@ -910,8 +910,8 @@ class FeedingMasterController:
             if belt_id == 'D6':
                 self.scheduler.pop_next_bin(belt_id)
                 print(f"[FM] D6 跳过 {first_bin} (上料点物料不可用)，尝试下一仓", flush=True)
-            # D8/D9: 跳过并重试，避免序列残留导致死锁
-            elif belt_id in ('D8', 'D9'):
+            # D7/D8/D9: 跳过并重试，避免序列残留导致死锁
+            elif belt_id in ('D7', 'D8', 'D9'):
                 self.scheduler.pop_next_bin(belt_id)
                 nxt = self.scheduler.get_next_bin(belt_id)
                 if nxt:
@@ -1607,9 +1607,13 @@ class FeedingMasterController:
         return ''
 
     def _add_route_activate_cmds(self, route_id: str, target_bin: str, commands: list, new_cmds: dict):
-        """同帧补发新路线的斗打开+上料点启动命令，确保不丢帧"""
+        """同帧补发新路线的斗打开+上料点启动命令，确保不丢帧
+        仅在 cart 已在目标位置（FEEDING）时补发，MOVING_TO_TARGET 时跳过"""
         ctx = self.route_manager.get_route_context(route_id)
         if not ctx:
+            return
+        # 仅 FEEDING 状态补发斗+上料点，MOVING_TO_TARGET 由 _build_commands 处理
+        if ctx.state != RouteState.FEEDING:
             return
         for hid in ctx.assigned_hoppers:
             key = f"hopper:{hid}"

@@ -167,6 +167,11 @@ class ScheduleManager:
                 if nxt and self._on_sequence:
                     print(f"[FM-Sched] {belt_id} 序列残留 {nxt}，尝试续料", flush=True)
                     self._on_sequence(belt_id, list(self._sequences[belt_id]))
+                # 消费后仍残留 → 清空让 idle 检测重新触发调度
+                with self._sequences_lock:
+                    if self._sequences.get(belt_id):
+                        print(f"[FM-Sched] {belt_id} 序列残留无法消费，清空重新调度", flush=True)
+                        self._sequences.pop(belt_id, None)
                 return False
 
         # 空闲检测: 有仓低于阈值
