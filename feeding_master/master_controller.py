@@ -925,11 +925,16 @@ class FeedingMasterController:
             d9_override = getattr(self, '_d9_feed_override', '')
             if belt_id == 'D9' and d9_override and feed_point != d9_override:
                 continue
-            # D8: feed3 有料→选 feed3, 无料→选 silo_out
-            if belt_id == 'D8' and feed_point == 'silo_out' and self._has_feed_material('feed3', prefix):
+            # D8: feed3 有料→选 feed3, 无料→选 silo_out（缓存避免两次TCP调用不一致）
+            feed3_has = False
+            if belt_id == 'D8':
+                feed3_has = self._has_feed_material('feed3', prefix)
+            if belt_id == 'D8' and feed_point == 'silo_out' and feed3_has:
                 continue  # feed3 有料，跳过 silo_out
             # silo_out 无需激光检测（默认有料）
-            has_material = (feed_point == 'silo_out' or self._has_feed_material(feed_point, prefix))
+            has_material = (feed_point == 'silo_out' or
+                          (feed_point == 'feed3' and belt_id == 'D8' and feed3_has) or
+                          self._has_feed_material(feed_point, prefix))
             if not has_material:
                 continue
             priority = priority_map.get(feed_point, 99)
@@ -944,6 +949,12 @@ class FeedingMasterController:
                         if laser.get('feed1_1', True):
                             return route_id
                 return None
+            # D8: 无候选路线时回退到 silo_out（route8）
+            if belt_id == 'D8':
+                for feed_point, route_id in available:
+                    if feed_point == 'silo_out':
+                        print(f"[FM] D8 {bin_id} 无候选路线，回退 silo_out", flush=True)
+                        return route_id
             return None
         candidates.sort()
         return candidates[0][2]
