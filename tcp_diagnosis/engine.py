@@ -1003,41 +1003,7 @@ class DiagnosisEngine:
             if not route or route.state != RouteState.FEEDING:
                 continue
 
-            # 规则1：FEEDING路线所有传感器false + 皮带运行 → 异常
-            if route.state != RouteState.FEEDING:
-                continue
-            all_false = True
-            for sid in route.proximity_sensor_ids:
-                sensor = snapshot.proximity_sensors.get(sid)
-                if sensor and sensor.state:
-                    all_false = False
-                    break
-            if all_false and route.proximity_sensor_ids:
-                # 顺序清空策略：终点皮带可能被故意停止，此时非终点皮带运行是正常的，跳过跨传感器检查
-                strategy = getattr(route, 'clearing_strategy', 'reverse')
-                end_cid = route.conveyor_ids[-1] if route.conveyor_ids else None
-                running = any(
-                    snapshot.conveyors.get(cid) and snapshot.conveyors[cid].is_running
-                    for cid in route.conveyor_ids
-                    if not (strategy == 'sequential' and cid == end_cid)
-                )
-                if running:
-                    key = f"{route_id}:all_sensors_false"
-                    if key not in self._conveyor_fault_start:
-                        self._conveyor_fault_start[key] = ts
-                    if ts - self._conveyor_fault_start[key] >= DEFAULT_FAULT_DURATION:
-                        results.append(DiagnosisResult(
-                            sensor_id=route_id,
-                            fault_type="route_all_sensors_false",
-                            confidence=0.55,
-                            description=f"{route_id}异常: FEEDING但所有传感器为false(持续{ts-self._conveyor_fault_start[key]:.0f}s)",
-                            category="cross_sensor",
-                            related_sensors=list(route.proximity_sensor_ids),
-                        ))
-                else:
-                    self._conveyor_fault_start.pop(f"{route_id}:all_sensors_false", None)
-
-            # 规则2：开关开 + 称重持续增加
+            # 规则：开关开 + 称重持续增加
             for hopper_id in route.hopper_ids:
                 hopper = snapshot.hoppers.get(hopper_id)
                 if not hopper:
