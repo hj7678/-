@@ -258,20 +258,30 @@ class FeedingMasterController:
         pending_stop = getattr(self, '_pending_feed_stop', None)
         if pending_stop:
             if pending_stop == 'silo_out':
-                s_bin = self._pick_source_silo_by_active()
+                s_bin, s_mat = self._pick_source_silo_by_active()
                 if s_bin:
-                    commands.append({'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'close'})
+                    cmd = {'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'close'}
+                    if s_mat: cmd['material'] = s_mat
+                    commands.append(cmd)
             else:
-                commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop', 'material': ''})
+                fp_mat = self._get_feed_point_material(pending_stop)
+                cmd = {'device': 'feed_point', 'id': pending_stop, 'action': 'stop'}
+                if fp_mat: cmd['material'] = fp_mat
+                commands.append(cmd)
             self._pending_feed_stop = None
         pending_start = getattr(self, '_pending_feed_start', None)
         if pending_start:
             if pending_start == 'silo_out':
-                s_bin = self._pick_source_silo_by_active()
+                s_bin, s_mat = self._pick_source_silo_by_active()
                 if s_bin:
-                    commands.append({'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'open'})
+                    cmd = {'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'open'}
+                    if s_mat: cmd['material'] = s_mat
+                    commands.append(cmd)
             else:
-                commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start', 'material': ''})
+                fp_mat = self._get_feed_point_material(pending_start)
+                cmd = {'device': 'feed_point', 'id': pending_start, 'action': 'start'}
+                if fp_mat: cmd['material'] = fp_mat
+                commands.append(cmd)
             self._pending_feed_start = None
         # 非共用皮带清空：判定传感器从有料→无料时完成
         pending_clear = getattr(self, '_pending_belt_clear', {})
@@ -393,7 +403,10 @@ class FeedingMasterController:
                         s_bin = self._pick_source_silo(route_id)
                         if s_bin:
                             gate_id = f"silo_gate_{s_bin}"
-                            commands.append({'device': 'silo_gate', 'id': gate_id, 'action': 'open'})
+                            mt = config.FEED_ROUTES.get(route_id, {}).get('material_types', [])
+                            cmd = {'device': 'silo_gate', 'id': gate_id, 'action': 'open'}
+                            if mt: cmd['material'] = mt[0]
+                            commands.append(cmd)
                             new_cmds[f"silo_gate:{s_bin}"] = 'open'
                             print(f"[FM] {route_id} silo_gate open: {gate_id}", flush=True)
                     elif fp:
@@ -411,7 +424,10 @@ class FeedingMasterController:
                                 self._pick_source_silo(route_id)
                         if s_bin:
                             gate_id = f"silo_gate_{s_bin}"
-                            commands.append({'device': 'silo_gate', 'id': gate_id, 'action': 'close'})
+                            mt = config.FEED_ROUTES.get(route_id, {}).get('material_types', [])
+                            cmd = {'device': 'silo_gate', 'id': gate_id, 'action': 'close'}
+                            if mt: cmd['material'] = mt[0]
+                            commands.append(cmd)
                             new_cmds[f"silo_gate:{s_bin}"] = 'close'
                             print(f"[FM] {route_id} silo_gate close: {gate_id}", flush=True)
                     elif fp:
@@ -1450,8 +1466,20 @@ class FeedingMasterController:
     def get_active_routes(self) -> Set[str]:
         return set(self._active_routes)
 
-    def _pick_source_silo_by_active(self) -> Optional[str]:
-        """从活跃路线中找到使用 silo_out 的路线，返回其源 S 仓"""
+    def _get_feed_point_material(self, fp: str) -> str:
+        """根据 feed_point ID 获取物料类型"""
+        for rid in self._active_routes:
+            ctx = self.route_manager.get_route_context(rid)
+            if not ctx:
+                continue
+            route_fp = ctx.feed_point or config.FEED_ROUTES.get(rid, {}).get('feed_point', '')
+            if route_fp == fp:
+                mt = config.FEED_ROUTES.get(rid, {}).get('material_types', [])
+                return mt[0] if mt else ''
+        return ''
+
+    def _pick_source_silo_by_active(self) -> tuple:
+        """从活跃路线中找到使用 silo_out 的路线，返回 (源S仓, material) 或 (None, '')"""
         for rid in self._active_routes:
             ctx = self.route_manager.get_route_context(rid)
             if not ctx:
@@ -1459,10 +1487,11 @@ class FeedingMasterController:
             fp = ctx.feed_point or config.FEED_ROUTES.get(rid, {}).get('feed_point', '')
             if fp == 'silo_out':
                 source = getattr(ctx, '_source_silo', None)
-                if source:
-                    return source
-                return self._pick_source_silo(rid)
-        return None
+                if not source:
+                    source = self._pick_source_silo(rid)
+                mt = config.FEED_ROUTES.get(rid, {}).get('material_types', [])
+                return (source, mt[0] if mt else '')
+        return (None, '')
 
     def _pick_source_silo(self, route_id: str) -> Optional[str]:
         """silo_out 上料时自动选择出料 S 仓：取物料匹配且料位最高的"""
