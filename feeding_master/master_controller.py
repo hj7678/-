@@ -556,6 +556,12 @@ class FeedingMasterController:
                         cmd = {'device': 'hopper', 'id': hid, 'action': action.value}
                         commands.append(cmd)
                         new_cmds[key] = action.value
+                    # 保持打开的斗也要出现在 commands 中，避免 delta 逻辑误判为"应该关闭"
+                    for hid in ctx.assigned_hoppers:
+                        if hid not in hopper_cmds:
+                            key = f"hopper:{hid}"
+                            if new_cmds.get(key) == 'open':
+                                commands.append({'device': 'hopper', 'id': hid, 'action': 'open'})
 
             elif ctx.state == RouteState.WAITING and route_conveyors:
                 # WAITING: 非终点皮带保持运行, 仅终点皮带已在上方状态转换中停止
