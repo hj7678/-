@@ -112,12 +112,14 @@ class FeedingMasterController:
     def _configure_state_engine(self):
         for rid, r in config.FEED_ROUTES.items():
             cart = self.route_manager.ROUTE_CARTS.get(rid, '')
+            belt_id = CART_TO_BELT.get(cart, '')
             self.state_engine.configure_route(
                 rid,
                 belts=r['conveyors'],
                 hoppers=[h for h in r['hoppers'] if h],
                 cart=cart,
                 endpoint=r['conveyors'][-1] if r['conveyors'] else '',
+                belt_id=belt_id,
             )
 
     # ── 传感器状态接收 ──
@@ -264,6 +266,12 @@ class FeedingMasterController:
 
         commands = []
         new_cmds = dict(prev_cmds)  # 继承上帧: 打开的斗仍然是打开
+        # 处理 _on_schedule_sequence 线程中激活的路线：补发斗+上料点命令
+        pending_activate = getattr(self, '_pending_route_activate_cmds', None)
+        if pending_activate:
+            self._pending_route_activate_cmds = []
+            for route_id, target_bin in pending_activate:
+                self._add_route_activate_cmds(route_id, target_bin, commands, new_cmds)
         # 小车归位（旧路线关闭时触发）
         cart_return = getattr(self, '_pending_cart_return', None)
         if cart_return:
@@ -917,6 +925,11 @@ class FeedingMasterController:
 
         self.scheduler.pop_next_bin(belt_id)
         ok = self.activate_route(route_id, first_bin)
+        if ok:
+            # 标记待补发斗+上料点命令（下帧 _build_commands 处理）
+            if not hasattr(self, '_pending_route_activate_cmds'):
+                self._pending_route_activate_cmds = []
+            self._pending_route_activate_cmds.append((route_id, first_bin))
         print(f"[FM] {belt_id} activate {route_id} → {first_bin}: {'OK' if ok else 'FAIL'}", flush=True)
 
     def _has_feed_material(self, feed_point: str, bin_prefix: str) -> bool:

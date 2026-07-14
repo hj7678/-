@@ -47,11 +47,13 @@ class StateTransitionEngine:
     # ------------------------------------------------------------------
 
     def configure_route(self, route_id: str, *, belts: List[str],
-                        hoppers: List[str], cart: str, endpoint: str):
+                        hoppers: List[str], cart: str, endpoint: str,
+                        belt_id: str = ''):
         """配置路线参数"""
         self._routes[route_id] = {
             'belts': belts, 'hoppers': hoppers,
             'cart': cart, 'endpoint': endpoint,
+            'belt_id': belt_id,
         }
 
     def set_schedule_callback(self, callback: Callable):
@@ -109,7 +111,7 @@ class StateTransitionEngine:
             threshold = getattr(self, '_override_threshold', None)
             if threshold is None:
                 threshold = {'sequential': 98, 'reverse': 95, 'column_switch': 88}.get(clearing_strategy, 95)
-            if cart == 'D9': threshold = 94  # D9 Cart3 backward compat
+            if route.get('belt_id') == 'D9': threshold = 94  # D9 始终反序
             if level >= threshold:
                 actions['close_hoppers'] = (clearing_strategy != 'column_switch')
                 if clearing_strategy == 'sequential':
