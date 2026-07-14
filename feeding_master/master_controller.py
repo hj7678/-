@@ -144,11 +144,13 @@ class FeedingMasterController:
         self.scheduler.set_active(data.get('scheduling_active', False))
 
         # 同步活跃路线: 仿真激活了哪些路线，FeedingMaster 就追踪哪些
+        # 真实上位机不提供 active_routes → FM 用自己的 _active_routes
         sim_active = set(data.get('active_routes', []))
         sim_states = data.get('route_states', {})
 
-        # FM判断cart到达
-        for route_id in sim_active & self._active_routes:
+        # FM判断cart到达（真实上位机无 active_routes 时，遍历 FM 自己管理的路线）
+        check_routes = sim_active & self._active_routes if sim_active else self._active_routes
+        for route_id in check_routes:
             ctx = self.route_manager.get_route_context(route_id)
             if not ctx:
                 continue
