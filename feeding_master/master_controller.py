@@ -262,7 +262,7 @@ class FeedingMasterController:
                 if s_bin:
                     commands.append({'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'close'})
             else:
-                commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
+                commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop', 'material': ''})
             self._pending_feed_stop = None
         pending_start = getattr(self, '_pending_feed_start', None)
         if pending_start:
@@ -271,7 +271,7 @@ class FeedingMasterController:
                 if s_bin:
                     commands.append({'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'open'})
             else:
-                commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
+                commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start', 'material': ''})
             self._pending_feed_start = None
         # 非共用皮带清空：判定传感器从有料→无料时完成
         pending_clear = getattr(self, '_pending_belt_clear', {})
@@ -397,7 +397,10 @@ class FeedingMasterController:
                             new_cmds[f"silo_gate:{s_bin}"] = 'open'
                             print(f"[FM] {route_id} silo_gate open: {gate_id}", flush=True)
                     elif fp:
-                        commands.append({'device': 'feed_point', 'id': fp, 'action': 'start'})
+                        mt = config.FEED_ROUTES.get(route_id, {}).get('material_types', [])
+                        cmd = {'device': 'feed_point', 'id': fp, 'action': 'start'}
+                        if mt: cmd['material'] = mt[0]
+                        commands.append(cmd)
                         new_cmds[f"feed_point:{fp}"] = 'start'
                         print(f"[FM] {route_id} feed_point start: {fp}", flush=True)
                 elif old.value == 'feeding':
@@ -412,7 +415,10 @@ class FeedingMasterController:
                             new_cmds[f"silo_gate:{s_bin}"] = 'close'
                             print(f"[FM] {route_id} silo_gate close: {gate_id}", flush=True)
                     elif fp:
-                        commands.append({'device': 'feed_point', 'id': fp, 'action': 'stop'})
+                        mt = config.FEED_ROUTES.get(route_id, {}).get('material_types', [])
+                        cmd = {'device': 'feed_point', 'id': fp, 'action': 'stop'}
+                        if mt: cmd['material'] = mt[0]
+                        commands.append(cmd)
                         new_cmds[f"feed_point:{fp}"] = 'stop'
                         print(f"[FM] {route_id} feed_point stop: {fp}", flush=True)
                 elif next_state.value == 'clearing':
