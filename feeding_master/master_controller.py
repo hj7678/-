@@ -490,8 +490,11 @@ class FeedingMasterController:
                             for cid in non_shared:
                                 commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
                                 new_cmds[f"belt:{cid}"] = 'stop'
+                            # 同帧为新路线补发斗+上料点命令（新路线不在当前 per-route 循环中）
+                            self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
                             print(f"[FM] {belt_id} 自动续料 {route_id}→{route_id2} → {nxt} (停非共用: {non_shared})", flush=True)
                         elif route_id2 and self.activate_route(route_id2, nxt):
+                            self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
                             print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
                         elif route_id2:
                             # 激活失败(如仓已被占用)→跳过该仓重试下一个
@@ -658,8 +661,10 @@ class FeedingMasterController:
                     for cid in non_shared:
                         commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
                         new_cmds[f"belt:{cid}"] = 'stop'
+                    self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
                     print(f"[FM] {belt_id} 自动续料 {old_route}→{route_id2} → {nxt} (停非共用: {non_shared})", flush=True)
                 elif self.activate_route(route_id2, nxt):
+                    self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
                     print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
         # 4. 推送控制指令 (含路线状态+调度序列用于HMI显示)
@@ -1531,6 +1536,23 @@ class FeedingMasterController:
             elif target_bin.startswith('P3'):
                 return 'aggregate_10mm'
         return ''
+
+    def _add_route_activate_cmds(self, route_id: str, target_bin: str, commands: list, new_cmds: dict):
+        """同帧补发新路线的斗打开+上料点启动命令，确保不丢帧"""
+        ctx = self.route_manager.get_route_context(route_id)
+        if not ctx:
+            return
+        for hid in ctx.assigned_hoppers:
+            key = f"hopper:{hid}"
+            commands.append({'device': 'hopper', 'id': hid, 'action': 'open'})
+            new_cmds[key] = 'open'
+        fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
+        if fp and fp != 'silo_out':
+            mt = self._get_feed_point_material(fp, target_bin)
+            cmd = {'device': 'feed_point', 'id': fp, 'action': 'start'}
+            if mt: cmd['material'] = mt
+            commands.append(cmd)
+            new_cmds[f"feed_point:{fp}"] = 'start'
 
     def _pick_source_silo_by_active(self) -> tuple:
         """从活跃路线中找到使用 silo_out 的路线，返回 (源S仓, material) 或 (None, '')"""
