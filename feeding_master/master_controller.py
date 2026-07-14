@@ -377,16 +377,31 @@ class FeedingMasterController:
                     # 重置顺序清空标记，确保下一轮能正常触发 early move
                     ctx.early_moved_from_clearing = False
                     ctx.clearing_strategy = 'reverse'
-                    # 启动上料点（silo_out 正常发送，不做 silo_gate 转换）
+                    # 启动上料点（silo_out 自动选最高料位 S 仓）
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-                    if fp:
+                    if fp == 'silo_out':
+                        s_bin = self._pick_source_silo(route_id)
+                        if s_bin:
+                            gate_id = f"silo_gate_{s_bin}"
+                            commands.append({'device': 'silo_gate', 'id': gate_id, 'action': 'open'})
+                            new_cmds[f"silo_gate:{s_bin}"] = 'open'
+                            print(f"[FM] {route_id} silo_gate open: {gate_id}", flush=True)
+                    elif fp:
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'start'})
                         new_cmds[f"feed_point:{fp}"] = 'start'
                         print(f"[FM] {route_id} feed_point start: {fp}", flush=True)
                 elif old.value == 'feeding':
-                    # 离开 FEEDING → 停止上料点
+                    # 离开 FEEDING → 停止上料点（silo_out 关闭对应 silo_gate）
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-                    if fp:
+                    if fp == 'silo_out':
+                        s_bin = getattr(ctx, '_source_silo', None) or \
+                                self._pick_source_silo(route_id)
+                        if s_bin:
+                            gate_id = f"silo_gate_{s_bin}"
+                            commands.append({'device': 'silo_gate', 'id': gate_id, 'action': 'close'})
+                            new_cmds[f"silo_gate:{s_bin}"] = 'close'
+                            print(f"[FM] {route_id} silo_gate close: {gate_id}", flush=True)
+                    elif fp:
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'stop'})
                         new_cmds[f"feed_point:{fp}"] = 'stop'
                         print(f"[FM] {route_id} feed_point stop: {fp}", flush=True)
@@ -1378,6 +1393,19 @@ class FeedingMasterController:
 
     def get_active_routes(self) -> Set[str]:
         return set(self._active_routes)
+
+    def _pick_source_silo(self, route_id: str) -> Optional[str]:
+        """silo_out 上料时自动选择出料 S 仓：取物料匹配且料位最高的"""
+        material_types = config.FEED_ROUTES.get(route_id, {}).get('material_types') or []
+        is_stone_powder = 'stone_powder' in material_types
+        # 石粉→S1-S6, 碎石→S7-S12
+        s_bins = [f'S{i}' for i in range(1, 7)] if is_stone_powder \
+            else [f'S{i}' for i in range(7, 13)]
+        levels = self.scheduler.stock.get_levels(s_bins) if hasattr(self.scheduler, 'stock') else []
+        if not levels:
+            return None
+        best = max(levels, key=lambda b: b.get('level_tons', 0))
+        return best['bin_id'] if best.get('level_tons', 0) > 0 else None
 
     @staticmethod
     def _compute_cart_divert(cart_id: str, target_bin: str) -> tuple:
