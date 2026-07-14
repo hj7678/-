@@ -1398,6 +1398,9 @@ class FeedingMasterController:
         belt_id = CART_TO_BELT.get(ctx.assigned_cart, '')
         if not belt_id:
             return 'reverse'
+        # D9 任何情况下都是反序清空（仅一条路线，无需换列/顺序）
+        if belt_id == 'D9':
+            return 'reverse'
         nxt = self.scheduler.get_next_bin(belt_id)
         if not nxt:
             return 'column_switch' if not self.scheduler.has_sequence(belt_id) else 'reverse'
