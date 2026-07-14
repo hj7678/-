@@ -347,14 +347,6 @@ class FeedingMasterController:
             cart_pos = self._cart_positions.get(cart_id, 1) if cart_id else 1
             if cart_id:
                 ctx.cart_moving = self._cart_moving.get(cart_id, False)
-            # 调试：MOVING_TO_TARGET 时仅位置变化时输出一次
-            if ctx.state == RouteState.MOVING_TO_TARGET and cart_id:
-                last_key = f"_{route_id}_move_debug"
-                cur_val = (cart_pos, ctx.cart_moving)
-                if cur_val != getattr(ctx, last_key, None):
-                    setattr(ctx, last_key, cur_val)
-                    print(f"[FM-debug] {route_id} MOVING: {cart_id} pos={cart_pos}→{cart_target}"
-                          f" moving={ctx.cart_moving} target_bin={ctx.target_bin}", flush=True)
             target_bin = ctx.target_bin or ''
 
             level = 0.0
@@ -403,10 +395,6 @@ class FeedingMasterController:
             self.state_engine._override_threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
             has_next = bool(self.scheduler.get_next_bin(belt_id_for_engine)) if belt_id_for_engine else False
             has_seq = self.scheduler.has_sequence(belt_id_for_engine) if belt_id_for_engine else False
-            # 调试: 清空判定参数
-            if ctx.state == RouteState.FEEDING and level >= 90:
-                print(f"[FM-debug] {route_id} {ctx.target_bin} 料位={level:.0f}% 策略={strategy} "
-                      f"阈值={self.state_engine._override_threshold} belt={belt_id_for_engine}", flush=True)
             next_state, actions = self.state_engine.evaluate(
                 route_id, ctx.state,
                 level_sensors={'__target__': level},
@@ -836,9 +824,6 @@ class FeedingMasterController:
         ok = self.route_manager.start_route(route_id, target_bin)
         if ok:
             ctx = self.route_manager.get_route_context(route_id)
-            print(f"[FM-debug] activate {route_id} → {target_bin}: "
-                  f"cart_target={ctx.cart_target_position if ctx else '?'} "
-                  f"cart_pos={self._cart_positions.get(ctx.assigned_cart, '?') if ctx else '?'}", flush=True)
             # start_route不处理S格式(Cart4), 补设正确目标
             ctx = self.route_manager.get_route_context(route_id)
             if ctx and ctx.assigned_cart == 'Cart4' and target_bin.startswith('S'):
