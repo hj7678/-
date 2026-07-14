@@ -748,8 +748,10 @@ class FeedingMasterController:
                     if prev.get('action', '') in ('close', 'stop'):
                         continue
                     off = 'close' if dev in ('hopper', 'silo_gate') else 'stop'
-                    delta.append({'device': dev, 'id': dev_id, 'action': off,
-                                  'material': prev.get('material', '')})
+                    cmd = {'device': dev, 'id': dev_id, 'action': off}
+                    if dev == 'feed_point' and prev.get('material'):
+                        cmd['material'] = prev['material']
+                    delta.append(cmd)
             self._last_sent_cmds = cur
             if delta:
                 self.server.send_commands(delta, route_info, sched_info, None)
