@@ -254,14 +254,24 @@ class FeedingMasterController:
             commands.append({'device': 'cart', 'id': cart_return[0], 'action': 'move',
                            'target': cart_return[1], 'route_id': '', 'left_divert': True, 'right_divert': False})
             print(f"[FM] 小车归位: {cart_return[0]}→{cart_return[1]}", flush=True)
-        # 上料点切换: 停止/启动旧上料点
+        # 上料点切换: 停止/启动旧上料点（silo_out 转为 silo_gate）
         pending_stop = getattr(self, '_pending_feed_stop', None)
         if pending_stop:
-            commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
+            if pending_stop == 'silo_out':
+                s_bin = self._pick_source_silo_by_active()
+                if s_bin:
+                    commands.append({'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'close'})
+            else:
+                commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
             self._pending_feed_stop = None
         pending_start = getattr(self, '_pending_feed_start', None)
         if pending_start:
-            commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
+            if pending_start == 'silo_out':
+                s_bin = self._pick_source_silo_by_active()
+                if s_bin:
+                    commands.append({'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': 'open'})
+            else:
+                commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
             self._pending_feed_start = None
         # 非共用皮带清空：判定传感器从有料→无料时完成
         pending_clear = getattr(self, '_pending_belt_clear', {})
@@ -1393,6 +1403,20 @@ class FeedingMasterController:
 
     def get_active_routes(self) -> Set[str]:
         return set(self._active_routes)
+
+    def _pick_source_silo_by_active(self) -> Optional[str]:
+        """从活跃路线中找到使用 silo_out 的路线，返回其源 S 仓"""
+        for rid in self._active_routes:
+            ctx = self.route_manager.get_route_context(rid)
+            if not ctx:
+                continue
+            fp = ctx.feed_point or config.FEED_ROUTES.get(rid, {}).get('feed_point', '')
+            if fp == 'silo_out':
+                source = getattr(ctx, '_source_silo', None)
+                if source:
+                    return source
+                return self._pick_source_silo(rid)
+        return None
 
     def _pick_source_silo(self, route_id: str) -> Optional[str]:
         """silo_out 上料时自动选择出料 S 仓：取物料匹配且料位最高的"""
