@@ -254,27 +254,14 @@ class FeedingMasterController:
             commands.append({'device': 'cart', 'id': cart_return[0], 'action': 'move',
                            'target': cart_return[1], 'route_id': '', 'left_divert': True, 'right_divert': False})
             print(f"[FM] 小车归位: {cart_return[0]}→{cart_return[1]}", flush=True)
-        # 上料点切换: 停止旧上料点（silo_out 转为 silo_gate close）
+        # 上料点切换: 停止/启动旧上料点
         pending_stop = getattr(self, '_pending_feed_stop', None)
         if pending_stop:
-            if pending_stop == 'silo_out':
-                # silo_out → 找到当前正在出料的卸料门并关闭
-                for rid in self._active_routes:
-                    ctx = self.route_manager.get_route_context(rid)
-                    if ctx and ctx.target_bin and ctx.target_bin.startswith('S'):
-                        commands.append({'device': 'silo_gate',
-                                        'id': f"silo_gate_{ctx.target_bin}",
-                                        'action': 'close'})
-                        break
-            else:
-                commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
+            commands.append({'device': 'feed_point', 'id': pending_stop, 'action': 'stop'})
             self._pending_feed_stop = None
         pending_start = getattr(self, '_pending_feed_start', None)
         if pending_start:
-            if pending_start == 'silo_out':
-                pass  # silo_out 启动由 silo_gate open 处理（在 FEEDING 进入时）
-            else:
-                commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
+            commands.append({'device': 'feed_point', 'id': pending_start, 'action': 'start'})
             self._pending_feed_start = None
         # 非共用皮带清空：判定传感器从有料→无料时完成
         pending_clear = getattr(self, '_pending_belt_clear', {})
@@ -390,31 +377,19 @@ class FeedingMasterController:
                     # 重置顺序清空标记，确保下一轮能正常触发 early move
                     ctx.early_moved_from_clearing = False
                     ctx.clearing_strategy = 'reverse'
-                    # 启动上料点（silo_out 由 silo_gate 替代）
+                    # 启动上料点（silo_out 正常发送，不做 silo_gate 转换）
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-                    if fp and fp != 'silo_out':
+                    if fp:
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'start'})
                         new_cmds[f"feed_point:{fp}"] = 'start'
                         print(f"[FM] {route_id} feed_point start: {fp}", flush=True)
-                    # 高位储料仓上料 → 打开对应卸料门
-                    if fp == 'silo_out' and target_bin.startswith('S'):
-                        gate_id = f"silo_gate_{target_bin}"
-                        commands.append({'device': 'silo_gate', 'id': gate_id, 'action': 'open'})
-                        new_cmds[f"silo_gate:{target_bin}"] = 'open'
-                        print(f"[FM] {route_id} silo_gate open: {gate_id}", flush=True)
                 elif old.value == 'feeding':
-                    # 离开 FEEDING → 停止上料点（silo_out 由 silo_gate 替代）
+                    # 离开 FEEDING → 停止上料点
                     fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
-                    if fp and fp != 'silo_out':
+                    if fp:
                         commands.append({'device': 'feed_point', 'id': fp, 'action': 'stop'})
                         new_cmds[f"feed_point:{fp}"] = 'stop'
                         print(f"[FM] {route_id} feed_point stop: {fp}", flush=True)
-                    # 高位储料仓上料 → 关闭对应卸料门
-                    if fp == 'silo_out' and target_bin and target_bin.startswith('S'):
-                        gate_id = f"silo_gate_{target_bin}"
-                        commands.append({'device': 'silo_gate', 'id': gate_id, 'action': 'close'})
-                        new_cmds[f"silo_gate:{target_bin}"] = 'close'
-                        print(f"[FM] {route_id} silo_gate close: {gate_id}", flush=True)
                 elif next_state.value == 'clearing':
                     threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
                     parts.append(f"料位{level:.0f}%≥{threshold}% 策略={strategy}")
@@ -696,22 +671,6 @@ class FeedingMasterController:
             old_rid, new_rid, tgt_bin = pending_switch
             self._switch_route_phase1(old_rid, new_rid, tgt_bin)
         # 指令变化时推送，发送全量指令（HMI根据全量设置状态，空缺表示关闭）
-        # 兜底：将 feed_point silo_out 替换为 silo_gate 命令
-        filtered = []
-        for c in commands:
-            if c['device'] == 'feed_point' and c['id'] == 'silo_out':
-                # 找到目标 S 仓
-                for rid in self._active_routes:
-                    ctx = self.route_manager.get_route_context(rid)
-                    if ctx and ctx.target_bin and ctx.target_bin.startswith('S'):
-                        gate_id = f"silo_gate_{ctx.target_bin}"
-                        filtered.append({'device': 'silo_gate', 'id': gate_id,
-                                        'action': 'open' if c['action'] == 'start' else 'close'})
-                        break
-            else:
-                filtered.append(c)
-        commands = filtered
-
         # 最低200ms间隔，避免高频刷新导致HMI动画卡顿
         last_send_time = getattr(self, '_last_send_time', 0)
         now = time.time()
