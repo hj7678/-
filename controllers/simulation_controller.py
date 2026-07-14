@@ -1058,14 +1058,16 @@ class SimulationController(QObject):
         # 累加到总运行时间
         self.total_runtime += delta_seconds
 
-        # FeedingMaster 桥接: 发送传感器状态
+        # FeedingMaster 桥接: 发送传感器状态（先更新位置再发送，确保FM看到最新位置）
         if self._feeding_bridge is not None:
+            self._update_cart_positions(delta_seconds)
             self._feeding_bridge.tick()
+        else:
+            self._update_cart_positions(delta_seconds)
 
         self._update_hoppers(delta_seconds)
         self._update_materials(delta_seconds)
         self._update_sensors()
-        self._update_cart_positions(delta_seconds)
         self._check_alarms()
 
         self._update_bin_consumption(delta_seconds)
