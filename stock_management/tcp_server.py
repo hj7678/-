@@ -41,6 +41,10 @@ class StockServer:
         self._running = True
         print(f"[StockMgmt] 服务已启动 {self.host}:{self.port}", flush=True)
 
+        # 启动向真实上位机推送料位的后台线程
+        threading.Thread(target=self._push_levels_to_real, daemon=True).start()
+        print(f"[StockMgmt] 料位推送 → 真实上位机 {self.host}:8897 (1s)", flush=True)
+
         loop_count = 0
         while self._running:
             loop_count += 1
@@ -68,6 +72,33 @@ class StockServer:
                     print(f"  补料中: {', '.join(s['feeding'])}", flush=True)
                 if s['discharging']:
                     print(f"  出料中: {', '.join(s['discharging'])}", flush=True)
+
+    def _push_levels_to_real(self):
+        """后台线程：每秒向真实上位机 :8897 推送所有料仓库存"""
+        import time as _time
+        REAl_HOST = self.host if self.host != '0.0.0.0' else '127.0.0.1'
+        REAl_PORT = 8897
+        while self._running:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                sock.connect((REAl_HOST, REAl_PORT))
+                while self._running:
+                    levels = self.store.get_all()
+                    slim = [{'bin_id': b['bin_id'], 'level_tons': b['level_tons'],
+                             'level_pct': b['level_pct'], 'capacity': b['capacity']}
+                            for b in levels]
+                    payload = json.dumps({"type": "level_report", "levels": slim},
+                                         ensure_ascii=False) + "\n"
+                    try:
+                        sock.sendall(payload.encode("utf-8"))
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        break  # 连接断开，重连
+                    _time.sleep(1)
+                sock.close()
+            except (ConnectionRefusedError, OSError, socket.timeout):
+                pass  # 真实上位机未启动，静默等待
+            _time.sleep(3)  # 重连间隔
 
     def stop(self):
         self._running = False
