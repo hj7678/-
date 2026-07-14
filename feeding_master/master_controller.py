@@ -701,65 +701,16 @@ class FeedingMasterController:
             self._pending_route_switch = None
             old_rid, new_rid, tgt_bin = pending_switch
             self._switch_route_phase1(old_rid, new_rid, tgt_bin)
-        # 指令变化时推送，仅发送增量变化（一次性指令）
-        # 安全网：silo_out → silo_gate
-        clean = []
-        for c in commands:
-            if c['device'] == 'feed_point' and c['id'] == 'silo_out':
-                s_bin = self._pick_source_silo_by_active()
-                if s_bin:
-                    action = 'open' if c['action'] == 'start' else 'close'
-                    clean.append({'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': action})
-            else:
-                clean.append(c)
-        commands = clean
-        # 补全上料点 stop: 非FEEDING路线自动关闭上料点
-        for rid in self._active_routes:
-            ctx = self.route_manager.get_route_context(rid)
-            if not ctx or ctx.state == RouteState.FEEDING:
-                continue
-            fp = ctx.feed_point or config.FEED_ROUTES.get(rid, {}).get('feed_point', '')
-            if fp and fp != 'silo_out':
-                key = f"feed_point:{fp}"
-                if new_cmds.get(key) != 'stop':
-                    mt = config.FEED_ROUTES.get(rid, {}).get('material_types', [])
-                    cmd = {'device': 'feed_point', 'id': fp, 'action': 'stop'}
-                    if mt: cmd['material'] = mt[0]
-                    commands.append(cmd)
-                    new_cmds[key] = 'stop'
-        last_cmds = getattr(self, '_last_sent_cmds', {})
-        # 构建当前状态: key→action
-        cur = {}
-        for c in commands:
-            key = (c['device'], c['id'])
-            cur[key] = c
-        # 计算增量并发送
-        if cur != last_cmds:
-            delta = []
-            for key, c in cur.items():
-                if key not in last_cmds:
-                    delta.append(c)
-                elif last_cmds[key] != c:
-                    delta.append(c)
-            for key in last_cmds:
-                if key not in cur:
-                    dev, dev_id = key
-                    prev = last_cmds[key]
-                    if prev.get('action', '') in ('close', 'stop'):
-                        continue
-                    off = 'close' if dev in ('hopper', 'silo_gate') else 'stop'
-                    cmd = {'device': dev, 'id': dev_id, 'action': off}
-                    if dev == 'feed_point' and prev.get('material'):
-                        cmd['material'] = prev['material']
-                    delta.append(cmd)
-            self._last_sent_cmds = cur
-            if delta:
-                self.server.send_commands(delta, route_info, sched_info, None)
+        # 指令变化时推送，发送全量指令（仅变化时发送，避免高频）
+        last_cmds = getattr(self, '_last_sent_commands', [])
+        if commands != last_cmds:
+            self._last_sent_commands = list(commands)
+            self.server.send_commands(commands, route_info, sched_info, None)
         else:
             last_sched = getattr(self, '_last_sent_sched', {})
             if sched_info != last_sched:
                 self._last_sent_sched = dict(sched_info) if sched_info else {}
-                self.server.send_commands([], route_info, sched_info, None)
+                self.server.send_commands(commands, route_info, sched_info, None)
 
         # 诊断独立发送，变化时推送一次
         last_diag = getattr(self, '_last_sent_diag', None)
