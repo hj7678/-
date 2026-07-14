@@ -62,8 +62,15 @@ def compute_route_belt_commands(
                     commands[cid] = ActuatorAction.STOP
                 else:
                     commands[cid] = ActuatorAction.START
+        elif clearing_strategy == 'reverse':
+            # 反序清空：终点皮带运行排空余料，非终点皮带关闭（物料不继续进入）
+            for cid in route_conveyors:
+                if cid == final_conveyor:
+                    commands[cid] = ActuatorAction.START
+                else:
+                    commands[cid] = ActuatorAction.STOP
         else:
-            # 反序/换列清空：全部皮带运行，终点皮带排空余料后停止
+            # 换列清空：全部皮带运行，终点皮带排空余料后停止
             for cid in route_conveyors:
                 commands[cid] = ActuatorAction.START
 
