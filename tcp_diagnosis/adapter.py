@@ -176,6 +176,11 @@ class TcpDataAdapter:
         # 优先使用下位机发送的真实路线状态
         raw = route_states_raw.get(route_id, '')
         if raw:
+            # 显式匹配确保正确解析
+            if raw == 'moving_to_target':
+                return RouteState.MOVING_TO_TARGET
+            if raw == 'feeding':
+                return RouteState.FEEDING
             try:
                 return RouteState(raw)
             except ValueError:
