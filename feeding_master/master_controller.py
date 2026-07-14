@@ -139,6 +139,7 @@ class FeedingMasterController:
             return  # 使用真实数据，忽略仿真数据
         if not use_real and source != 'sim':
             return  # 使用仿真数据，忽略真实数据
+        self._sensor_states = data
         self._cart_positions = data.get('cart_positions', {})
         self._cart_moving = data.get('cart_moving', {})
         self._cart_divert = {
