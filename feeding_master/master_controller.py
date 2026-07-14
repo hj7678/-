@@ -1467,13 +1467,13 @@ class FeedingMasterController:
 
     def _pick_source_silo(self, route_id: str) -> Optional[str]:
         """silo_out 上料时自动选择出料 S 仓：取物料匹配且料位最高的"""
-        from pos import SILO_MATERIAL_TYPES
+        from pos import SILO_BIN_MATERIALS
         material_types = config.FEED_ROUTES.get(route_id, {}).get('material_types') or []
         if not material_types:
             return None
         target_material = material_types[0]  # 取第一个物料类型
         # 筛选匹配的 S 仓
-        s_bins = [bid for bid, mt in SILO_MATERIAL_TYPES.items() if mt == target_material]
+        s_bins = [bid for bid, mt in SILO_BIN_MATERIALS.items() if mt == target_material]
         if not s_bins:
             return None
         levels = self.scheduler.stock.get_levels(s_bins) if hasattr(self.scheduler, 'stock') else []
