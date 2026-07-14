@@ -162,16 +162,12 @@ class ScheduleManager:
             return False
         with self._sequences_lock:
             if self._sequences.get(belt_id):
-                # 皮带未执行但有序列残留 → 自动续料失败导致，尝试继续消费
-                nxt = self._sequences[belt_id][0] if self._sequences[belt_id] else None
-                if nxt and self._on_sequence:
-                    print(f"[FM-Sched] {belt_id} 序列残留 {nxt}，尝试续料", flush=True)
-                    self._on_sequence(belt_id, list(self._sequences[belt_id]))
-                # 消费后仍残留 → 清空让 idle 检测重新触发调度
-                with self._sequences_lock:
-                    if self._sequences.get(belt_id):
-                        print(f"[FM-Sched] {belt_id} 序列残留无法消费，清空重新调度", flush=True)
-                        self._sequences.pop(belt_id, None)
+                # 皮带未执行但有序列残留 → 自动续料失败导致，清空并重新请求调度
+                print(f"[FM-Sched] {belt_id} 序列残留，清空重新调度", flush=True)
+                self._sequences.pop(belt_id, None)
+                # 绕过冷却直接请求调度
+                self._last_request[belt_id] = 0
+                self._request_schedule(belt_id)
                 return False
 
         # 空闲检测: 有仓低于阈值
