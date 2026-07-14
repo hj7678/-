@@ -873,6 +873,26 @@ class FeedingMasterController:
             if belt_id == 'D6':
                 self.scheduler.pop_next_bin(belt_id)
                 print(f"[FM] D6 跳过 {first_bin} (上料点物料不可用)，尝试下一仓", flush=True)
+            # D8/D9: 跳过并重试，避免序列残留导致死锁
+            elif belt_id in ('D8', 'D9'):
+                self.scheduler.pop_next_bin(belt_id)
+                nxt = self.scheduler.get_next_bin(belt_id)
+                if nxt:
+                    print(f"[FM] {belt_id} 跳过 {first_bin} (无可用路线)，尝试下一仓 {nxt}", flush=True)
+                    self.scheduler.pop_next_bin(belt_id)
+                    route_id2 = self._pick_route_for_bin(belt_id, nxt)
+                    if route_id2 and self.activate_route(route_id2, nxt):
+                        self.scheduler.mark_executing(belt_id, route_id2, nxt)
+                        print(f"[FM] {belt_id} activate {route_id2} → {nxt}: OK", flush=True)
+                    else:
+                        print(f"[FM] {belt_id} {nxt} 也失败，请求重新调度", flush=True)
+                        # 清空残留序列，让 _check_idle 重新请求调度
+                        with self.scheduler._sequences_lock:
+                            self.scheduler._sequences.pop(belt_id, None)
+                else:
+                    print(f"[FM] {belt_id} 序列耗尽，请求重新调度", flush=True)
+                    with self.scheduler._sequences_lock:
+                        self.scheduler._sequences.pop(belt_id, None)
             return
 
         self.scheduler.pop_next_bin(belt_id)

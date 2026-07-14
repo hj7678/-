@@ -157,11 +157,16 @@ class ScheduleManager:
                     self._request_schedule(belt_id)
                     return True
 
-        # 正在执行中或已有缓存序列 → 跳过
+        # 正在执行中或已有缓存序列 → 跳过（但非执行+有序列=待机残留，尝试消费）
         if belt_id in self._executing:
             return False
         with self._sequences_lock:
             if self._sequences.get(belt_id):
+                # 皮带未执行但有序列残留 → 自动续料失败导致，尝试继续消费
+                nxt = self._sequences[belt_id][0] if self._sequences[belt_id] else None
+                if nxt and self._on_sequence:
+                    print(f"[FM-Sched] {belt_id} 序列残留 {nxt}，尝试续料", flush=True)
+                    self._on_sequence(belt_id, list(self._sequences[belt_id]))
                 return False
 
         # 空闲检测: 有仓低于阈值
