@@ -700,6 +700,17 @@ class FeedingMasterController:
         last_send_time = getattr(self, '_last_send_time', 0)
         now = time.time()
         min_interval = 0.2
+        # 安全网：过滤所有 feed_point silo_out，替换为 silo_gate
+        clean = []
+        for c in commands:
+            if c['device'] == 'feed_point' and c['id'] == 'silo_out':
+                s_bin = self._pick_source_silo_by_active()
+                if s_bin:
+                    action = 'open' if c['action'] == 'start' else 'close'
+                    clean.append({'device': 'silo_gate', 'id': f"silo_gate_{s_bin}", 'action': action})
+            else:
+                clean.append(c)
+        commands = clean
         last_cmds = getattr(self, '_last_sent_commands', [])
         if commands != last_cmds and now - last_send_time >= min_interval:
             self._last_sent_commands = list(commands)
