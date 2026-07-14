@@ -706,6 +706,20 @@ class FeedingMasterController:
         last_send_time = getattr(self, '_last_send_time', 0)
         now = time.time()
         min_interval = 0.2
+        # 补全上料点 stop: 非FEEDING路线自动关闭上料点
+        for rid in self._active_routes:
+            ctx = self.route_manager.get_route_context(rid)
+            if not ctx or ctx.state == RouteState.FEEDING:
+                continue
+            fp = ctx.feed_point or config.FEED_ROUTES.get(rid, {}).get('feed_point', '')
+            if fp and fp != 'silo_out':
+                key = f"feed_point:{fp}"
+                if new_cmds.get(key) != 'stop':
+                    mt = config.FEED_ROUTES.get(rid, {}).get('material_types', [])
+                    cmd = {'device': 'feed_point', 'id': fp, 'action': 'stop'}
+                    if mt: cmd['material'] = mt[0]
+                    commands.append(cmd)
+                    new_cmds[key] = 'stop'
         # 安全网：过滤所有 feed_point silo_out，替换为 silo_gate
         clean = []
         for c in commands:
