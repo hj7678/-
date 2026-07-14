@@ -881,8 +881,15 @@ class FeedingMasterController:
         for rid in self._active_routes:
             ctx = self.route_manager.get_route_context(rid)
             if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id:
-                print(f"[FM] {belt_id} 已有活跃路线 {rid}, 序列缓存", flush=True)
-                return
+                if ctx.state == RouteState.STANDBY:
+                    # 待机状态有残留序列 → 直接激活新路线
+                    print(f"[FM] {belt_id} 待机路线 {rid} 有序列，激活新路线", flush=True)
+                    self._active_routes.discard(rid)
+                    self.route_manager._release_resources(rid)
+                    break
+                else:
+                    print(f"[FM] {belt_id} 已有活跃路线 {rid}, 序列缓存", flush=True)
+                    return
 
         first_bin = sequence[0] if sequence else None
         if not first_bin:
