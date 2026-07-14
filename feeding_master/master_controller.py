@@ -122,9 +122,23 @@ class FeedingMasterController:
 
     # ── 传感器状态接收 ──
 
-    def _on_sensor_states(self, data: dict):
-        """接收 Upper Computer 转发的传感器状态"""
-        self._sensor_states = data
+    def _on_sensor_states(self, data: dict, source: str = 'sim'):
+        """接收 Upper Computer 转发的传感器状态
+
+        source='sim' → 仿真 HMI (:8896)
+        source='real' → 真实上位机 (:8897)
+        """
+        # 同时接收两端数据，根据 _use_real_hmi 决定使用哪一端
+        if source == 'real':
+            self._real_sensor_data = data
+        else:
+            self._sim_sensor_data = data
+
+        use_real = getattr(self, '_use_real_hmi', False)
+        if use_real and source != 'real':
+            return  # 使用真实数据，忽略仿真数据
+        if not use_real and source != 'sim':
+            return  # 使用仿真数据，忽略真实数据
         self._cart_positions = data.get('cart_positions', {})
         self._cart_moving = data.get('cart_moving', {})
         self._cart_divert = {
@@ -1239,6 +1253,15 @@ class FeedingMasterController:
 
     def _on_manual_start(self, bin_id: str, route_id: str):
         """手动上料: 上位机点击料仓触发"""
+        # 特殊命令: route_id='__switch_real__' → 切换为真实上位机数据
+        if route_id == '__switch_real__':
+            self._use_real_hmi = True
+            print("[FM] 已切换为真实上位机数据源", flush=True)
+            return
+        if route_id == '__switch_sim__':
+            self._use_real_hmi = False
+            print("[FM] 已切换为仿真 HMI 数据源", flush=True)
+            return
         if self.scheduler.is_executing(CART_TO_BELT.get(
                 self.route_manager.ROUTE_CARTS.get(route_id, ''), '')):
             print(f"[FM] 手动上料拒绝: {route_id} 皮带已在执行中", flush=True)

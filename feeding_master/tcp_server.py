@@ -229,7 +229,7 @@ class FeedingMasterServer:
                 buf += chunk
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
-                    self._process_upper_msg(line.decode("utf-8").strip())
+                    self._process_upper_msg(line.decode("utf-8").strip(), 'sim')
         except socket.timeout:
             pass
         except ConnectionResetError:
@@ -274,7 +274,7 @@ class FeedingMasterServer:
                 buf += chunk
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
-                    self._process_upper_msg(line.decode("utf-8").strip())
+                    self._process_upper_msg(line.decode("utf-8").strip(), 'real')
         except socket.timeout:
             pass
         except ConnectionResetError:
@@ -307,7 +307,7 @@ class FeedingMasterServer:
             except Exception:
                 pass
 
-    def _process_upper_msg(self, line: str):
+    def _process_upper_msg(self, line: str, source: str = 'sim'):
         if not line:
             return
         try:
@@ -323,7 +323,7 @@ class FeedingMasterServer:
             self._send({"type": f"echo_{msg_type}", "data": msg})
 
         if msg_type == "sensor_states" and self._on_sensor_states:
-            self._on_sensor_states(msg.get("data", {}))
+            self._on_sensor_states(msg.get("data", {}), source)
         elif msg_type == "manual_start" and self._on_manual_start:
             self._on_manual_start(msg.get("bin_id", ""), msg.get("route_id", ""))
         elif msg_type == "manual_stop" and self._on_manual_stop:
