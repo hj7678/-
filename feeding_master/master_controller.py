@@ -768,16 +768,19 @@ class FeedingMasterController:
                     if mt: cmd['material'] = mt
                     commands.append(cmd)
                     new_cmds[key] = 'stop'
-        # 全量发送: 指令变化时发送完整 commands 列表
+        # 全量发送: 指令变化时发送完整 commands 列表（仿真 HMI :8896）
         last_cmds = getattr(self, '_last_sent_commands', [])
         if commands != last_cmds:
             self._last_sent_commands = list(commands)
             self.server.send_commands(commands, route_info, sched_info, None)
+            # 真实上位机 :8897 — 增量发送（仅变化部分）
+            self._send_real_delta(commands, route_info, sched_info)
         else:
             last_sched = getattr(self, '_last_sent_sched', {})
             if sched_info != last_sched:
                 self._last_sent_sched = dict(sched_info) if sched_info else {}
                 self.server.send_commands(commands, route_info, sched_info, None)
+                self._send_real_delta(commands, route_info, sched_info)
 
         # 诊断独立发送，变化时推送一次
         last_diag = getattr(self, '_last_sent_diag', None)
@@ -1568,6 +1571,35 @@ class FeedingMasterController:
             if mt: cmd['material'] = mt
             commands.append(cmd)
             new_cmds[f"feed_point:{fp}"] = 'start'
+
+    def _send_real_delta(self, commands: list, route_info: dict, sched_info: dict):
+        """计算增量 → 发送给真实上位机 :8897"""
+        last_real = getattr(self, '_last_real_cmds', {})
+        # 构建当前状态: key→action
+        cur = {}
+        for c in commands:
+            key = (c['device'], c['id'])
+            cur[key] = c
+        # 计算增量
+        delta = []
+        for key, c in cur.items():
+            prev = last_real.get(key)
+            if prev is None or prev.get('action') != c.get('action'):
+                delta.append(c)
+        for key in last_real:
+            if key not in cur:
+                prev = last_real[key]
+                if prev.get('action', '') in ('close', 'stop'):
+                    continue
+                dev, dev_id = key
+                off = 'close' if dev in ('hopper', 'silo_gate') else 'stop'
+                cmd = {'device': dev, 'id': dev_id, 'action': off}
+                if dev == 'feed_point' and prev.get('material'):
+                    cmd['material'] = prev['material']
+                delta.append(cmd)
+        self._last_real_cmds = cur
+        if delta:
+            self.server.send_commands_real(delta, route_info, sched_info, None)
 
     def _pick_source_silo_by_active(self) -> tuple:
         """从活跃路线中找到使用 silo_out 的路线，返回 (源S仓, material) 或 (None, '')"""
