@@ -393,6 +393,7 @@ class SimulationFeedingBridge(QObject):
                                 grids = abs(target - current_pos)
                                 duration = grids * self._cart_move_per_grid
                                 self._cart_moves[dev_id] = (target, time.time(), duration)
+                                ctrl._cart_set_moving(dev_id, True)  # 标记移动中
                                 if last_target != target:
                                     print(f"[桥接] {dev_id} 开始移动: {current_pos}→{target} ({grids}格={duration:.0f}s)", flush=True)
                             else:
