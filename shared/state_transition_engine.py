@@ -100,16 +100,7 @@ class StateTransitionEngine:
         if current_state == RouteState.MOVING_TO_TARGET:
             cart_pos = cart_sensor.get(route['cart'], 1)
             if not cart_moving and cart_pos == cart_target:
-                print(f"[Engine] {route_id} MOVING_TO_TARGET→FEEDING: "
-                      f"cart_moving={cart_moving} cart_pos={cart_pos} "
-                      f"cart_target={cart_target} route_cart={route.get('cart','?')} "
-                      f"sensor={cart_sensor}", flush=True)
                 return RouteState.FEEDING, {'start_endpoint': True, 'open_hoppers': True}
-            # 诊断：cart_moving=True 但 cart_pos 异常时也打印
-            if cart_moving and cart_pos == cart_target:
-                print(f"[Engine] {route_id} MOVING_TO_TARGET STAY: "
-                      f"cart_moving=True but cart_pos={cart_pos}==cart_target={cart_target} "
-                      f"sensor={cart_sensor}", flush=True)
             return current_state, actions
 
         # === FEEDING → CLEARING ===

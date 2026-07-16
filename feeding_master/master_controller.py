@@ -425,10 +425,6 @@ class FeedingMasterController:
             self.state_engine._override_threshold = get_clearing_threshold(belt_id_for_engine or '', strategy)
             has_next = bool(self.scheduler.get_next_bin(belt_id_for_engine)) if belt_id_for_engine else False
             has_seq = self.scheduler.has_sequence(belt_id_for_engine) if belt_id_for_engine else False
-            if ctx.state == RouteState.MOVING_TO_TARGET:
-                print(f"[FM-DIAG] {route_id} pre-eval: state={ctx.state.value} "
-                      f"target_bin={ctx.target_bin} cart_target={cart_target} "
-                      f"cart_pos={cart_pos} cart_moving={ctx.cart_moving}", flush=True)
             next_state, actions = self.state_engine.evaluate(
                 route_id, ctx.state,
                 level_sensors={'__target__': level},
@@ -719,14 +715,11 @@ class FeedingMasterController:
 
             if cart_id:
                 if cart_id == 'Cart4':
-                    target = compute_cart4_target_position(target_bin)
+                    target = compute_cart4_target_position(ctx.target_bin or '')
                 else:
-                    target = compute_cart_target_position(target_bin, cart_id)
+                    target = compute_cart_target_position(ctx.target_bin or '', cart_id)
                 if target is not None:
                     ctx.cart_target_position = target  # 同步: FM知道真实目标
-                    if ctx.state == RouteState.MOVING_TO_TARGET:
-                        print(f"[FM-DIAG] {route_id} post-build: cart_target_position={ctx.cart_target_position} "
-                              f"target_bin={target_bin}", flush=True)
                 if target is not None and should_move_cart(cart_pos, target):
                     left_div, right_div = self._compute_cart_divert(cart_id, target_bin)
                     cmd = {'device': 'cart', 'id': cart_id, 'action': 'move',
