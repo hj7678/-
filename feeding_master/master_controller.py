@@ -506,13 +506,33 @@ class FeedingMasterController:
                     parts.append(f"小车 {cart_id}→{cart_target}")
                 elif next_state.value == 'waiting':
                     parts.append("清空完成")
-                    # 反序: 只停终点皮带, 非终点皮带继续运行
-                    convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
-                    if convs:
-                        final = convs[-1]
-                        commands.append({'device': 'belt', 'id': final, 'action': 'stop'})
-                        new_cmds[f"belt:{final}"] = 'stop'
-                        parts.append(f"停终点:{final}")
+                    # 连续上料：有下一仓时跳过 WAITING，直接进入 MOVING_TO_TARGET
+                    belt_id = CART_TO_BELT.get(cart_id, '')
+                    nxt = self.scheduler.get_next_bin(belt_id)
+                    if nxt and nxt != ctx.target_bin:
+                        # 释放资源 + 直接激活下一仓，不停止终点皮带
+                        self.route_manager._release_resources(route_id)
+                        self.scheduler.mark_completed(belt_id)
+                        self.scheduler.pop_next_bin(belt_id)
+                        route_id2 = self._pick_route_for_bin(belt_id, nxt)
+                        if route_id2 and route_id2 != route_id:
+                            self._do_switch(route_id, route_id2, nxt)
+                            self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
+                            print(f"[FM] {belt_id} 连续上料 {route_id}→{route_id2} → {nxt} (跳过WAITING)", flush=True)
+                        elif route_id2 and self.activate_route(route_id2, nxt):
+                            self.scheduler.mark_executing(belt_id, route_id2, nxt)
+                            self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
+                            print(f"[FM] {belt_id} 连续上料 → {nxt} (跳过WAITING)", flush=True)
+                        next_state = RouteState.MOVING_TO_TARGET
+                        parts.append(f"→{nxt}")
+                    else:
+                        # 无下一仓: 正常进入 WAITING，停终点皮带
+                        convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
+                        if convs:
+                            final = convs[-1]
+                            commands.append({'device': 'belt', 'id': final, 'action': 'stop'})
+                            new_cmds[f"belt:{final}"] = 'stop'
+                            parts.append(f"停终点:{final}")
 
                 ctx.clearing_start_time = self._total_runtime if next_state.value == 'clearing' else getattr(ctx, 'clearing_start_time', 0)
                 print(' | '.join(parts), flush=True)
