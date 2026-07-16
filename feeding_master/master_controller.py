@@ -375,7 +375,7 @@ class FeedingMasterController:
                 level = b.get('level_pct', 0)
 
             strategy = getattr(ctx, 'clearing_strategy', 'reverse')
-            if ctx.state == RouteState.FEEDING and strategy == 'reverse':
+            if ctx.state == RouteState.FEEDING:
                 strategy = self._resolve_clearing_strategy(route_id)
                 ctx.clearing_strategy = strategy
 
@@ -1531,8 +1531,10 @@ class FeedingMasterController:
                 # 产线1/2（row 1-2）作为下一目标，且当前料仓产线位置≤3时，用反序代替顺序清空
                 if next_row <= 2 and cur_row <= 3:
                     return 'reverse'
+                print(f"[FM] {route_id} {ctx.target_bin}→{nxt}: 顺序清空 (next_row={next_row} < cur_row={cur_row})", flush=True)
                 return 'sequential'
             return 'reverse'
+        print(f"[FM] {route_id} {ctx.target_bin}→{nxt}: 反序清空 (next_row={next_row} >= cur_row={cur_row})", flush=True)
         return 'reverse'
 
     def _start_diag_client(self):
