@@ -448,6 +448,8 @@ class FeedingMasterController:
 
                 if next_state.value == 'feeding':
                     parts.append(f"→ {target_bin} (料位{level:.0f}%)")
+                    if old.value == 'moving_to_target':
+                        parts.append(f"cart_moving={ctx.cart_moving} pos={cart_pos} target={cart_target}")
                     convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
                     parts.append(f"皮带: {','.join(convs)}")
                     if ctx.assigned_hoppers:
