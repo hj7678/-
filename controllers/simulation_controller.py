@@ -184,28 +184,26 @@ class SimulationController(QObject):
         self.cart4_is_moving = False  # 是否在移动中
         self.cart4_sensor_position = 1  # 传感器报告的位置（等小车实际到达后才更新）
 
-        # Cart1/2/3 移动状态
-        self._cart1_is_moving = False
-        self._cart2_is_moving = False
-        self._cart3_is_moving = False
+        # Cart1 移动系统（D7皮带，18s/格物理移动）
+        self.cart1_position = 1
+        self.cart1_target_position = 1
+        self.cart1_is_moving = False
+        self.cart1_sensor_position = 1
+        self._cart1_move_timer = 0.0
 
-        # Cart1/2/3位置管理（水平滑轨小车，18s/格物理移动）
-        self.cart_positions: Dict[str, int] = {
-            'Cart1': 1,
-            'Cart2': 1,
-            'Cart3': 1,
-        }
-        self.cart_target_positions: Dict[str, int] = {
-            'Cart1': 1,
-            'Cart2': 1,
-            'Cart3': 1,
-        }
-        # 传感器报告的位置（等小车实际到达后才更新）
-        self.cart_sensor_positions: Dict[str, int] = {
-            'Cart1': 1,
-            'Cart2': 1,
-            'Cart3': 1,
-        }
+        # Cart2 移动系统（D8皮带，18s/格物理移动）
+        self.cart2_position = 1
+        self.cart2_target_position = 1
+        self.cart2_is_moving = False
+        self.cart2_sensor_position = 1
+        self._cart2_move_timer = 0.0
+
+        # Cart3 移动系统（D9皮带，18s/格物理移动）
+        self.cart3_position = 1
+        self.cart3_target_position = 1
+        self.cart3_is_moving = False
+        self.cart3_sensor_position = 1
+        self._cart3_move_timer = 0.0
         # 分料传感器状态（持久化，不依赖当前路线）
         self.cart_divert: Dict[str, tuple] = {
             'Cart1': (True, False),
@@ -319,15 +317,23 @@ class SimulationController(QObject):
                     pos = data.get('position', 1)
                     left_div = data.get('left_divert', False)
                     right_div = data.get('right_divert', False)
-                    if cart_id == 'Cart4':
+                    if cart_id == 'Cart1':
+                        self.cart1_position = pos
+                        self.cart1_target_position = pos
+                        self.cart1_sensor_position = pos
+                    elif cart_id == 'Cart2':
+                        self.cart2_position = pos
+                        self.cart2_target_position = pos
+                        self.cart2_sensor_position = pos
+                    elif cart_id == 'Cart3':
+                        self.cart3_position = pos
+                        self.cart3_target_position = pos
+                        self.cart3_sensor_position = pos
+                    elif cart_id == 'Cart4':
                         self.cart4_position = pos
                         self.cart4_target_position = pos
                         self.cart4_sensor_position = pos
-                    else:
-                        self.cart_positions[cart_id] = pos
-                        self.cart_target_positions[cart_id] = pos
-                        self.cart_sensor_positions[cart_id] = pos
-                        self.cart_divert[cart_id] = (left_div, right_div)
+                    self.cart_divert[cart_id] = (left_div, right_div)
         except Exception as e:
             print(f"[初始化] 加载小车位置失败: {e}", flush=True)
             belt_log('system').info(f"[初始化] 加载小车位置失败: {e}")
@@ -464,7 +470,7 @@ class SimulationController(QObject):
                         position = 1
                 else:
                     position = 1
-            current_pos = self.cart_positions.get(cart_id, 1)
+            current_pos = self._cart_get_position(cart_id)
             needs_cart_move = (current_pos != position)
         elif cart_id == 'Cart4':
             # 小车4：根据目标S仓判断
@@ -558,6 +564,80 @@ class SimulationController(QObject):
                     return 1
         return 1
 
+    # ---- 小车位置读写辅助方法（统一接口，内部用 if/elif 保持 IDE 静态分析能力） ----
+
+    def _cart_get_position(self, cart_id: str) -> int:
+        """统一获取小车物理位置"""
+        if cart_id == 'Cart1': return self.cart1_position
+        if cart_id == 'Cart2': return self.cart2_position
+        if cart_id == 'Cart3': return self.cart3_position
+        if cart_id == 'Cart4': return self.cart4_position
+        return 1
+
+    def _cart_get_target(self, cart_id: str) -> int:
+        """统一获取小车目标位置"""
+        if cart_id == 'Cart1': return self.cart1_target_position
+        if cart_id == 'Cart2': return self.cart2_target_position
+        if cart_id == 'Cart3': return self.cart3_target_position
+        if cart_id == 'Cart4': return self.cart4_target_position
+        return 1
+
+    def _cart_get_sensor_position(self, cart_id: str) -> int:
+        """统一获取传感器上报位置"""
+        if cart_id == 'Cart1': return self.cart1_sensor_position
+        if cart_id == 'Cart2': return self.cart2_sensor_position
+        if cart_id == 'Cart3': return self.cart3_sensor_position
+        if cart_id == 'Cart4': return self.cart4_sensor_position
+        return 1
+
+    def _cart_is_moving(self, cart_id: str) -> bool:
+        """统一获取移动状态"""
+        if cart_id == 'Cart1': return self.cart1_is_moving
+        if cart_id == 'Cart2': return self.cart2_is_moving
+        if cart_id == 'Cart3': return self.cart3_is_moving
+        if cart_id == 'Cart4': return self.cart4_is_moving
+        return False
+
+    def _cart_set_position(self, cart_id: str, pos: int):
+        """统一设置小车物理位置"""
+        if cart_id == 'Cart1': self.cart1_position = pos
+        elif cart_id == 'Cart2': self.cart2_position = pos
+        elif cart_id == 'Cart3': self.cart3_position = pos
+        elif cart_id == 'Cart4': self.cart4_position = pos
+
+    def _cart_set_target(self, cart_id: str, pos: int):
+        """统一设置小车目标并标记移动"""
+        if cart_id == 'Cart1':
+            self.cart1_target_position = pos
+            if self.cart1_position != pos:
+                self.cart1_is_moving = True
+        elif cart_id == 'Cart2':
+            self.cart2_target_position = pos
+            if self.cart2_position != pos:
+                self.cart2_is_moving = True
+        elif cart_id == 'Cart3':
+            self.cart3_target_position = pos
+            if self.cart3_position != pos:
+                self.cart3_is_moving = True
+        elif cart_id == 'Cart4':
+            self.cart4_target_position = pos
+            if self.cart4_position != pos:
+                self.cart4_is_moving = True
+
+    def _cart_set_sensor_position(self, cart_id: str, pos: int):
+        """统一设置传感器上报位置"""
+        if cart_id == 'Cart1': self.cart1_sensor_position = pos
+        elif cart_id == 'Cart2': self.cart2_sensor_position = pos
+        elif cart_id == 'Cart3': self.cart3_sensor_position = pos
+        elif cart_id == 'Cart4': self.cart4_sensor_position = pos
+
+    def _cart_set_moving(self, cart_id: str, moving: bool):
+        """统一设置移动状态"""
+        if cart_id == 'Cart1': self.cart1_is_moving = moving
+        elif cart_id == 'Cart2': self.cart2_is_moving = moving
+        elif cart_id == 'Cart3': self.cart3_is_moving = moving
+        elif cart_id == 'Cart4': self.cart4_is_moving = moving
+
     def _set_cart_target_position(self, route_id: str, target_bin: str):
         """设置小车目标位置（根据目标料仓）"""
         ctx = self.route_state_manager.get_route_context(route_id)
@@ -576,8 +656,8 @@ class SimulationController(QObject):
                 if ctx.state == RouteState.MOVING_TO_TARGET:
                     self._immediate_cart_arrival(route_id, 'Cart4')
         else:
-            self.cart_target_positions[cart_id] = position
-            current_pos = self.cart_positions.get(cart_id, 1)
+            self._cart_set_target(cart_id, position)
+            current_pos = self._cart_get_position(cart_id)
             if current_pos != position:
                 ctx.cart_moving = True
                 ctx.cart_target_position = position
@@ -603,8 +683,8 @@ class SimulationController(QObject):
                 if ctx.state == RouteState.MOVING_TO_TARGET:
                     self._immediate_cart_arrival(route_id, 'Cart4')
         else:
-            self.cart_target_positions[cart_id] = position
-            current_pos = self.cart_positions.get(cart_id, 1)
+            self._cart_set_target(cart_id, position)
+            current_pos = self._cart_get_position(cart_id)
             if current_pos != position:
                 ctx.cart_moving = True
                 ctx.cart_target_position = position
@@ -637,7 +717,7 @@ class SimulationController(QObject):
         if cart_id == 'Cart4':
             self.cart4_sensor_position = self.cart4_position
         else:
-            self.cart_sensor_positions[cart_id] = self.cart_positions.get(cart_id, 1)
+            self._cart_set_sensor_position(cart_id, self._cart_get_position(cart_id))
 
         route = config.FEED_ROUTES.get(route_id)
         if route and route['conveyors']:
@@ -855,7 +935,9 @@ class SimulationController(QObject):
         self.fault_diagnosis.clear_all_faults()
         self.diagnosis_result.clear()
         # 持久化状态（reset_all_data会清空JSON，需提前保存）
-        _saved_cart_positions = dict(self.cart_positions)
+        _saved_cart1_pos = self.cart1_position
+        _saved_cart2_pos = self.cart2_position
+        _saved_cart3_pos = self.cart3_position
         _saved_cart_divert = dict(self.cart_divert)
         _saved_consumption_rates = dict(self._consumption_rates)
 
@@ -878,13 +960,24 @@ class SimulationController(QObject):
         self.cart4_target_position = 1
         self.cart4_is_moving = False
         self.cart4_sensor_position = 1
-        self.cart_positions = _saved_cart_positions
-        self.cart_target_positions = dict(_saved_cart_positions)
-        self.cart_sensor_positions = dict(_saved_cart_positions)
+        self.cart1_position = _saved_cart1_pos
+        self.cart1_target_position = _saved_cart1_pos
+        self.cart1_sensor_position = _saved_cart1_pos
+        self.cart1_is_moving = False
+        self._cart1_move_timer = 0.0
+        self.cart2_position = _saved_cart2_pos
+        self.cart2_target_position = _saved_cart2_pos
+        self.cart2_sensor_position = _saved_cart2_pos
+        self.cart2_is_moving = False
+        self._cart2_move_timer = 0.0
+        self.cart3_position = _saved_cart3_pos
+        self.cart3_target_position = _saved_cart3_pos
+        self.cart3_sensor_position = _saved_cart3_pos
+        self.cart3_is_moving = False
+        self._cart3_move_timer = 0.0
         self.cart_divert = _saved_cart_divert
         # 重写到JSON
-        for cart_id in ('Cart1', 'Cart2', 'Cart3'):
-            pos = _saved_cart_positions.get(cart_id, 1)
+        for cart_id, pos in [('Cart1', _saved_cart1_pos), ('Cart2', _saved_cart2_pos), ('Cart3', _saved_cart3_pos)]:
             ld, rd = _saved_cart_divert.get(cart_id, (False, False))
             self.sensor_data_manager.write_cart_position(cart_id, pos)
             self.sensor_data_manager.write_cart_left_divert(cart_id, ld)
@@ -895,8 +988,10 @@ class SimulationController(QObject):
             if bin_id in self.small_bins:
                 self.small_bins[bin_id].consumption_rate = rate
         self.sensor_data_manager.write_consumption_rates(_saved_consumption_rates)
-        if hasattr(self, '_cart_move_timers'):
-            self._cart_move_timers.clear()
+        self._cart1_move_timer = 0.0
+        self._cart2_move_timer = 0.0
+        self._cart3_move_timer = 0.0
+        self._cart4_move_timer = 0.0
 
         MaterialFactory.reset_id_counter()
         self.state_changed.emit('reset', {})
@@ -1060,10 +1155,14 @@ class SimulationController(QObject):
 
         # FeedingMaster 桥接: 发送传感器状态（先更新位置再发送，确保FM看到最新位置）
         if self._feeding_bridge is not None:
-            self._update_cart_positions(delta_seconds)
+            self.update_cart1_position(delta_seconds)
+            self.update_cart2_position(delta_seconds)
+            self.update_cart3_position(delta_seconds)
             self._feeding_bridge.tick()
         else:
-            self._update_cart_positions(delta_seconds)
+            self.update_cart1_position(delta_seconds)
+            self.update_cart2_position(delta_seconds)
+            self.update_cart3_position(delta_seconds)
 
         self._update_hoppers(delta_seconds)
         self._update_materials(delta_seconds)
@@ -1155,7 +1254,7 @@ class SimulationController(QObject):
         if not ctx:
             return None, {}
         cart_id = ctx.assigned_cart or ''
-        cart_pos = self.cart_sensor_positions.get(cart_id, 1) if cart_id != 'Cart4' else int(self.cart4_sensor_position)
+        cart_pos = self._cart_get_sensor_position(cart_id)
         cart_target = ctx.cart_target_position if cart_id != 'Cart4' else self.cart4_target_position
         cart_moving = ctx.cart_moving
         target_bin = self.route_to_bin.get(route_id) or ctx.target_bin or ''
@@ -1391,7 +1490,7 @@ class SimulationController(QObject):
                             print(f"[提前移动] {route_id} 顺序清空3s，进入MOVING_TO_TARGET → {next_bin}", flush=True)
                             belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[提前移动] {route_id} 顺序清空3s，进入MOVING_TO_TARGET → {next_bin}")
                             self.route_state_manager.early_move_from_clearing(route_id, next_bin, next_pos)
-                            self.cart_target_positions[cart_id] = next_pos
+                            self._cart_set_target(cart_id, next_pos)
                             self.route_to_bin[route_id] = next_bin
                             # 更新分料方向（跨列移动时切换P2↔P3）
                             expected_divert = self._calculate_cart_divert(cart_id, next_bin)
@@ -1487,9 +1586,9 @@ class SimulationController(QObject):
 
     def _get_cart_positions_dict(self) -> dict:
         return {
-            'Cart1': self.cart_positions.get('Cart1', 1),
-            'Cart2': self.cart_positions.get('Cart2', 1),
-            'Cart3': self.cart_positions.get('Cart3', 1),
+            'Cart1': self.cart1_position,
+            'Cart2': self.cart2_position,
+            'Cart3': self.cart3_position,
             'Cart4': self.cart4_position,
         }
 
@@ -1657,7 +1756,7 @@ class SimulationController(QObject):
                     left_div, right_div = True, False
                 else:
                     cart_id = cart_map.get(belt_id, '')
-                    row = self.cart_positions.get(cart_id, 1)
+                    row = self._cart_get_position(cart_id)
                     left_div, right_div = self.cart_divert.get(cart_id, (False, False))
                     if belt_id == 'D8':
                         cart_pos = self._calc_d8_cart_pos(row, left_div, right_div)
@@ -2013,7 +2112,7 @@ class SimulationController(QObject):
             left_div, right_div = True, False
         else:
             cart_id = cart_map.get(belt_id, '')
-            row = self.cart_positions.get(cart_id, 1)  # 物理行号 1-7
+            row = self._cart_get_position(cart_id)  # 物理行号 1-7
             left_div, right_div = self.cart_divert.get(cart_id, (False, False))
             if belt_id == 'D8':
                 # D8: 行号+分料 → 映射位置 (P2→1-7, P3→8-14)
@@ -2874,7 +2973,7 @@ class SimulationController(QObject):
         }
         """
         # 使用传感器位置（等实际到达后才更新）
-        position = self.cart_sensor_positions.get(cart_id, 1)
+        position = self._cart_get_sensor_position(cart_id)
 
         # 计算极限传感器值
         if cart_id == 'Cart4':
@@ -2918,6 +3017,9 @@ class SimulationController(QObject):
     def _calculate_cart_divert(self, cart_id: str, target_bin: str) -> tuple:
         """计算小车分料传感器值"""
         if cart_id == 'Cart1':
+            # D7: P1列 → 左true右false; P2跨列 → 左false右true
+            if target_bin.startswith('P2'):
+                return (False, True)
             return (True, False)
         elif cart_id == 'Cart2':
             if target_bin.startswith('P2'):
@@ -2926,6 +3028,9 @@ class SimulationController(QObject):
                 return (False, True)
             return (True, False)
         elif cart_id == 'Cart3':
+            # D9: P4列 → 左false右true; P3跨列 → 左true右false
+            if target_bin.startswith('P3'):
+                return (True, False)
             return (False, True)
         return (False, False)
 
@@ -3167,100 +3272,113 @@ class SimulationController(QObject):
                         print(f"[到达] {route_id} 打开中转斗 {hopper_id}", flush=True)
                         belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 打开中转斗 {hopper_id}")
 
-    def _update_cart_positions(self, delta_seconds: float):
-        """更新所有小车位置（模拟移动）
+    def update_cart1_position(self, delta_seconds: float):
+        """更新小车1位置（每帧调用，参照Cart4模式）"""
+        if not self.cart1_is_moving:
+            return
+        distance = abs(self.cart1_position - self.cart1_target_position)
+        if distance <= 0:
+            self.cart1_is_moving = False
+            self._cart1_move_timer = 0.0
+            return
+        self._cart1_move_timer += delta_seconds
+        if self._cart1_move_timer >= 18.0:
+            self._cart1_move_timer = 0.0
+            old_pos = self.cart1_position
+            if self.cart1_position < self.cart1_target_position:
+                self.cart1_position += 1
+            else:
+                self.cart1_position -= 1
+            print(f"[Cart1] 移动: {old_pos} → {self.cart1_position} (目标={self.cart1_target_position})", flush=True)
+            belt_log('D7').info(f"[Cart1] 移动: {old_pos} → {self.cart1_position} (目标={self.cart1_target_position})")
+            self.cart1_sensor_position = self.cart1_position
+            self.sensor_data_manager.write_cart_position('Cart1', self.cart1_position)
+            if self.cart1_position == self.cart1_target_position:
+                self._check_cart1_arrival()
+                self.cart1_is_moving = False
 
-        小车移动参数：
-        - 皮带上相邻小仓间距为24像素
-        - 移动一位需要的时间 = 18秒
-        - 移动速度 = 24 / 18 = 1.333 px/s
-        """
-        # 每移动一格需要的时间（秒）
-        move_one_position_time = 18.0
+    def update_cart2_position(self, delta_seconds: float):
+        """更新小车2位置（每帧调用，参照Cart4模式）"""
+        if not self.cart2_is_moving:
+            return
+        distance = abs(self.cart2_position - self.cart2_target_position)
+        if distance <= 0:
+            self.cart2_is_moving = False
+            self._cart2_move_timer = 0.0
+            return
+        self._cart2_move_timer += delta_seconds
+        if self._cart2_move_timer >= 18.0:
+            self._cart2_move_timer = 0.0
+            old_pos = self.cart2_position
+            if self.cart2_position < self.cart2_target_position:
+                self.cart2_position += 1
+            else:
+                self.cart2_position -= 1
+            print(f"[Cart2] 移动: {old_pos} → {self.cart2_position} (目标={self.cart2_target_position})", flush=True)
+            belt_log('D8').info(f"[Cart2] 移动: {old_pos} → {self.cart2_position} (目标={self.cart2_target_position})")
+            self.cart2_sensor_position = self.cart2_position
+            self.sensor_data_manager.write_cart_position('Cart2', self.cart2_position)
+            if self.cart2_position == self.cart2_target_position:
+                self._check_cart2_arrival()
+                self.cart2_is_moving = False
 
-        # 更新Cart1/2/3的位置
-        for cart_id in ['Cart1', 'Cart2', 'Cart3']:
-            if cart_id not in self.cart_target_positions:
-                continue
+    def update_cart3_position(self, delta_seconds: float):
+        """更新小车3位置（每帧调用，参照Cart4模式）"""
+        if not self.cart3_is_moving:
+            return
+        distance = abs(self.cart3_position - self.cart3_target_position)
+        if distance <= 0:
+            self.cart3_is_moving = False
+            self._cart3_move_timer = 0.0
+            return
+        self._cart3_move_timer += delta_seconds
+        if self._cart3_move_timer >= 18.0:
+            self._cart3_move_timer = 0.0
+            old_pos = self.cart3_position
+            if self.cart3_position < self.cart3_target_position:
+                self.cart3_position += 1
+            else:
+                self.cart3_position -= 1
+            print(f"[Cart3] 移动: {old_pos} → {self.cart3_position} (目标={self.cart3_target_position})", flush=True)
+            belt_log('D9').info(f"[Cart3] 移动: {old_pos} → {self.cart3_position} (目标={self.cart3_target_position})")
+            self.cart3_sensor_position = self.cart3_position
+            self.sensor_data_manager.write_cart_position('Cart3', self.cart3_position)
+            if self.cart3_position == self.cart3_target_position:
+                self._check_cart3_arrival()
+                self.cart3_is_moving = False
 
-            target_pos = self.cart_target_positions.get(cart_id, 1)
-            current_pos = self.cart_positions.get(cart_id, 1)
+    def _check_cart1_arrival(self):
+        """检查Cart1到达后，触发相关路线的FEEDING状态"""
+        self._handle_cart_arrival('Cart1', 'D7')
 
-            # FM接管: cart在目标位 → 设cart_moving=False通知FM
-            # FM 为唯一控制大脑：小车到达目标位置时通知 FM，由 FM 推动状态
-            if current_pos == target_pos:
-                for route_id in list(self.active_routes):
-                    ctx = self.route_state_manager.get_route_context(route_id)
-                    if ctx and ctx.assigned_cart == cart_id:
-                        ctx.cart_moving = False
-                if cart_id == 'Cart1': self._cart1_is_moving = False
-                elif cart_id == 'Cart2': self._cart2_is_moving = False
-                elif cart_id == 'Cart3': self._cart3_is_moving = False
-                continue
+    def _check_cart2_arrival(self):
+        """检查Cart2到达后，触发相关路线的FEEDING状态"""
+        self._handle_cart_arrival('Cart2', 'D8')
 
-            # 检查是否有小车需要移动
-            needs_moving = False
-            for route_id in list(self.active_routes):
-                ctx = self.route_state_manager.get_route_context(route_id)
-                if ctx and ctx.assigned_cart == cart_id and ctx.cart_moving:
-                    needs_moving = True
-                    break
+    def _check_cart3_arrival(self):
+        """检查Cart3到达后，触发相关路线的FEEDING状态"""
+        self._handle_cart_arrival('Cart3', 'D9')
 
-            if needs_moving and current_pos == target_pos:
-                pass  # FM 模式：上方已处理
-            elif current_pos != target_pos and needs_moving:
-                # 模拟小车每18秒（移动一位）更新一次位置
-                if not hasattr(self, '_cart_move_timers'):
-                    self._cart_move_timers = {}
-                if cart_id not in self._cart_move_timers:
-                    self._cart_move_timers[cart_id] = 0.0
-
-                self._cart_move_timers[cart_id] += delta_seconds
-                if self._cart_move_timers[cart_id] >= move_one_position_time:
-                    self._cart_move_timers[cart_id] = 0.0
-                    old_pos = current_pos
-                    if current_pos < target_pos:
-                        self.cart_positions[cart_id] = current_pos + 1
-                    else:
-                        self.cart_positions[cart_id] = current_pos - 1
-                    print(f"[{cart_id}] 移动: {old_pos} → {self.cart_positions[cart_id]} (目标={target_pos})", flush=True)
-                    # 同步传感器上报值（实时跟踪实际位置）
-                    self.cart_sensor_positions[cart_id] = self.cart_positions[cart_id]
-                    # 同步写入数据管理器，确保状态栏实时显示
-                    self.sensor_data_manager.write_cart_position(cart_id, self.cart_positions[cart_id])
-
-                    # 检查是否有小车到达
-                    self._check_virtual_cart_arrival(cart_id)
-
-    def _check_virtual_cart_arrival(self, cart_id: str):
-        """检查虚拟小车(Cart1/2/3)是否到达目标位置"""
+    def _handle_cart_arrival(self, cart_id: str, belt_id: str):
+        """统一处理小车到达后的状态转换"""
         for route_id in list(self.active_routes):
             ctx = self.route_state_manager.get_route_context(route_id)
             if not ctx or ctx.assigned_cart != cart_id:
                 continue
-
             if not ctx.cart_moving:
                 continue
-            # 允许 MOVING_TO_TARGET 或 CLEARING+early_moved 两种状态
             if ctx.state != RouteState.MOVING_TO_TARGET:
                 if not (ctx.state == RouteState.CLEARING and ctx.early_moved_from_clearing):
                     continue
-                print(f"[VirtualArrival] {cart_id} route={route_id} CLEARING+early_moved → 处理到达", flush=True)
-                belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[VirtualArrival] {cart_id} route={route_id} CLEARING+early_moved → 处理到达")
-
-            current_pos = self.cart_sensor_positions.get(cart_id, 1)
+            current_pos = self._cart_get_sensor_position(cart_id)
             if current_pos != ctx.cart_target_position:
                 continue
-
             if route_id in self._pending_stop_after_cart_arrival:
                 self._pending_stop_after_cart_arrival.discard(route_id)
                 self._complete_stop_route(route_id)
                 continue
-
-            # 小车到达目标位置，切换到FEEDING状态
             ctx.previous_state = 'clearing'
             if ctx.early_moved_from_clearing:
-                # 提前移动路线跳过了complete_clearing，将累加的余料转移到待释放
                 for hopper_id, weight in ctx.current_weights.items():
                     if weight > 0:
                         ctx.pending_release_weights[hopper_id] = weight
@@ -3271,27 +3389,15 @@ class SimulationController(QObject):
             ctx.cart_moving = False
             ctx.feeding_start_time = self.total_runtime
             ctx.clearing_strategy = self._resolve_clearing_strategy(route_id)
-            # 更新传感器位置（只有实际到达后才更新）
-            self.cart_sensor_positions[cart_id] = current_pos
-            if cart_id == 'Cart1': self._cart1_is_moving = False
-            elif cart_id == 'Cart2': self._cart2_is_moving = False
-            elif cart_id == 'Cart3': self._cart3_is_moving = False
-
-            # 更新 executing_bin 追踪（提前移动路线跳过了 _on_auto_feed_route_completed）
-            cart_to_belt = {'Cart1': 'D7', 'Cart2': 'D8', 'Cart3': 'D9'}
-            belt_id = cart_to_belt.get(cart_id, '')
+            self._cart_set_sensor_position(cart_id, current_pos)
             if belt_id and belt_id in self._executing_route:
                 self._executing_bin[belt_id] = ctx.target_bin
-
-            # 启动所有皮带
             route = config.FEED_ROUTES.get(route_id)
             if route and route['conveyors']:
                 for conv_id in route['conveyors']:
                     if conv_id in self.conveyors:
                         self.conveyors[conv_id].start(self.speed)
                 print(f"[到达] {route_id} 提前移动小车到达，启动所有皮带，打开中转斗释放余料", flush=True)
-                belt_log(({'route1':'D7','route2':'D7','route3':'D7','route4':'D9','route5':'D6','route6':'D8','route7':'D9','route8':'D8'}.get(route_id,'system'))).info(f"[到达] {route_id} 提前移动小车到达，启动所有皮带，打开中转斗释放余料")
-                # 打开中转斗开关（正常补料开始，释放累积余料）
                 for hopper_id in ctx.assigned_hoppers:
                     if hopper_id in self.hoppers:
                         self.hoppers[hopper_id].is_open = True

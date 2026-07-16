@@ -21,7 +21,9 @@ from typing import Optional, Callable, Dict, Any
 
 HOST = '127.0.0.1'
 PORT = 8896       # 仿真 HMI 端口（全量发送）
-REAL_PORT = 8897  # 真实上位机端口（增量发送）
+# REAL_PORT = 8897  # [已注释] 旧真实上位机端口（增量发送，作为服务器接受连接）
+REAL_HOST = '172.16.16.100'  # 新真实上位机地址（FM 主动连接发送）
+REAL_PORT = 8888                # 新真实上位机端口
 
 
 class FeedingMasterServer:
@@ -30,9 +32,11 @@ class FeedingMasterServer:
     def __init__(self, host: str = HOST, port: int = PORT, real_port: int = REAL_PORT):
         self.host = host
         self.port = port
-        self.real_port = real_port
+        # self.real_port = real_port  # [已注释] 旧真实上位机监听端口
+        self.real_host = REAL_HOST  # 新真实上位机地址
+        self.real_port = REAL_PORT  # 新真实上位机端口
         self._server: Optional[socket.socket] = None
-        self._real_server: Optional[socket.socket] = None
+        # self._real_server: Optional[socket.socket] = None  # [已注释] 旧真实上位机服务器 socket
         self._running = False
         self._seq = 0
         self._real_seq = 0  # 真实上位机独立序号，不与仿真 HMI 共享
@@ -88,7 +92,7 @@ class FeedingMasterServer:
         self._send(payload)
 
     def send_commands_real(self, commands: list, route_info: dict = None, sched_info: dict = None, diag: list = None):
-        """推送增量控制指令给真实上位机（仅 :8897）"""
+        """推送增量控制指令给真实上位机（主动连接 172.16.16.100:0 发送）"""
         self._real_seq += 1
         payload = {
             "type": "command",
@@ -101,7 +105,11 @@ class FeedingMasterServer:
             payload["schedule"] = sched_info
         if diag:
             payload["diagnosis"] = diag
-        self._send_real(payload)
+        # 新方式：主动连接真实上位机发送
+        self._send_real_direct(payload)
+
+        # [已注释] 旧方式：广播给已连接的真实上位机客户端
+        # self._send_real(payload)
 
     def send_state_snapshot(self, snapshot: dict):
         """推送状态快照 (也通过这个通道转发给诊断模块的话可另开端口)"""
@@ -140,16 +148,35 @@ class FeedingMasterServer:
             except (BrokenPipeError, ConnectionResetError, OSError):
                 self._remove_upper(sock)
 
-    def _send_real(self, data: dict):
-        """广播消息给所有真实上位机连接（:8897）"""
-        with self._real_lock:
-            sockets = list(self._real_sockets)
-        payload = (json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8")
-        for sock in sockets:
-            try:
-                sock.sendall(payload)
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                self._remove_real(sock)
+    def _send_real_direct(self, data: dict):
+        """主动连接真实上位机 172.16.16.100:0 发送命令（短连接）"""
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            sock.connect((self.real_host, self.real_port))
+            payload = (json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8")
+            sock.sendall(payload)
+        except Exception as e:
+            print(f"[FeedingMaster] 真实上位机发送失败 ({self.real_host}:{self.real_port}): {e}", file=sys.stderr)
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+    # [已注释] 旧方式：广播给已连接的真实上位机客户端
+    # def _send_real(self, data: dict):
+    #     """广播消息给所有真实上位机连接（:8897）"""
+    #     with self._real_lock:
+    #         sockets = list(self._real_sockets)
+    #     payload = (json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8")
+    #     for sock in sockets:
+    #         try:
+    #             sock.sendall(payload)
+    #         except (BrokenPipeError, ConnectionResetError, OSError):
+    #             self._remove_real(sock)
 
     # ── 服务生命周期 ──
 
@@ -161,13 +188,16 @@ class FeedingMasterServer:
         self._running = True
         print(f"[FeedingMaster] 服务已启动 {self.host}:{self.port}", flush=True)
 
-        # 启动真实上位机端口 accept 线程
-        self._real_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._real_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._real_server.bind((self.host, self.real_port))
-        self._real_server.listen(5)
-        threading.Thread(target=self._real_accept_loop, daemon=True).start()
-        print(f"[FeedingMaster] 真实上位机端口 {self.host}:{self.real_port} (增量发送)", flush=True)
+        # [已注释] 旧真实上位机端口 (作为服务器接受连接)
+        # self._real_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # self._real_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # self._real_server.bind((self.host, self.real_port))
+        # self._real_server.listen(5)
+        # threading.Thread(target=self._real_accept_loop, daemon=True).start()
+        # print(f"[FeedingMaster] 真实上位机端口 {self.host}:{self.real_port} (增量发送)", flush=True)
+
+        # 新方式：主动连接真实上位机发送（不监听端口）
+        print(f"[FeedingMaster] 真实上位机 → {self.real_host}:{self.real_port} (主动连接发送)", flush=True)
 
         while self._running:
             try:
@@ -187,17 +217,18 @@ class FeedingMasterServer:
     def stop(self):
         self._running = False
         self._close_all()
-        self._close_all_real()
+        # self._close_all_real()  # [已注释] 旧真实上位机 cleanup
         if self._server:
             try:
                 self._server.close()
             except Exception:
                 pass
-        if self._real_server:
-            try:
-                self._real_server.close()
-            except Exception:
-                pass
+        # [已注释] 旧真实上位机服务器 cleanup
+        # if self._real_server:
+        #     try:
+        #         self._real_server.close()
+        #     except Exception:
+        #         pass
         print("[FeedingMaster] 服务已停止", flush=True)
 
     def _remove_upper(self, sock: socket.socket):
@@ -244,69 +275,70 @@ class FeedingMasterServer:
             except Exception:
                 pass
 
+    # [已注释] 旧真实上位机端口 (作为服务器接受连接，已改为主动连接发送)
     # ── 真实上位机端口 (:8897) ──
-
-    def _real_accept_loop(self):
-        """独立线程 accept 真实上位机连接"""
-        while self._running:
-            try:
-                self._real_server.settimeout(1.0)
-                try:
-                    client, addr = self._real_server.accept()
-                    print(f"[FeedingMaster] 真实上位机已连接: {addr}", flush=True)
-                    with self._real_lock:
-                        self._real_sockets.append(client)
-                    threading.Thread(target=self._handle_real, args=(client, addr), daemon=True).start()
-                except socket.timeout:
-                    pass
-            except Exception as e:
-                if self._running:
-                    print(f"[FeedingMaster] 真实端口 accept 错误: {e}", file=sys.stderr)
-
-    def _handle_real(self, client: socket.socket, addr: tuple):
-        """处理真实上位机连接（上行数据接收，与仿真 HMI 共用回调）"""
-        buf = b""
-        try:
-            client.settimeout(None)
-            while self._running:
-                chunk = client.recv(4096)
-                if not chunk:
-                    break
-                buf += chunk
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
-                    self._process_upper_msg(line.decode("utf-8").strip(), 'real')
-        except socket.timeout:
-            pass
-        except ConnectionResetError:
-            print(f"[FeedingMaster] 真实上位机断开: {addr}", flush=True)
-        except Exception as e:
-            print(f"[FeedingMaster] 真实上位机通信错误: {e}", file=sys.stderr)
-        finally:
-            self._remove_real(client)
-            try:
-                client.close()
-            except Exception:
-                pass
-
-    def _remove_real(self, sock: socket.socket):
-        with self._real_lock:
-            if sock in self._real_sockets:
-                self._real_sockets.remove(sock)
-        try:
-            sock.close()
-        except Exception:
-            pass
-
-    def _close_all_real(self):
-        with self._real_lock:
-            sockets = list(self._real_sockets)
-            self._real_sockets.clear()
-        for sock in sockets:
-            try:
-                sock.close()
-            except Exception:
-                pass
+    #
+    # def _real_accept_loop(self):
+    #     \"\"\"独立线程 accept 真实上位机连接\"\"\"
+    #     while self._running:
+    #         try:
+    #             self._real_server.settimeout(1.0)
+    #             try:
+    #                 client, addr = self._real_server.accept()
+    #                 print(f\"[FeedingMaster] 真实上位机已连接: {addr}\", flush=True)
+    #                 with self._real_lock:
+    #                     self._real_sockets.append(client)
+    #                 threading.Thread(target=self._handle_real, args=(client, addr), daemon=True).start()
+    #             except socket.timeout:
+    #                 pass
+    #         except Exception as e:
+    #             if self._running:
+    #                 print(f\"[FeedingMaster] 真实端口 accept 错误: {e}\", file=sys.stderr)
+    #
+    # def _handle_real(self, client: socket.socket, addr: tuple):
+    #     \"\"\"处理真实上位机连接（上行数据接收，与仿真 HMI 共用回调）\"\"\"
+    #     buf = b\"\"
+    #     try:
+    #         client.settimeout(None)
+    #         while self._running:
+    #             chunk = client.recv(4096)
+    #             if not chunk:
+    #                 break
+    #             buf += chunk
+    #             while b\"\\n\" in buf:
+    #                 line, buf = buf.split(b\"\\n\", 1)
+    #                 self._process_upper_msg(line.decode(\"utf-8\").strip(), 'real')
+    #     except socket.timeout:
+    #         pass
+    #     except ConnectionResetError:
+    #         print(f\"[FeedingMaster] 真实上位机断开: {addr}\", flush=True)
+    #     except Exception as e:
+    #         print(f\"[FeedingMaster] 真实上位机通信错误: {e}\", file=sys.stderr)
+    #     finally:
+    #         self._remove_real(client)
+    #         try:
+    #             client.close()
+    #         except Exception:
+    #             pass
+    #
+    # def _remove_real(self, sock: socket.socket):
+    #     with self._real_lock:
+    #         if sock in self._real_sockets:
+    #             self._real_sockets.remove(sock)
+    #     try:
+    #         sock.close()
+    #     except Exception:
+    #         pass
+    #
+    # def _close_all_real(self):
+    #     with self._real_lock:
+    #         sockets = list(self._real_sockets)
+    #         self._real_sockets.clear()
+    #     for sock in sockets:
+    #         try:
+    #             sock.close()
+    #         except Exception:
+    #             pass
 
     def _process_upper_msg(self, line: str, source: str = 'sim'):
         if not line:

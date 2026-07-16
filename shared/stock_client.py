@@ -7,6 +7,7 @@ import json
 import socket
 import sys
 import threading
+import time
 from typing import Dict, List, Optional
 
 STOCK_HOST = '127.0.0.1'
@@ -21,6 +22,7 @@ class BaseStockClient:
         self.port = port
         self._sock: Optional[socket.socket] = None
         self._lock = threading.Lock()
+        self._last_fail_time = 0.0  # 冷却: 5s内不重复重连
 
     def connect(self) -> bool:
         with self._lock:
@@ -31,10 +33,12 @@ class BaseStockClient:
                 self._sock.settimeout(3)
                 self._sock.connect((self.host, self.port))
                 self._sock.settimeout(10)
+                print(f"[Stock] 已连接 {self.host}:{self.port}", flush=True)
                 return True
             except Exception as e:
                 print(f"[Stock] 连接失败: {e}", file=sys.stderr)
                 self._sock = None
+                self._last_fail_time = time.time()
                 return False
 
     def disconnect(self):
@@ -52,6 +56,9 @@ class BaseStockClient:
             sock = self._sock
         if sock is None:
             return None
+        # 冷却: 上次失败后5s内直接返回None，不重试
+        if time.time() - self._last_fail_time < 5.0:
+            return None
         try:
             sock.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
             buf = b""
@@ -59,11 +66,14 @@ class BaseStockClient:
                 chunk = sock.recv(4096)
                 if not chunk:
                     self.disconnect()
+                    self._last_fail_time = time.time()
                     return None
                 buf += chunk
             return json.loads(buf.decode("utf-8").strip())
         except Exception:
             self.disconnect()
+            self._last_fail_time = time.time()
+            print(f"[Stock] 请求失败，已断开", flush=True)
             return None
 
     def get_all_levels(self) -> List[dict]:

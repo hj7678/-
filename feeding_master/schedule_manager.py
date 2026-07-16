@@ -41,6 +41,7 @@ class ScheduleManager:
     def __init__(self, stock_client, route_manager):
         self.stock = stock_client
         self.route_mgr = route_manager
+        self._level_cache: dict = {}  # 主线程注入的缓存，避免直接 TCP 调用
 
         self._sequences: Dict[str, list] = {}
         self._sequences_lock = threading.Lock()
@@ -51,6 +52,9 @@ class ScheduleManager:
         self._last_request: Dict[str, float] = {}
         self._last_emergency: Dict[str, float] = {}
         self._last_cross_request: Dict[str, float] = {}
+        self._cross_return_pending: Dict[str, bool] = {}  # 兼职回切标记: 完成当前仓后回归主列
+        self._pending_activate: Dict[str, list] = {}  # 后台线程收到的序列，主线程安全激活
+        self._activate_lock = threading.Lock()  # 保护 _pending_activate
         self._d9_last_route: str = ''
 
         # 防抖: 每个belt每次tick最多触发一次
@@ -89,7 +93,7 @@ class ScheduleManager:
                 continue
 
     def _check_cross_column(self, belt_id: str, now: float) -> bool:
-        """跨列/兼职调度：主列序列执行完毕+全满→启用备用列"""
+        """跨列/兼职调度：主列全满+备用列有低于60%的仓→单仓调度"""
         if belt_id not in ('D7', 'D9'):
             return False
         # 仅在空闲时触发（序列全部执行完毕）
@@ -100,29 +104,42 @@ class ScheduleManager:
             return False
 
         from scheduling.bin_config import BELT_BINS, CROSS_COLUMN_BINS, CROSS_COL_PREFIX
-        primary = self.stock.get_levels(BELT_BINS.get(belt_id, []))
+        primary = self._get_levels_cached(BELT_BINS.get(belt_id, []))
         if not primary or not all(b.get('level_tons', 0) >= IDLE_THRESHOLD_TONS for b in primary):
             return False  # 主列有需求，不触发跨列
-        # 主列全满→取跨列最低仓
+
+        # 跨列调度阈值: 60% × 110t = 66t
+        CROSS_THRESHOLD = 66.0
         cross_ids = list(CROSS_COLUMN_BINS.get(belt_id, []))
-        cart2_bin = self._executing_bin.get('D8', '')
-        if cart2_bin and cart2_bin in cross_ids:
-            cross_ids.remove(cart2_bin)
+
+        # 排除 D8/Cart2 正在执行和序列中下一个料仓（防冲突）
+        cart2_executing = self._executing_bin.get('D8', '')
+        if cart2_executing and cart2_executing in cross_ids:
+            cross_ids.remove(cart2_executing)
+        with self._sequences_lock:
+            cart2_seq = self._sequences.get('D8', [])
+        if cart2_seq and cart2_seq[0] in cross_ids:
+            cross_ids.remove(cart2_seq[0])
+
         if not cross_ids:
             return False
-        cross_levels = self.stock.get_levels(cross_ids)
+
+        cross_levels = self._get_levels_cached(cross_ids)
         if not cross_levels:
             return False
+
+        # 找最低料位且低于 60% 的仓
         cross_levels.sort(key=lambda b: b.get('level_tons', 0))
         lowest = cross_levels[0]
-        if lowest.get('level_tons', 0) >= IDLE_THRESHOLD_TONS:
-            return False  # 跨列仓也全满，无需调度
+        if lowest.get('level_tons', 0) >= CROSS_THRESHOLD:
+            return False  # 跨列仓都高于60%，无需调度
+
         # 避免重复请求
         last = self._last_cross_request.get(belt_id, 0)
         if now - last < 30:
             return False
         self._last_cross_request[belt_id] = now
-        print(f"[FM-Sched] {belt_id} 跨列调度 → {lowest['bin_id']}", flush=True)
+        print(f"[FM-Sched] {belt_id} 跨列调度 → {lowest['bin_id']} (料位{lowest.get('level_tons',0):.0f}t)", flush=True)
         # 直接构造单仓请求发给调度引擎
         self._request_schedule_cross(belt_id, lowest['bin_id'],
                                      CROSS_COL_PREFIX.get(belt_id, ''))
@@ -141,7 +158,7 @@ class ScheduleManager:
         return False
 
     def _check_idle(self, belt_id: str, now: float) -> bool:
-        # 兼职调度回切检测: 正在执行跨列但主列有仓低于阈值→强制请求调度
+        # 兼职调度回切检测: 正在执行跨列但主列有仓低于阈值→标记回切
         if belt_id in self._executing and belt_id in ('D7', 'D9'):
             current_bin = self._executing_bin.get(belt_id, '')
             from scheduling.bin_config import CROSS_COL_PREFIX
@@ -149,12 +166,9 @@ class ScheduleManager:
             if cross_prefix and current_bin.startswith(cross_prefix):
                 primary = self._get_primary_bins(belt_id)
                 if primary and any(b['stock'] < IDLE_THRESHOLD_TONS for b in primary):
-                    last = self._last_request.get(belt_id, 0)
-                    if now - last < 30:
-                        return False
-                    self._last_request[belt_id] = now
-                    print(f"[FM-Sched] {belt_id} 兼职回切: 主列有仓低于{IDLE_THRESHOLD_TONS}t", flush=True)
-                    self._request_schedule(belt_id)
+                    if not self._cross_return_pending.get(belt_id):
+                        self._cross_return_pending[belt_id] = True
+                        print(f"[FM-Sched] {belt_id} 兼职回切标记: 主列有仓低于{IDLE_THRESHOLD_TONS}t，完成当前仓后回切", flush=True)
                     return True
 
         # 正在执行中或已有缓存序列 → 跳过
@@ -186,13 +200,19 @@ class ScheduleManager:
 
     # ── 构建请求 ──
 
+    def _get_levels_cached(self, bin_ids: List[str]) -> List[dict]:
+        """从缓存读取料位，缓存不可用时回退到 TCP"""
+        if self._level_cache:
+            return [self._level_cache[bid] for bid in bin_ids if bid in self._level_cache]
+        return self.stock.get_levels(bin_ids)
+
     def _get_primary_bins(self, belt_id: str) -> List[dict]:
         """只获取主列料仓（不触发跨列），用于回切检测"""
         from scheduling.bin_config import BELT_BINS
         bin_ids = BELT_BINS.get(belt_id, [])
         if not bin_ids:
             return []
-        levels = self.stock.get_levels(bin_ids)
+        levels = self._get_levels_cached(bin_ids)
         return [
             {'bin_id': b['bin_id'], 'stock': b['level_tons']}
             for b in levels
@@ -204,7 +224,15 @@ class ScheduleManager:
         bin_ids = BELT_BINS.get(belt_id, [])
         if not bin_ids:
             return []
-        levels = self.stock.get_levels(bin_ids)
+
+        # 双向防冲突: D8调度时排除D7/D9跨列正在执行的仓
+        if belt_id == 'D8':
+            for cross_belt in ('D7', 'D9'):
+                cross_bin = self._executing_bin.get(cross_belt, '')
+                if cross_bin and cross_bin in bin_ids:
+                    bin_ids = [b for b in bin_ids if b != cross_bin]
+
+        levels = self._get_levels_cached(bin_ids)
         return [
             {
                 'bin_id': b['bin_id'],
@@ -221,7 +249,11 @@ class ScheduleManager:
         if belt_id in self._tick_triggered:
             return
         self._tick_triggered.add(belt_id)
-        bins = [{'bin_id': bin_id, 'stock': 0, 'consumption_rate': 0.01,
+        # 读取真实料位（优先缓存），而非硬编码0（用于调度日志和诊断）
+        levels = self._get_levels_cached([bin_id])
+        stock = levels[0]['level_tons'] if levels else 0.0
+        rate = levels[0].get('consumption_rate', 0.01) if levels else 0.01
+        bins = [{'bin_id': bin_id, 'stock': stock, 'consumption_rate': rate,
                  'maintenance': False, 'has_future_order': False}]
         cart_id = BELT_TO_CART.get(belt_id, '')
         cart_pos = self._cart_positions.get(cart_id, 1) if hasattr(self, '_cart_positions') else 1
@@ -325,9 +357,10 @@ class ScheduleManager:
         with self._sequences_lock:
             self._sequences[belt_id] = list(seq)
 
-        # 仅当皮带空闲时自动启动第一条, 否则等WAITING→auto-continue
-        if not self.is_executing(belt_id) and self._on_sequence:
-            self._on_sequence(belt_id, list(seq))
+        # 标记待激活：由主线程 _tick 在安全时机处理，避免后台线程竞态
+        if not self.is_executing(belt_id):
+            with self._activate_lock:
+                self._pending_activate[belt_id] = list(seq)
 
     # ── 序列消费 ──
 
@@ -379,6 +412,43 @@ class ScheduleManager:
     def update_cart_state(self, cart_positions: dict, cart_divert: dict):
         self._cart_positions = cart_positions
         self._cart_divert = cart_divert
+
+    # ── 跨列调度辅助 ──
+
+    def is_cross_column_bin(self, belt_id: str, bin_id: str) -> bool:
+        """判断料仓是否属于该皮带的跨列备用列"""
+        from scheduling.bin_config import CROSS_COLUMN_BINS
+        return bin_id in CROSS_COLUMN_BINS.get(belt_id, [])
+
+    def pick_next_cross_bin(self, belt_id: str) -> Optional[str]:
+        """跨列调度自动续料：找下一个符合条件的备用列料仓"""
+        if belt_id not in ('D7', 'D9'):
+            return None
+        from scheduling.bin_config import CROSS_COLUMN_BINS
+        CROSS_THRESHOLD = 66.0  # 60% × 110t
+
+        cross_ids = list(CROSS_COLUMN_BINS.get(belt_id, []))
+        # 排除 D8/Cart2 正在执行和序列中下一个料仓
+        cart2_executing = self._executing_bin.get('D8', '')
+        if cart2_executing and cart2_executing in cross_ids:
+            cross_ids.remove(cart2_executing)
+        with self._sequences_lock:
+            cart2_seq = self._sequences.get('D8', [])
+        if cart2_seq and cart2_seq[0] in cross_ids:
+            cross_ids.remove(cart2_seq[0])
+
+        if not cross_ids:
+            return None
+
+        cross_levels = self._get_levels_cached(cross_ids)
+        if not cross_levels:
+            return None
+
+        cross_levels.sort(key=lambda b: b.get('level_tons', 0))
+        lowest = cross_levels[0]
+        if lowest.get('level_tons', 0) >= CROSS_THRESHOLD:
+            return None
+        return lowest['bin_id']
 
     @staticmethod
     def _map_d8_pos(row: int, left: bool, right: bool) -> int:

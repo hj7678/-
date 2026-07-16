@@ -114,12 +114,10 @@ class SimulationFeedingBridge(QObject):
         now = time.time()
         for cart_id, (target, start_time, duration) in list(self._cart_moves.items()):
             if now - start_time >= duration:
-                # 移动完成，位置由控制器 _update_cart_positions 逐格(18s/格)到位
-                if cart_id == 'Cart1': ctrl._cart1_is_moving = False
-                elif cart_id == 'Cart2': ctrl._cart2_is_moving = False
-                elif cart_id == 'Cart3': ctrl._cart3_is_moving = False
+                # 移动完成，位置由控制器逐格(18s/格)到位
+                ctrl._cart_set_moving(cart_id, False)
                 del self._cart_moves[cart_id]
-                print(f"[桥接] {cart_id} 移动完成 → pos={ctrl.cart_positions.get(cart_id, '?')} ({duration:.0f}s)", flush=True)
+                print(f"[桥接] {cart_id} 移动完成 → pos={ctrl._cart_get_position(cart_id)} ({duration:.0f}s)", flush=True)
 
         # 自动重连 (每3秒尝试一次, 避免阻塞tick)
         now = time.time()
@@ -165,9 +163,9 @@ class SimulationFeedingBridge(QObject):
             "hopper_states": {hid: h.is_open for hid, h in ctrl.hoppers.items()},
             "hopper_weights": {hid: h.get_display_weight() for hid, h in ctrl.hoppers.items()},
             "cart_positions": {
-                'Cart1': ctrl.cart_positions.get('Cart1', 1),
-                'Cart2': ctrl.cart_positions.get('Cart2', 1),
-                'Cart3': ctrl.cart_positions.get('Cart3', 1),
+                'Cart1': ctrl.cart1_position,
+                'Cart2': ctrl.cart2_position,
+                'Cart3': ctrl.cart3_position,
                 'Cart4': ctrl.cart4_position,
             },
             "cart_divert": {
@@ -177,19 +175,19 @@ class SimulationFeedingBridge(QObject):
                 'Cart4': _cart4_divert(ctrl),
             },
             "cart_limits": {
-                'Cart1': [ctrl.cart_sensor_positions.get('Cart1', 1) == 1,
-                          ctrl.cart_sensor_positions.get('Cart1', 1) == 7],
-                'Cart2': [ctrl.cart_sensor_positions.get('Cart2', 1) == 1,
-                          ctrl.cart_sensor_positions.get('Cart2', 1) == 7],
-                'Cart3': [ctrl.cart_sensor_positions.get('Cart3', 1) == 1,
-                          ctrl.cart_sensor_positions.get('Cart3', 1) == 7],
+                'Cart1': [ctrl.cart1_sensor_position == 1,
+                          ctrl.cart1_sensor_position == 7],
+                'Cart2': [ctrl.cart2_sensor_position == 1,
+                          ctrl.cart2_sensor_position == 7],
+                'Cart3': [ctrl.cart3_sensor_position == 1,
+                          ctrl.cart3_sensor_position == 7],
                 'Cart4': [ctrl.cart4_position == 1,
                           ctrl.cart4_position == 6],
             },
             "cart_moving": {
-                'Cart1': getattr(ctrl, '_cart1_is_moving', False),
-                'Cart2': getattr(ctrl, '_cart2_is_moving', False),
-                'Cart3': getattr(ctrl, '_cart3_is_moving', False),
+                'Cart1': ctrl.cart1_is_moving,
+                'Cart2': ctrl.cart2_is_moving,
+                'Cart3': ctrl.cart3_is_moving,
                 'Cart4': ctrl.cart4_is_moving,
             },
             "belt_states": {cid: conv.is_running for cid, conv in ctrl.conveyors.items()},
@@ -362,6 +360,17 @@ class SimulationFeedingBridge(QObject):
                         ctrl.set_feed_point_active("silo_out", False)
 
             elif device == "cart":
+                    action = cmd.get("action", "move")
+                    if action == "divert":
+                        # 纯分料命令：小车不移动，仅切换分料方向
+                        left_div = cmd.get("left_divert")
+                        right_div = cmd.get("right_divert")
+                        if left_div is not None and right_div is not None:
+                            ctrl.cart_divert[dev_id] = (left_div, right_div)
+                            ctrl.sensor_data_manager.write_cart_left_divert(dev_id, left_div)
+                            ctrl.sensor_data_manager.write_cart_right_divert(dev_id, right_div)
+                            print(f"[桥接] {dev_id} 分料切换: 左={left_div} 右={right_div}", flush=True)
+                        continue
                     target = cmd.get("target")
                     if target is not None:
                         # 仅当目标变化时打印日志
@@ -378,24 +387,16 @@ class SimulationFeedingBridge(QObject):
                             else:
                                 ctrl.cart4_is_moving = False
                         else:
-                            # 记录小车移动，通过 _update_cart_positions 模拟移动
-                            current_pos = ctrl.cart_positions.get(dev_id, 1)
-                            ctrl.cart_target_positions[dev_id] = target
+                            current_pos = ctrl._cart_get_position(dev_id)
+                            ctrl._cart_set_target(dev_id, target)
                             if current_pos != target:
                                 grids = abs(target - current_pos)
                                 duration = grids * self._cart_move_per_grid
                                 self._cart_moves[dev_id] = (target, time.time(), duration)
-                                # 仅当目标变化时打印
                                 if last_target != target:
                                     print(f"[桥接] {dev_id} 开始移动: {current_pos}→{target} ({grids}格={duration:.0f}s)", flush=True)
-                                if dev_id == 'Cart1': ctrl._cart1_is_moving = True
-                                if dev_id == 'Cart2': ctrl._cart2_is_moving = True
-                                if dev_id == 'Cart3': ctrl._cart3_is_moving = True
                             else:
-                                # 已在目标位置，无需移动
-                                if dev_id == 'Cart1': ctrl._cart1_is_moving = False
-                                if dev_id == 'Cart2': ctrl._cart2_is_moving = False
-                                if dev_id == 'Cart3': ctrl._cart3_is_moving = False
+                                ctrl._cart_set_moving(dev_id, False)
                         route_id = cmd.get("route_id")
                         if route_id:
                             ctx = ctrl.route_state_manager.get_route_context(route_id)

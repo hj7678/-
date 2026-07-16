@@ -69,6 +69,7 @@ class FeedingMasterController:
     def __init__(self, tcp_server: FeedingMasterServer):
         self.server = tcp_server
         self.stock = StockClient()
+        self._stock_poll_client = StockClient()  # 后台轮询线程专用，避免与主线程竞态
 
         # 故障诊断客户端
         self._diag_client = None
@@ -94,6 +95,11 @@ class FeedingMasterController:
         self._thread: Optional[threading.Thread] = None
         self._tick_ms = 50
         self._total_runtime = 0.0
+
+        # Stock Management 料位缓存（后台线程更新，_tick 无阻塞读取）
+        self._level_cache: dict = {}
+        self._level_cache_lock = threading.Lock()
+        self._level_cache_ok = False  # 缓存是否有效
 
         # 调度管理器
         self.scheduler = ScheduleManager(self.stock, self.route_manager)
@@ -160,50 +166,38 @@ class FeedingMasterController:
         # 同步调度开关: UI点击"调度服务"后FM才开始请求调度
         self.scheduler.set_active(data.get('scheduling_active', False))
 
-        # 同步活跃路线: 仿真激活了哪些路线，FeedingMaster 就追踪哪些
-        # 真实上位机不提供 active_routes → FM 用自己的 _active_routes
-        sim_active = set(data.get('active_routes', []))
-        sim_states = data.get('route_states', {})
-
-        # FM判断cart到达（真实上位机无 active_routes 时，遍历 FM 自己管理的路线）
-        check_routes = sim_active & self._active_routes if sim_active else self._active_routes
-        for route_id in check_routes:
-            ctx = self.route_manager.get_route_context(route_id)
-            if not ctx:
-                continue
-            cart_id = ctx.assigned_cart
-            if cart_id:
-                ctx.cart_moving = self._cart_moving.get(cart_id, False)
-                if ctx.state == RouteState.MOVING_TO_TARGET:
-                    cur = self._cart_positions.get(cart_id, 1)
-                    moving = self._cart_moving.get(cart_id, False)
-                    if not moving and cur == ctx.cart_target_position:
-                        # 检查分料状态是否匹配目标列
-                        divert_ok = True
-                        div = self._cart_divert.get(cart_id, (True, False))
-                        target_bin = ctx.target_bin or ''
-                        if cart_id == 'Cart4' and target_bin.startswith('S'):
-                            try:
-                                n = int(target_bin[1:])
-                                expected = (True, False) if 1 <= n <= 6 else (False, True)
-                                if tuple(div) != expected:
-                                    divert_ok = False
-                            except ValueError:
-                                pass
-                        elif cart_id in ('Cart1', 'Cart2', 'Cart3'):
-                            target_col = target_bin.split('-')[0] if target_bin else ''
-                            col_map = {'P1': (True, False), 'P2': (True, False), 'P3': (False, True), 'P4': (False, True)}
-                            expected = col_map.get(target_col)
-                            if expected and tuple(div) != expected:
-                                divert_ok = False
-                        if divert_ok:
-                            self.route_manager.set_route_state(route_id, RouteState.FEEDING)
-                            ctx.feeding_start_time = self._total_runtime
-                            ctx.early_moved_from_clearing = False
-                            ctx.clearing_strategy = 'reverse'
-                            print(f"[FM] {route_id} cart到达→FEEDING pos={cur}", flush=True)
+        # 注意: cart到达检测由主线程 _tick 中的状态引擎统一处理，
+        # 不在此处（后台线程）修改 ctx 状态，避免竞态。
 
         # FM自主管理路线生命周期, 不从仿真同步添加/移除
+
+    def _stock_poll_loop(self):
+        """后台线程：每500ms轮询 Stock Management，更新 _level_cache"""
+        print("[FeedingMaster] Stock 轮询线程已启动", flush=True)
+        poll = self._stock_poll_client  # 专用客户端，避免与主线程竞态
+        fail_count = 0
+        while self._running:
+            try:
+                levels = poll.get_all_levels()
+                if levels:
+                    with self._level_cache_lock:
+                        self._level_cache = {b['bin_id']: b for b in levels}
+                        self._level_cache_ok = True
+                    fail_count = 0
+                else:
+                    fail_count += 1
+                    if fail_count == 1:
+                        print("[FM] Stock 轮询返回空，尝试重连...", flush=True)
+                        poll.connect()
+                    if fail_count > 10:
+                        with self._level_cache_lock:
+                            self._level_cache_ok = False
+            except Exception as e:
+                fail_count += 1
+                if fail_count == 1:
+                    print(f"[FM] Stock 轮询异常: {e}", flush=True)
+            time.sleep(0.5)
+        print("[FeedingMaster] Stock 轮询线程已停止", flush=True)
 
     # ── 主循环 ──
 
@@ -213,6 +207,9 @@ class FeedingMasterController:
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        # 启动 Stock Management 后台轮询（避免 _tick 阻塞）
+        self._stock_thread = threading.Thread(target=self._stock_poll_loop, daemon=True)
+        self._stock_thread.start()
         self._start_diag_client()
         print("[FeedingMaster] 控制循环已启动 (50ms)", flush=True)
 
@@ -234,19 +231,33 @@ class FeedingMasterController:
             try:
                 self._tick(delta)
             except Exception as e:
-                print(f"[FeedingMaster] tick 异常: {e}", file=sys.stderr)
+                import traceback
+                print(f"[FeedingMaster] tick 异常: {e}", flush=True)
+                traceback.print_exc()
 
-            # 每5s发送料位报告
+            # 心跳: 每60s确认_tick在运行 + 料位快照
+            if int(self._total_runtime) % 60 == 0 and int(self._total_runtime) != getattr(self, '_last_heartbeat', 0):
+                self._last_heartbeat = int(self._total_runtime)
+                with self._level_cache_lock:
+                    cache = dict(self._level_cache)
+                snapshot = []
+                for rid in self._active_routes:
+                    ctx = self.route_manager.get_route_context(rid)
+                    if ctx and ctx.state == RouteState.FEEDING:
+                        snapshot.append(f"{ctx.target_bin}={cache.get(ctx.target_bin, {}).get('level_pct','?')}%")
+                print(f"[FM-HEARTBEAT] t={self._total_runtime:.0f}s "
+                      f"routes={list(self._active_routes)} "
+                      f"levels=[{', '.join(snapshot)}] "
+                      f"cache={'OK' if self._level_cache_ok else 'STALE'}", flush=True)
+
+            # 每5s发送料位报告（从缓存读取，无阻塞）
             if self._total_runtime - last_level_report >= 5.0:
                 last_level_report = self._total_runtime
-                try:
-                    levels = self.stock.get_all_levels()
-                    if levels:
-                        # 只发送 bin_id + level_pct + capacity
-                        slim = [{'bin_id': b['bin_id'], 'level_pct': b.get('level_pct', 0), 'capacity': b.get('capacity', 0)} for b in levels]
-                        self.server.send_levels(slim)
-                except Exception as e:
-                    print(f"[FeedingMaster] 料位发送异常: {e}", file=sys.stderr)
+                with self._level_cache_lock:
+                    cache = dict(self._level_cache)
+                if cache:
+                    slim = [{'bin_id': b['bin_id'], 'level_pct': b.get('level_pct', 0), 'capacity': b.get('capacity', 0)} for b in cache.values()]
+                    self.server.send_levels(slim)
 
             elapsed = time.time() - now
             sleep_time = max(0, self._tick_ms / 1000.0 - elapsed)
@@ -254,13 +265,18 @@ class FeedingMasterController:
 
     def _tick(self, delta_seconds: float):
         """一个控制周期"""
-        # 1. 拉取料位（断连时自动重连）
-        levels = self.stock.get_all_levels()
-        if not levels:
-            # 尝试重连 Stock Management
-            self.stock.connect()
-            levels = self.stock.get_all_levels()
-        level_map = {b['bin_id']: b for b in levels} if levels else {}
+        # 1. 读取料位（从后台线程缓存，无阻塞）
+        with self._level_cache_lock:
+            level_map = dict(self._level_cache)
+            cache_ok = self._level_cache_ok
+        if not cache_ok and not level_map:
+            # 缓存失效且无数据：尝试同步读取一次作为兜底
+            try:
+                levels = self.stock.get_all_levels()
+                if levels:
+                    level_map = {b['bin_id']: b for b in levels}
+            except Exception:
+                pass
 
         # 上料点无料自动切换检测
         self._check_feed_point_switch()
@@ -510,6 +526,19 @@ class FeedingMasterController:
                     if nxt and nxt == completed_bin:
                         self.scheduler.pop_next_bin(belt_id)
                         nxt = self.scheduler.get_next_bin(belt_id)
+                    # D8: 跳过 D7/D9 正在跨列调度的仓
+                    if nxt and belt_id == 'D8':
+                        skip = False
+                        for cross_belt in ('D7', 'D9'):
+                            cross_bin = self.scheduler._executing_bin.get(cross_belt, '')
+                            if cross_bin and cross_bin == nxt:
+                                self.scheduler.pop_next_bin(belt_id)
+                                print(f"[FM] {belt_id} 跳过 {nxt} (D7/D9跨列中)", flush=True)
+                                nxt = self.scheduler.get_next_bin(belt_id)
+                                skip = True
+                                break
+                        if skip and not nxt:
+                            nxt = None  # 序列耗尽，走待机逻辑
                     if nxt:
                         self.scheduler.pop_next_bin(belt_id)
                         # 同帧续料: 避免 WAITING 空窗期导致皮带 停→启
@@ -526,6 +555,7 @@ class FeedingMasterController:
                             self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
                             print(f"[FM] {belt_id} 自动续料 {route_id}→{route_id2} → {nxt} (停非共用: {non_shared})", flush=True)
                         elif route_id2 and self.activate_route(route_id2, nxt):
+                            self.scheduler.mark_executing(belt_id, route_id2, nxt)
                             self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
                             print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
                         elif route_id2:
@@ -540,21 +570,63 @@ class FeedingMasterController:
                         else:
                             self._pending_auto_continue = (belt_id, nxt)
                     else:
-                        # 无下一仓: 进入节能待机, 停止所有皮带
-                        self.route_manager.set_route_state(route_id, RouteState.STANDBY)
-                        route_convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
-                        for cid in route_convs:
-                            commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
-                            new_cmds[f"belt:{cid}"] = 'stop'
-                        for hid in ctx.assigned_hoppers:
-                            commands.append({'device': 'hopper', 'id': hid, 'action': 'close'})
-                            new_cmds[f"hopper:{hid}"] = 'close'
-                        self._active_routes.discard(route_id)
-                        if not hasattr(self, '_deactivated_routes'):
-                            self._deactivated_routes = set()
-                        self._deactivated_routes.add(route_id)
-                        print(f"[FM] {route_id}: waiting → standby | 节能待机", flush=True)
-                        ctx.clearing_start_time = 0
+                        # 无下一仓: 兼职调度自动续料
+                        cross_return = self.scheduler._cross_return_pending.pop(belt_id, False)
+                        if cross_return:
+                            # 回切标记已触发 → 直接待机，让主列调度接管
+                            print(f"[FM] {belt_id} 兼职回切: 完成 {completed_bin}，回归主列", flush=True)
+                            self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+                            route_convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
+                            for cid in route_convs:
+                                commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                                new_cmds[f"belt:{cid}"] = 'stop'
+                            for hid in ctx.assigned_hoppers:
+                                commands.append({'device': 'hopper', 'id': hid, 'action': 'close'})
+                                new_cmds[f"hopper:{hid}"] = 'close'
+                            self._active_routes.discard(route_id)
+                            if not hasattr(self, '_deactivated_routes'):
+                                self._deactivated_routes = set()
+                            self._deactivated_routes.add(route_id)
+                            print(f"[FM] {route_id}: waiting → standby | 节能待机", flush=True)
+                            ctx.clearing_start_time = 0
+                        elif belt_id in ('D7', 'D9') and completed_bin \
+                           and self.scheduler.is_cross_column_bin(belt_id, completed_bin):
+                            nxt_cross = self.scheduler.pick_next_cross_bin(belt_id)
+                            if nxt_cross:
+                                self._pending_auto_continue = (belt_id, nxt_cross)
+                                print(f"[FM] {belt_id} 兼职续料 → {nxt_cross}", flush=True)
+                            else:
+                                # 无满足条件的跨列仓 → 节能待机
+                                self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+                                route_convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
+                                for cid in route_convs:
+                                    commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                                    new_cmds[f"belt:{cid}"] = 'stop'
+                                for hid in ctx.assigned_hoppers:
+                                    commands.append({'device': 'hopper', 'id': hid, 'action': 'close'})
+                                    new_cmds[f"hopper:{hid}"] = 'close'
+                                self._active_routes.discard(route_id)
+                                if not hasattr(self, '_deactivated_routes'):
+                                    self._deactivated_routes = set()
+                                self._deactivated_routes.add(route_id)
+                                print(f"[FM] {route_id}: waiting → standby | 节能待机", flush=True)
+                                ctx.clearing_start_time = 0
+                        else:
+                            # 无下一仓: 进入节能待机, 停止所有皮带
+                            self.route_manager.set_route_state(route_id, RouteState.STANDBY)
+                            route_convs = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
+                            for cid in route_convs:
+                                commands.append({'device': 'belt', 'id': cid, 'action': 'stop'})
+                                new_cmds[f"belt:{cid}"] = 'stop'
+                            for hid in ctx.assigned_hoppers:
+                                commands.append({'device': 'hopper', 'id': hid, 'action': 'close'})
+                                new_cmds[f"hopper:{hid}"] = 'close'
+                            self._active_routes.discard(route_id)
+                            if not hasattr(self, '_deactivated_routes'):
+                                self._deactivated_routes = set()
+                            self._deactivated_routes.add(route_id)
+                            print(f"[FM] {route_id}: waiting → standby | 节能待机", flush=True)
+                            ctx.clearing_start_time = 0
 
             # 执行器命令
             route_conveyors = config.FEED_ROUTES.get(route_id, {}).get('conveyors', [])
@@ -635,6 +707,17 @@ class FeedingMasterController:
                     # 同步更新FM自身的分料状态缓存，避免送到调度请求时使用旧值
                     self._cart_divert[cart_id] = (left_div, right_div)
                     new_cmds[f"cart:{cart_id}"] = f"→{target}"
+                elif target is not None:
+                    # 小车已在目标位，但分料方向可能变化（如跨列调度 P1↔P2）
+                    left_div, right_div = self._compute_cart_divert(cart_id, target_bin)
+                    cur_div = self._cart_divert.get(cart_id, (True, False))
+                    if (left_div, right_div) != cur_div:
+                        cmd = {'device': 'cart', 'id': cart_id, 'action': 'divert',
+                               'target': target, 'route_id': route_id,
+                               'left_divert': left_div, 'right_divert': right_div}
+                        commands.append(cmd)
+                        self._cart_divert[cart_id] = (left_div, right_div)
+                        new_cmds[f"cart:{cart_id}"] = f"divert→{'左' if left_div else ''}{'右' if right_div else ''}"
 
         # 指令变化时输出
         if new_cmds != prev_cmds:
@@ -667,8 +750,19 @@ class FeedingMasterController:
             if parts:
                 print(f"[FM] 指令变化: {'; '.join(parts)}", flush=True)
 
-        # 3. 调度引擎联动
+        # 2.5 处理后台线程收到的调度序列（主线程安全激活，避免竞态）
+        with self.scheduler._activate_lock:
+            pending_items = list(self.scheduler._pending_activate.items())
+            self.scheduler._pending_activate.clear()
+        for belt_id, seq in pending_items:
+            if not self.scheduler.is_executing(belt_id):
+                self._on_schedule_sequence(belt_id, seq)
+
+        # 3. 调度引擎联动（注入缓存，避免 Stock Mgmt 断开时阻塞）
+        self.scheduler._level_cache = level_map
         self.scheduler.tick(self._total_runtime)
+        if hasattr(self.stock, '_sock') and self.stock._sock:
+            self.stock._sock.settimeout(10.0)
 
         # 3.5 延迟自动续料: 在构建 route_info 前处理，确保 HMI 不显示已关闭的旧路线
         pending = getattr(self, '_pending_auto_continue', None)
@@ -696,6 +790,7 @@ class FeedingMasterController:
                     self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
                     print(f"[FM] {belt_id} 自动续料 {old_route}→{route_id2} → {nxt} (停非共用: {non_shared})", flush=True)
                 elif self.activate_route(route_id2, nxt):
+                    self.scheduler.mark_executing(belt_id, route_id2, nxt)
                     self._add_route_activate_cmds(route_id2, nxt, commands, new_cmds)
                     print(f"[FM] {belt_id} 自动续料 → {nxt}", flush=True)
 
@@ -872,23 +967,7 @@ class FeedingMasterController:
 
     def _on_schedule_sequence(self, belt_id: str, sequence: list):
         """收到调度序列 → 若皮带空闲则自动启动"""
-        # 兼职调度回切: 执行中但新序列是主列且当前路线是跨列→强制停止
         if self.scheduler.is_executing(belt_id):
-            first_bin = sequence[0] if sequence else ''
-            from scheduling.bin_config import BELT_TO_COL_PREFIX, CROSS_COL_PREFIX
-            default_prefix = BELT_TO_COL_PREFIX.get(belt_id, '')
-            cross_prefix = CROSS_COL_PREFIX.get(belt_id, '')
-            if cross_prefix and first_bin.startswith(default_prefix):
-                current_bin = self.scheduler._executing_bin.get(belt_id, '')
-                if current_bin.startswith(cross_prefix):
-                    # 跨列→主列回切
-                    for rid in self._active_routes:
-                        ctx = self.route_manager.get_route_context(rid)
-                        if ctx and CART_TO_BELT.get(ctx.assigned_cart or '', '') == belt_id \
-                           and ctx.target_bin and ctx.target_bin.startswith(cross_prefix):
-                            print(f"[FM] {belt_id} 兼职回切: {ctx.target_bin}→{first_bin}", flush=True)
-                            self._stop_route_for_switch(rid)
-                            return
             print(f"[FM] {belt_id} 已在执行中, 序列缓存", flush=True)
             return
         # 双保险: 检查 _active_routes 中是否有同皮带活跃路线
@@ -1389,8 +1468,8 @@ class FeedingMasterController:
             return
         cart_id = ctx.assigned_cart or ''
         belt_id = CART_TO_BELT.get(cart_id, '')
-        # 清除旧序列
-        self.scheduler._sequences.pop(belt_id, None)
+        # 注意: 不清除 _sequences，因为调用方 (_on_schedule_sequence) 刚缓存了新序列
+        # 旧序列在 mark_completed → auto-continue 流程中会被自然消费
         if getattr(self, '_pending_auto_continue', (None, None))[0] == belt_id:
             self._pending_auto_continue = None
         self.scheduler.mark_completed(belt_id)
@@ -1428,6 +1507,9 @@ class FeedingMasterController:
             return 'reverse'
         # D9 任何情况下都是反序清空（仅一条路线，无需换列/顺序）
         if belt_id == 'D9':
+            return 'reverse'
+        # 跨列兼职调度：始终反序清空
+        if self.scheduler.is_cross_column_bin(belt_id, ctx.target_bin):
             return 'reverse'
         nxt = self.scheduler.get_next_bin(belt_id)
         if not nxt:
@@ -1613,18 +1695,28 @@ class FeedingMasterController:
         return ''
 
     def _add_route_activate_cmds(self, route_id: str, target_bin: str, commands: list, new_cmds: dict):
-        """同帧补发新路线的斗打开+上料点启动命令，确保不丢帧
-        仅在 cart 已在目标位置（FEEDING）时补发，MOVING_TO_TARGET 时跳过"""
+        """同帧补发新路线的斗打开+上料点+分料命令，确保不丢帧"""
         ctx = self.route_manager.get_route_context(route_id)
         if not ctx:
             return
-        # 仅 FEEDING 状态补发斗+上料点，MOVING_TO_TARGET 由 _build_commands 处理
-        if ctx.state != RouteState.FEEDING:
-            return
-        for hid in ctx.assigned_hoppers:
-            key = f"hopper:{hid}"
-            commands.append({'device': 'hopper', 'id': hid, 'action': 'open'})
-            new_cmds[key] = 'open'
+        # FEEDING: 补发斗+上料点
+        if ctx.state == RouteState.FEEDING:
+            for hid in ctx.assigned_hoppers:
+                key = f"hopper:{hid}"
+                commands.append({'device': 'hopper', 'id': hid, 'action': 'open'})
+                new_cmds[key] = 'open'
+        # 补发分料命令：无论 cart 是否已在位，分料方向都需要立即生效
+        cart_id = ctx.assigned_cart or ''
+        if cart_id and cart_id != 'Cart4':
+            left_div, right_div = self._compute_cart_divert(cart_id, target_bin)
+            cur_div = self._cart_divert.get(cart_id, (True, False))
+            if (left_div, right_div) != cur_div:
+                cmd = {'device': 'cart', 'id': cart_id, 'action': 'divert',
+                       'target': ctx.cart_target_position, 'route_id': route_id,
+                       'left_divert': left_div, 'right_divert': right_div}
+                commands.append(cmd)
+                self._cart_divert[cart_id] = (left_div, right_div)
+                new_cmds[f"cart:{cart_id}"] = f"divert→{'左' if left_div else ''}{'右' if right_div else ''}"
         fp = ctx.feed_point or config.FEED_ROUTES.get(route_id, {}).get('feed_point', '')
         if fp and fp != 'silo_out':
             mt = self._get_feed_point_material(fp, target_bin)

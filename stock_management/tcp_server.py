@@ -42,8 +42,8 @@ class StockServer:
         print(f"[StockMgmt] 服务已启动 {self.host}:{self.port}", flush=True)
 
         # 启动向真实上位机推送料位的后台线程
-        threading.Thread(target=self._push_levels_to_real, daemon=True).start()
-        print(f"[StockMgmt] 料位推送 → 真实上位机 {self.host}:8897 (1s)", flush=True)
+        # threading.Thread(target=self._push_levels_to_real, daemon=True).start()
+        # print(f"[StockMgmt] 料位推送 → 真实上位机 {self.host}:8897 (1s)", flush=True)
 
         loop_count = 0
         while self._running:
