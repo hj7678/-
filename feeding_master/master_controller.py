@@ -139,6 +139,8 @@ class FeedingMasterController:
         # 同时接收两端数据，根据 _use_real_hmi 决定使用哪一端
         if source == 'real':
             self._real_sensor_data = data
+            # 真实上位机格式适配：嵌套对象 → 直接值
+            data = self._normalize_real_sensor(data)
         else:
             self._sim_sensor_data = data
 
@@ -170,6 +172,28 @@ class FeedingMasterController:
         # 不在此处（后台线程）修改 ctx 状态，避免竞态。
 
         # FM自主管理路线生命周期, 不从仿真同步添加/移除
+
+    @staticmethod
+    def _normalize_real_sensor(data: dict) -> dict:
+        """真实上位机格式 → 仿真格式适配"""
+        data = dict(data)  # 浅拷贝，避免修改原始数据
+        # cart_positions: {"Cart1": {"value": 0}} → {"Cart1": 0}
+        cp = data.get('cart_positions', {})
+        if cp and isinstance(next(iter(cp.values()), None), dict):
+            data['cart_positions'] = {k: v.get('value', 0) for k, v in cp.items()}
+        # cart_divert: {"Cart1": {"left": false, "right": false}} → {"Cart1": [false, false]}
+        cd = data.get('cart_divert', {})
+        if cd and isinstance(next(iter(cd.values()), None), dict):
+            data['cart_divert'] = {k: [v.get('left', False), v.get('right', False)] for k, v in cd.items()}
+        # cart_limits: {"Cart1": {"left": false, "right": false}} → {"Cart1": [false, false]}
+        cl = data.get('cart_limits', {})
+        if cl and isinstance(next(iter(cl.values()), None), dict):
+            data['cart_limits'] = {k: [v.get('left', False), v.get('right', False)] for k, v in cl.items()}
+        # belt_speeds: {"D7": {"value": 0}} → {"D7": 0}
+        bs = data.get('belt_speeds', {})
+        if bs and isinstance(next(iter(bs.values()), None), dict):
+            data['belt_speeds'] = {k: v.get('value', 0) for k, v in bs.items()}
+        return data
 
     def _stock_poll_loop(self):
         """后台线程：每500ms轮询 Stock Management，更新 _level_cache"""
