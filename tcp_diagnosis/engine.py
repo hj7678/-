@@ -86,6 +86,7 @@ class DiagnosisEngine:
         results.extend(self._diagnose_feeding_blockage(snapshot))
         results.extend(self._diagnose_hopper_blockage(snapshot))
         results.extend(self._diagnose_cart_movement(snapshot))
+        results.extend(self._diagnose_silo_gates(snapshot))
         return self._dedup_and_sort(results, snapshot.timestamp)
 
     # ========================================================================
@@ -1264,3 +1265,37 @@ class DiagnosisEngine:
         self._hopper_blockage_start.clear()
         self._cart_move_start.clear()
         self._cart_move_initial_pos.clear()
+
+    # ========================================================================
+    # J. 高位储料仓卸料门故障诊断
+    # ========================================================================
+
+    def _diagnose_silo_gates(self, snapshot: SystemSnapshot) -> List[DiagnosisResult]:
+        """卸料门故障：仅当前出料仓在FEEDING时应开，其余全部应关"""
+        results = []
+        gates = snapshot.silo_gate_states
+        active_silo = snapshot.active_source_silo
+        if not gates:
+            return results
+
+        # 判断是否有路线在 FEEDING 且使用 silo_out
+        any_feeding = any(
+            r.state == RouteState.FEEDING and r.feed_point == 'silo_out'
+            for r in snapshot.routes.values()
+        )
+
+        for silo_id in [f"S{i}" for i in range(1, 13)]:
+            gate_key = f"silo_gate_{silo_id}"
+            actual = gates.get(gate_key, False)
+            expected = (silo_id == active_silo and any_feeding)
+
+            if actual != expected:
+                results.append(DiagnosisResult(
+                    sensor_id=gate_key,
+                    fault_type="silo_gate_mismatch",
+                    confidence=0.95,
+                    description=f"{silo_id}卸料门异常: 期望{'开' if expected else '关'} 实际{'开' if actual else '关'}",
+                    category="silo_gate",
+                ))
+
+        return results

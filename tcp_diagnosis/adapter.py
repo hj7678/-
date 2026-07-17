@@ -126,6 +126,8 @@ class TcpDataAdapter:
             hoppers=hopper_snapshots,
             conveyors=conveyor_snapshots,
             carts=cart_snapshots,
+            silo_gate_states=data.get('silo_gate_states', {}),
+            active_source_silo=data.get('active_source_silo', ''),
         )
         snapshot.clearing_strategies = data.get('clearing_strategies', {})
         return snapshot

@@ -76,6 +76,8 @@ class SystemSnapshot:
     hoppers: Dict[str, HopperSnapshot]
     conveyors: Dict[str, ConveyorSnapshot]
     carts: Dict[str, CartSnapshot]
+    silo_gate_states: Dict[str, bool] = field(default_factory=dict)  # 卸料门实际状态
+    active_source_silo: str = ''  # 当前出料的高位仓 (如 "S3")
 
 
 @dataclass
