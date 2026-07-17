@@ -1696,6 +1696,7 @@ class FeedingMasterController:
             "route_states": route_states,
             "clearing_strategies": clearing_strategies,
             "silo_gate_states": getattr(self, '_silo_gate_states', {}),
+            "active_source_silo": self._pick_source_silo_by_active()[0],  # 当前出料的高位仓
             "feed_signals": {},  # FM模式无此数据
         }
 
