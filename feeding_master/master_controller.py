@@ -161,6 +161,14 @@ class FeedingMasterController:
         self.scheduler._maintenance_bins = set(data.get('maintenance_bins', []))
         self._d7_feed_override = data.get('d7_feed_override', '')
         self._d9_feed_override = data.get('d9_feed_override', '')
+        # 中转斗状态：信任上位机传感器反馈，而非 FM 自己发的命令值
+        hs = data.get('hopper_states', {})
+        hw = data.get('hopper_weights', {})
+        for hid in self.hoppers:
+            if hid in hs:
+                self.hoppers[hid].is_open = hs[hid]
+            if hid in hw:
+                self.hoppers[hid].current_weight = hw[hid]
         # 上料点原料状态（来自 feed_material_service 响应）
         feed_material = data.get('feed_material_states', {})
         if feed_material:
