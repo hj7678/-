@@ -169,6 +169,8 @@ class FeedingMasterController:
                 self.hoppers[hid].is_open = hs[hid]
             if hid in hw:
                 self.hoppers[hid].current_weight = hw[hid]
+        # 高位储料仓卸料门状态（S1-S12）
+        self._silo_gate_states = data.get('silo_gate_states', {})
         # 上料点原料状态（来自 feed_material_service 响应）
         feed_material = data.get('feed_material_states', {})
         if feed_material:
@@ -1693,6 +1695,7 @@ class FeedingMasterController:
             "cart_sensors": carts,
             "route_states": route_states,
             "clearing_strategies": clearing_strategies,
+            "silo_gate_states": getattr(self, '_silo_gate_states', {}),
             "feed_signals": {},  # FM模式无此数据
         }
 
